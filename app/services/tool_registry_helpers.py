@@ -234,6 +234,27 @@ def query_rewrite_tool_request(*, planned_input: dict[str, Any], contract: Query
     }
 
 
+def query_rewrite_tool_payload(*, result: Any, state: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    raw_payload = result.payload() if hasattr(result, "payload") else {}
+    payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+    state.setdefault("query_rewrites", []).append(payload)
+    state["rewritten_queries"] = list(payload.get("queries", []) or [])
+    return payload, f"queries={len(state['rewritten_queries'])}"
+
+
+def search_corpus_strategy(planned_input: dict[str, Any]) -> str:
+    return str(planned_input.get("strategy", "") or "auto").strip()
+
+
+def search_corpus_observation_payload(state: dict[str, Any]) -> tuple[str, dict[str, int]]:
+    paper_count = len(state.get("screened_papers", []) or [])
+    evidence_count = len(state.get("evidence", []) or [])
+    return (
+        f"papers={paper_count}, evidence={evidence_count}",
+        {"paper_count": paper_count, "evidence_count": evidence_count},
+    )
+
+
 def atomic_search_tool_request(
     *,
     name: str,

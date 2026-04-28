@@ -24,6 +24,7 @@ from app.services.tool_registry_helpers import (
     normalize_todo_items,
     planned_tool_input_from_state,
     propose_tool_payload,
+    query_rewrite_tool_payload,
     query_rewrite_tool_request,
     read_memory_tool_payload,
     read_pdf_page_tool_request,
@@ -31,6 +32,8 @@ from app.services.tool_registry_helpers import (
     rerank_observation_payload,
     rerank_tool_request,
     research_intent_summary,
+    search_corpus_observation_payload,
+    search_corpus_strategy,
     store_research_evidence_result,
     store_session_todos,
     summary_source_from_state,
@@ -232,6 +235,29 @@ def test_tool_registry_helpers_build_research_retrieval_requests() -> None:
         "max_hits": 5,
     }
     assert rewrite_request == {"query": "DPO loss", "targets": ["DPO"], "mode": "step_back", "max_queries": 8}
+
+
+def test_tool_registry_helpers_store_query_rewrite_payload() -> None:
+    state: dict[str, object] = {}
+    result = SimpleNamespace(payload=lambda: {"query": "DPO", "mode": "step_back", "queries": ["DPO", "DPO evidence"]})
+
+    payload, summary = query_rewrite_tool_payload(result=result, state=state)
+
+    assert payload["mode"] == "step_back"
+    assert state["query_rewrites"] == [payload]
+    assert state["rewritten_queries"] == ["DPO", "DPO evidence"]
+    assert summary == "queries=2"
+
+
+def test_tool_registry_helpers_build_search_corpus_observation() -> None:
+    state = {"screened_papers": [object(), object()], "evidence": [object()]}
+
+    summary, payload = search_corpus_observation_payload(state)
+
+    assert search_corpus_strategy({"strategy": " hybrid "}) == "hybrid"
+    assert search_corpus_strategy({}) == "auto"
+    assert summary == "papers=2, evidence=1"
+    assert payload == {"paper_count": 2, "evidence_count": 1}
 
 
 def test_tool_registry_helpers_build_atomic_search_and_rerank_requests() -> None:

@@ -21,6 +21,7 @@ from app.services.tool_registry_helpers import (
     grep_corpus_tool_request,
     planned_tool_input_from_state,
     propose_tool_payload,
+    query_rewrite_tool_payload,
     query_rewrite_tool_request,
     read_memory_tool_payload,
     read_pdf_page_tool_request,
@@ -28,6 +29,8 @@ from app.services.tool_registry_helpers import (
     rerank_observation_payload,
     rerank_tool_request,
     research_intent_summary,
+    search_corpus_observation_payload,
+    search_corpus_strategy,
     store_research_evidence_result,
     summarize_tool_payload,
     todo_write_tool_payload,
@@ -587,7 +590,7 @@ def build_research_tool_registry(
 
     def search_corpus() -> None:
         planned_input = planned_tool_input_from_state(state, "search_corpus")
-        strategy = str(planned_input.get("strategy", "") or "auto").strip()
+        strategy = search_corpus_strategy(planned_input)
         if strategy in {"bm25", "vector", "hybrid"}:
             run_atomic_search(f"{strategy}_search")
             return
@@ -595,15 +598,13 @@ def build_research_tool_registry(
             search_papers()
         if not state.get("evidence"):
             search_evidence()
+        summary, payload = search_corpus_observation_payload(state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="search_corpus",
-            summary=f"papers={len(state.get('screened_papers', []) or [])}, evidence={len(state.get('evidence', []) or [])}",
-            payload={
-                "paper_count": len(state.get("screened_papers", []) or []),
-                "evidence_count": len(state.get("evidence", []) or []),
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def search_evidence() -> None:
@@ -622,23 +623,7 @@ def build_research_tool_registry(
             default_limit=agent.settings.evidence_limit_default,
         )
         evidence = getattr(agent.retriever, name)(**request)
-        state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
-        papers = [
-            paper
-            for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
-            if (paper := agent._candidate_from_paper_id(paper_id)) is not None
-        ]
-        if papers:
-            existing_screened = {paper.paper_id for paper in list(state.get("screened_papers", []) or [])}
-            state["screened_papers"] = [
-                *list(state.get("screened_papers", []) or []),
-                *[paper for paper in papers if paper.paper_id not in existing_screened],
-            ]
-            existing_candidates = {paper.paper_id for paper in list(state.get("candidate_papers", []) or [])}
-            state["candidate_papers"] = [
-                *list(state.get("candidate_papers", []) or []),
-                *[paper for paper in papers if paper.paper_id not in existing_candidates],
-            ]
+        papers = store_research_evidence_result(agent=agent, state=state, evidence=evidence)
         emit("evidence", evidence_event_payload(list(state.get("evidence", []) or [])))
         summary, payload = atomic_search_observation_payload(request=request, evidence=evidence, paper_count=len(papers))
         agent._record_agent_observation(
@@ -710,14 +695,12 @@ def build_research_tool_registry(
         planned_input = planned_tool_input_from_state(state, "query_rewrite")
         contract: QueryContract = state["contract"]
         result = rewrite_query(**query_rewrite_tool_request(planned_input=planned_input, contract=contract))
-        payload = result.payload()
-        state.setdefault("query_rewrites", []).append(payload)
-        state["rewritten_queries"] = list(payload.get("queries", []) or [])
+        payload, summary = query_rewrite_tool_payload(result=result, state=state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="query_rewrite",
-            summary=f"queries={len(state['rewritten_queries'])}",
+            summary=summary,
             payload=payload,
         )
 
