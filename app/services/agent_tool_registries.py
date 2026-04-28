@@ -10,6 +10,8 @@ from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
     conversation_intent_summary,
+    evidence_event_payload,
+    evidence_result_observation_payload,
     fetch_url_evidence,
     fetch_url_tool_payload,
     fetch_url_tool_request,
@@ -26,6 +28,7 @@ from app.services.tool_registry_helpers import (
     rerank_observation_payload,
     rerank_tool_request,
     research_intent_summary,
+    store_research_evidence_result,
     summarize_tool_payload,
     todo_write_tool_payload,
     tool_input_from_state,
@@ -636,7 +639,7 @@ def build_research_tool_registry(
                 *list(state.get("candidate_papers", []) or []),
                 *[paper for paper in papers if paper.paper_id not in existing_candidates],
             ]
-        emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
+        emit("evidence", evidence_event_payload(list(state.get("evidence", []) or [])))
         summary, payload = atomic_search_observation_payload(request=request, evidence=evidence, paper_count=len(papers))
         agent._record_agent_observation(
             emit=emit,
@@ -665,7 +668,7 @@ def build_research_tool_registry(
         )
         evidence = agent.retriever.rerank_evidence(**request)
         state["evidence"] = evidence
-        emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
+        emit("evidence", evidence_event_payload(evidence))
         summary, payload = rerank_observation_payload(request=request, payload_context=payload_context, evidence=evidence)
         agent._record_agent_observation(
             emit=emit,
@@ -676,30 +679,19 @@ def build_research_tool_registry(
         )
 
     def add_evidence_result(name: str, evidence: list[EvidenceBlock], payload: dict[str, Any]) -> None:
-        state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
-        papers = [
-            paper
-            for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
-            if (paper := agent._candidate_from_paper_id(paper_id)) is not None
-        ]
-        if papers:
-            existing_screened = {paper.paper_id for paper in list(state.get("screened_papers", []) or [])}
-            state["screened_papers"] = [
-                *list(state.get("screened_papers", []) or []),
-                *[paper for paper in papers if paper.paper_id not in existing_screened],
-            ]
-            existing_candidates = {paper.paper_id for paper in list(state.get("candidate_papers", []) or [])}
-            state["candidate_papers"] = [
-                *list(state.get("candidate_papers", []) or []),
-                *[paper for paper in papers if paper.paper_id not in existing_candidates],
-            ]
-        emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
+        papers = store_research_evidence_result(agent=agent, state=state, evidence=evidence)
+        emit("evidence", evidence_event_payload(list(state.get("evidence", []) or [])))
+        summary, observation_payload = evidence_result_observation_payload(
+            payload=payload,
+            evidence=evidence,
+            paper_count=len(papers),
+        )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool=name,
-            summary=f"evidence={len(evidence)}",
-            payload={**payload, "evidence_count": len(evidence), "paper_count": len(papers)},
+            summary=summary,
+            payload=observation_payload,
         )
 
     def read_pdf_page() -> None:

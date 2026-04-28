@@ -314,6 +314,45 @@ def rerank_observation_payload(
     )
 
 
+def store_research_evidence_result(
+    *,
+    agent: Any,
+    state: dict[str, Any],
+    evidence: list[EvidenceBlock],
+) -> list[Any]:
+    state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
+    papers = [
+        paper
+        for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
+        if (paper := agent._candidate_from_paper_id(paper_id)) is not None
+    ]
+    if papers:
+        existing_screened = {paper.paper_id for paper in list(state.get("screened_papers", []) or [])}
+        state["screened_papers"] = [
+            *list(state.get("screened_papers", []) or []),
+            *[paper for paper in papers if paper.paper_id not in existing_screened],
+        ]
+        existing_candidates = {paper.paper_id for paper in list(state.get("candidate_papers", []) or [])}
+        state["candidate_papers"] = [
+            *list(state.get("candidate_papers", []) or []),
+            *[paper for paper in papers if paper.paper_id not in existing_candidates],
+        ]
+    return papers
+
+
+def evidence_event_payload(evidence: list[EvidenceBlock]) -> dict[str, Any]:
+    return {"count": len(evidence), "items": [item.model_dump() for item in evidence]}
+
+
+def evidence_result_observation_payload(
+    *,
+    payload: dict[str, Any],
+    evidence: list[EvidenceBlock],
+    paper_count: int,
+) -> tuple[str, dict[str, Any]]:
+    return f"evidence={len(evidence)}", {**payload, "evidence_count": len(evidence), "paper_count": paper_count}
+
+
 def evidence_blocks_from_state(state: dict[str, Any]) -> list[EvidenceBlock]:
     evidence: list[EvidenceBlock] = []
     for key in ("evidence", "web_evidence"):

@@ -10,6 +10,8 @@ from app.services.tool_registry_helpers import (
     coerce_int,
     conversation_intent_summary,
     evidence_blocks_from_state,
+    evidence_event_payload,
+    evidence_result_observation_payload,
     fetch_url_evidence,
     fetch_url_payload,
     fetch_url_tool_payload,
@@ -29,6 +31,7 @@ from app.services.tool_registry_helpers import (
     rerank_observation_payload,
     rerank_tool_request,
     research_intent_summary,
+    store_research_evidence_result,
     store_session_todos,
     summary_source_from_state,
     summarize_tool_payload,
@@ -279,6 +282,44 @@ def test_tool_registry_helpers_build_atomic_search_and_rerank_requests() -> None
     assert rerank_context == {"used_explicit_candidates": False, "input_candidate_count": 1}
     assert rerank_summary == "evidence=1"
     assert rerank_payload["top_doc_ids"] == ["local-1"]
+
+
+def test_tool_registry_helpers_store_research_evidence_result_and_payloads() -> None:
+    evidence = EvidenceBlock(
+        doc_id="ev-1",
+        paper_id="paper-1",
+        title="Paper",
+        file_path="",
+        page=1,
+        block_type="page_text",
+        snippet="Evidence",
+    )
+    paper = SimpleNamespace(paper_id="paper-1")
+
+    class _Agent:
+        def _merge_evidence(self, existing: list[EvidenceBlock], new: list[EvidenceBlock]) -> list[EvidenceBlock]:
+            return [*existing, *new]
+
+        def _candidate_from_paper_id(self, paper_id: str) -> SimpleNamespace | None:
+            return paper if paper_id == "paper-1" else None
+
+    state: dict[str, object] = {"screened_papers": [], "candidate_papers": []}
+
+    papers = store_research_evidence_result(agent=_Agent(), state=state, evidence=[evidence])
+    event_payload = evidence_event_payload(state["evidence"])  # type: ignore[arg-type]
+    summary, observation_payload = evidence_result_observation_payload(
+        payload={"paper_id": "paper-1"},
+        evidence=[evidence],
+        paper_count=len(papers),
+    )
+
+    assert papers == [paper]
+    assert state["screened_papers"] == [paper]
+    assert state["candidate_papers"] == [paper]
+    assert event_payload["count"] == 1
+    assert event_payload["items"][0]["doc_id"] == "ev-1"
+    assert summary == "evidence=1"
+    assert observation_payload == {"paper_id": "paper-1", "evidence_count": 1, "paper_count": 1}
 
 
 def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_path: Path) -> None:
