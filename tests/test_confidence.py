@@ -8,6 +8,7 @@ from app.services.confidence import (
     confidence_from_self_consistency,
     confidence_from_verification_report,
     confidence_payload,
+    coerce_confidence_value,
     should_ask_human,
 )
 
@@ -75,3 +76,10 @@ def test_confidence_from_verification_report_maps_status_to_score() -> None:
 
     assert passed.score > retry.score > clarify.score
     assert confidence_payload(retry)["detail"]["recommended_action"] == "expand_recall"
+
+
+def test_coerce_confidence_value_supports_labels_numbers_and_callsite_defaults() -> None:
+    assert coerce_confidence_value("high") == 0.88
+    assert coerce_confidence_value("0.63") == 0.63
+    assert coerce_confidence_value(None, default=0.12) == 0.12
+    assert coerce_confidence_value("low", label_scores={"low": 0.45}) == 0.45

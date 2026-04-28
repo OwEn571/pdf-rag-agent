@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+from app.services.confidence import coerce_confidence_value
 
 
 class EntityDefinitionMixin:
@@ -334,11 +335,11 @@ class EntityDefinitionMixin:
             return None, []
         if relation_to_target in {"usage_only", "incidental_mention"}:
             return None, []
-        raw_confidence = payload.get("confidence", 0)
-        try:
-            confidence = float(raw_confidence)
-        except (TypeError, ValueError):
-            confidence = {"high": 0.88, "medium": 0.72, "low": 0.45}.get(str(raw_confidence).strip().lower(), 0.0)
+        confidence = coerce_confidence_value(
+            payload.get("confidence", 0),
+            default=0.0,
+            label_scores={"high": 0.88, "medium": 0.72, "low": 0.45},
+        )
         if confidence < 0.55:
             return None, []
         raw_doc_ids = payload.get("evidence_doc_ids", [])

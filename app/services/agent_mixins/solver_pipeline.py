@@ -7,6 +7,7 @@ from typing import Any
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext
 from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
+from app.services.confidence import coerce_confidence_value
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 
@@ -1324,16 +1325,11 @@ class SolverPipelineMixin:
 
     @staticmethod
     def _coerce_confidence(value: Any) -> float:
-        if isinstance(value, (int, float)):
-            return float(value)
-        normalized = str(value or "").strip().lower()
-        mapping = {"high": 0.88, "medium": 0.72, "low": 0.55}
-        if normalized in mapping:
-            return mapping[normalized]
-        try:
-            return float(normalized)
-        except ValueError:
-            return 0.82
+        return coerce_confidence_value(
+            value,
+            default=0.82,
+            label_scores={"high": 0.88, "medium": 0.72, "low": 0.55},
+        )
 
     def _derive_topology_recommendation(self, *, evidence: list[EvidenceBlock], topology_terms: list[str]) -> dict[str, str]:
         payload = self.clients.invoke_json(

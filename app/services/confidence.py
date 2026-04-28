@@ -109,6 +109,24 @@ def confidence_payload(confidence: Confidence) -> dict[str, Any]:
     }
 
 
+def coerce_confidence_value(
+    value: Any,
+    *,
+    default: float = 0.82,
+    label_scores: dict[str, float] | None = None,
+) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    normalized = str(value or "").strip().lower()
+    mapping = label_scores or {"high": 0.88, "medium": 0.72, "low": 0.55}
+    if normalized in mapping:
+        return float(mapping[normalized])
+    try:
+        return float(normalized)
+    except ValueError:
+        return float(default)
+
+
 def _note_float(*, notes: list[str], prefix: str) -> float | None:
     for note in notes:
         if not note.startswith(prefix):
