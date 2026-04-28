@@ -31,7 +31,7 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
-from app.services.agent_loop import finish_agent_turn, run_conversation_turn, run_research_turn
+from app.services.agent_loop import finish_agent_turn, run_compound_turn_if_needed, run_standard_turn
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
@@ -259,16 +259,13 @@ class ResearchAssistantAgentV4(
             event_callback=event_callback,
         )
         emit = run_context.emit
-        execution_steps = run_context.execution_steps
 
         emit("session", {"session_id": resolved_session_id})
-        compound_result = self._run_compound_query_if_needed(
+        compound_result = run_compound_turn_if_needed(
+            agent=self,
+            run_context=run_context,
             query=query,
-            session_id=resolved_session_id,
-            session=session,
             clarification_choice=clarification_choice,
-            emit=emit,
-            execution_steps=execution_steps,
         )
         if compound_result is not None:
             return finish_agent_turn(
@@ -278,46 +275,14 @@ class ResearchAssistantAgentV4(
                 logger=logger,
             )
 
-        contract = self._extract_query_contract(
-            query=query,
-            session=session,
-            mode=mode,
-            clarification_choice=clarification_choice,
-        )
-        web_enabled = self._should_use_web_search(use_web_search=use_web_search, contract=contract)
-        if web_enabled:
-            contract = contract.model_copy(update={"allow_web_search": True})
-        emit("contract", contract.model_dump())
-        execution_steps.append({"node": "query_contract_extractor", "summary": contract.relation})
-        agent_plan = self._plan_agent_actions(contract=contract, session=session, use_web_search=web_enabled)
-        emit("agent_plan", agent_plan)
-        execution_steps.append({"node": "agent_planner", "summary": " -> ".join(agent_plan.get("actions", []))})
-
-        if contract.interaction_mode == "conversation":
-            payload = run_conversation_turn(
-                agent=self,
-                run_context=run_context,
-                query=query,
-                contract=contract,
-                agent_plan=agent_plan,
-                max_web_results=max_web_results,
-            )
-            return finish_agent_turn(
-                settings=self.settings,
-                run_context=run_context,
-                final_payload=payload,
-                logger=logger,
-            )
-
-        payload = run_research_turn(
+        payload = run_standard_turn(
             agent=self,
             run_context=run_context,
             query=query,
-            contract=contract,
-            agent_plan=agent_plan,
-            web_enabled=web_enabled,
-            explicit_web_search=use_web_search,
+            mode=mode,
+            use_web_search=use_web_search,
             max_web_results=max_web_results,
+            clarification_choice=clarification_choice,
             stream_answer=event_callback is not None,
         )
         return finish_agent_turn(

@@ -14,7 +14,13 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
-from app.services.agent_loop import finish_agent_turn, run_conversation_turn, run_research_turn
+from app.services.agent_loop import (
+    finish_agent_turn,
+    run_compound_turn_if_needed,
+    run_conversation_turn,
+    run_research_turn,
+    run_standard_turn,
+)
 
 
 def test_finish_agent_turn_writes_trace_and_returns_events(tmp_path) -> None:
@@ -34,6 +40,53 @@ def test_finish_agent_turn_writes_trace_and_returns_events(tmp_path) -> None:
     traces = list((tmp_path / "traces" / "demo").glob("*.jsonl"))
     assert len(traces) == 1
     assert '"answer_preview": "hello"' in traces[0].read_text(encoding="utf-8")
+
+
+def test_run_compound_turn_if_needed_delegates_with_run_context() -> None:
+    agent = _FakeAgent(conversation_state={}, compound_payload={"answer": "compound"})
+    context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
+
+    payload = run_compound_turn_if_needed(
+        agent=agent,
+        run_context=context,
+        query="DPO和PPO分别是什么？",
+        clarification_choice={"option_id": "a"},
+    )
+
+    assert payload == {"answer": "compound"}
+    assert agent.compound_call["session_id"] == "demo"
+    assert agent.compound_call["session"] is context.session
+    assert agent.compound_call["clarification_choice"] == {"option_id": "a"}
+    assert context.events[0]["event"] == "agent_plan"
+    assert context.execution_steps == [{"node": "compound_planner", "summary": "fake"}]
+
+
+def test_run_standard_turn_extracts_plans_and_routes_conversation() -> None:
+    contract = QueryContract(clean_query="hello", interaction_mode="conversation", relation="greeting")
+    agent = _FakeAgent(
+        conversation_state={"answer": "hello"},
+        standard_contract=contract,
+        web_enabled=True,
+    )
+    context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
+
+    payload = run_standard_turn(
+        agent=agent,
+        run_context=context,
+        query="hello",
+        mode="auto",
+        use_web_search=True,
+        max_web_results=3,
+        clarification_choice=None,
+        stream_answer=False,
+    )
+
+    assert payload["answer"] == "hello"
+    assert payload["query_contract"]["allow_web_search"] is True
+    assert agent.extract_call["query"] == "hello"
+    assert agent.plan_contract.allow_web_search is True
+    assert [item["event"] for item in context.events[:2]] == ["contract", "agent_plan"]
+    assert context.execution_steps[0]["node"] == "query_contract_extractor"
 
 
 def test_run_conversation_turn_commits_answer_and_response_payload() -> None:
@@ -182,13 +235,46 @@ class _FakeSessions:
 
 
 class _FakeAgent:
-    def __init__(self, *, conversation_state: dict[str, Any], research_state: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        conversation_state: dict[str, Any],
+        research_state: dict[str, Any] | None = None,
+        compound_payload: dict[str, Any] | None = None,
+        standard_contract: QueryContract | None = None,
+        web_enabled: bool = False,
+    ) -> None:
         self.runtime = _FakeRuntime(conversation_state, research_state)
         self.sessions = _FakeSessions()
+        self.compound_payload = compound_payload
+        self.standard_contract = standard_contract
+        self.web_enabled = web_enabled
         self.stored_pending = False
         self.cleared_pending = False
         self.remembered_verification = None
         self.remembered_research = False
+        self.compound_call: dict[str, Any] = {}
+        self.extract_call: dict[str, Any] = {}
+        self.plan_contract: QueryContract | None = None
+
+    def _run_compound_query_if_needed(self, **kwargs: Any) -> dict[str, Any] | None:
+        self.compound_call = dict(kwargs)
+        kwargs["emit"]("agent_plan", {"actions": ["Task"]})
+        kwargs["execution_steps"].append({"node": "compound_planner", "summary": "fake"})
+        return self.compound_payload
+
+    def _extract_query_contract(self, **kwargs: Any) -> QueryContract:
+        self.extract_call = dict(kwargs)
+        if self.standard_contract is None:
+            raise AssertionError("missing standard contract")
+        return self.standard_contract
+
+    def _should_use_web_search(self, **_: Any) -> bool:
+        return self.web_enabled
+
+    def _plan_agent_actions(self, *, contract: QueryContract, **_: Any) -> dict[str, list[str]]:
+        self.plan_contract = contract
+        return {"actions": ["compose"]}
 
     @staticmethod
     def _conversation_relation_updates_research_context(relation: str) -> bool:

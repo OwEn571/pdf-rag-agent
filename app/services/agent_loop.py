@@ -33,6 +33,71 @@ def finish_agent_turn(
     return final_payload, run_context.events
 
 
+def run_compound_turn_if_needed(
+    *,
+    agent: Any,
+    run_context: AgentRunContext,
+    query: str,
+    clarification_choice: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    return agent._run_compound_query_if_needed(
+        query=query,
+        session_id=run_context.session_id,
+        session=run_context.session,
+        clarification_choice=clarification_choice,
+        emit=run_context.emit,
+        execution_steps=run_context.execution_steps,
+    )
+
+
+def run_standard_turn(
+    *,
+    agent: Any,
+    run_context: AgentRunContext,
+    query: str,
+    mode: str,
+    use_web_search: bool,
+    max_web_results: int,
+    clarification_choice: dict[str, Any] | None,
+    stream_answer: bool,
+) -> dict[str, Any]:
+    session = run_context.session
+    contract = agent._extract_query_contract(
+        query=query,
+        session=session,
+        mode=mode,
+        clarification_choice=clarification_choice,
+    )
+    web_enabled = agent._should_use_web_search(use_web_search=use_web_search, contract=contract)
+    if web_enabled:
+        contract = contract.model_copy(update={"allow_web_search": True})
+    run_context.emit("contract", contract.model_dump())
+    run_context.execution_steps.append({"node": "query_contract_extractor", "summary": contract.relation})
+    agent_plan = agent._plan_agent_actions(contract=contract, session=session, use_web_search=web_enabled)
+    run_context.emit("agent_plan", agent_plan)
+    run_context.execution_steps.append({"node": "agent_planner", "summary": " -> ".join(agent_plan.get("actions", []))})
+    if contract.interaction_mode == "conversation":
+        return run_conversation_turn(
+            agent=agent,
+            run_context=run_context,
+            query=query,
+            contract=contract,
+            agent_plan=agent_plan,
+            max_web_results=max_web_results,
+        )
+    return run_research_turn(
+        agent=agent,
+        run_context=run_context,
+        query=query,
+        contract=contract,
+        agent_plan=agent_plan,
+        web_enabled=web_enabled,
+        explicit_web_search=use_web_search,
+        max_web_results=max_web_results,
+        stream_answer=stream_answer,
+    )
+
+
 def run_conversation_turn(
     *,
     agent: Any,
