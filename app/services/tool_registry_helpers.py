@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.contract_context import contract_answer_slots, note_value
 from app.services.evidence_tools import evidence_from_payload
+from app.services.url_fetcher import FetchUrlResult
 
 
 def tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
@@ -88,6 +90,35 @@ def format_fetched_urls_answer(fetched_urls: list[dict[str, Any]]) -> str:
         text = str(item.get("text", "") or "").strip()
         sections.append(f"### {title}\n\n来源：{url}\n\n{text}")
     return "\n\n".join(sections).strip()
+
+
+def fetch_url_payload(result: FetchUrlResult) -> dict[str, Any]:
+    return {
+        "ok": result.ok,
+        "url": result.url,
+        "title": result.title,
+        "text": result.text,
+        "error": result.error,
+        "status_code": result.status_code,
+    }
+
+
+def fetch_url_evidence(result: FetchUrlResult) -> EvidenceBlock | None:
+    if not result.ok:
+        return None
+    doc_id = "web::fetch::" + hashlib.sha1(result.url.encode("utf-8")).hexdigest()[:16]
+    return EvidenceBlock(
+        doc_id=doc_id,
+        paper_id=doc_id,
+        title=result.title or result.url,
+        file_path=result.url,
+        page=0,
+        block_type="web",
+        caption=result.url,
+        snippet=result.text[:1600],
+        score=0.75,
+        metadata={"source": "fetch_url", "url": result.url, "status_code": result.status_code},
+    )
 
 
 def format_summaries_answer(summaries: list[dict[str, Any]]) -> str:

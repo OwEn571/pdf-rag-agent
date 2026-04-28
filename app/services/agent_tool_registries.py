@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +20,8 @@ from app.services.tool_registry_helpers import (
     conversation_intent_summary,
     evidence_blocks_from_state,
     focus_values,
+    fetch_url_evidence,
+    fetch_url_payload,
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
@@ -438,14 +439,7 @@ def build_conversation_tool_registry(
         max_chars = planned_input.get("max_chars", 4000)
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})
         result = fetch_url_text(client=agent.clients.http_client, url=url, max_chars=max_chars)
-        payload = {
-            "ok": result.ok,
-            "url": result.url,
-            "title": result.title,
-            "text": result.text,
-            "error": result.error,
-            "status_code": result.status_code,
-        }
+        payload = fetch_url_payload(result)
         state.setdefault("fetched_urls", []).append(payload)
         agent._record_agent_observation(
             emit=emit,
@@ -949,29 +943,10 @@ def build_research_tool_registry(
         max_chars = planned_input.get("max_chars", 4000)
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})
         result = fetch_url_text(client=agent.clients.http_client, url=url, max_chars=max_chars)
-        payload = {
-            "ok": result.ok,
-            "url": result.url,
-            "title": result.title,
-            "text": result.text,
-            "error": result.error,
-            "status_code": result.status_code,
-        }
+        payload = fetch_url_payload(result)
         state.setdefault("fetched_urls", []).append(payload)
-        if result.ok:
-            doc_id = "web::fetch::" + hashlib.sha1(result.url.encode("utf-8")).hexdigest()[:16]
-            evidence = EvidenceBlock(
-                doc_id=doc_id,
-                paper_id=doc_id,
-                title=result.title or result.url,
-                file_path=result.url,
-                page=0,
-                block_type="web",
-                caption=result.url,
-                snippet=result.text[:1600],
-                score=0.75,
-                metadata={"source": "fetch_url", "url": result.url, "status_code": result.status_code},
-            )
+        evidence = fetch_url_evidence(result)
+        if evidence is not None:
             state["web_evidence"] = [*list(state.get("web_evidence", []) or []), evidence]
             state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), [evidence])
             emit("web_search", {"count": 1, "items": [evidence.model_dump()]})

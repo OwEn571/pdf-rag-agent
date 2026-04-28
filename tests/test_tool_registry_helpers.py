@@ -5,6 +5,8 @@ from app.services.tool_registry_helpers import (
     coerce_int,
     conversation_intent_summary,
     evidence_blocks_from_state,
+    fetch_url_evidence,
+    fetch_url_payload,
     focus_values,
     format_fetched_urls_answer,
     format_summaries_answer,
@@ -15,6 +17,7 @@ from app.services.tool_registry_helpers import (
     summary_source_from_state,
     tool_input_from_state,
 )
+from app.services.url_fetcher import FetchUrlResult
 
 
 def test_tool_registry_helpers_normalize_and_store_todos() -> None:
@@ -83,6 +86,29 @@ def test_tool_registry_helpers_format_compose_sources() -> None:
     assert "### A" in fetched_answer
     assert "读取失败" in fetched_answer
     assert summaries_answer == "one\n\ntwo"
+
+
+def test_tool_registry_helpers_convert_fetch_result_payload_and_evidence() -> None:
+    result = FetchUrlResult(
+        ok=True,
+        url="https://example.com/a",
+        title="Example",
+        text="x" * 2000,
+        status_code=200,
+    )
+    failed = FetchUrlResult(ok=False, url="https://example.com/b", error="timeout")
+
+    payload = fetch_url_payload(result)
+    evidence = fetch_url_evidence(result)
+
+    assert payload["ok"] is True
+    assert payload["status_code"] == 200
+    assert evidence is not None
+    assert evidence.doc_id.startswith("web::fetch::")
+    assert evidence.paper_id == evidence.doc_id
+    assert evidence.snippet == "x" * 1600
+    assert evidence.metadata["url"] == "https://example.com/a"
+    assert fetch_url_evidence(failed) is None
 
 
 def test_tool_registry_helpers_collect_evidence_and_summary_source() -> None:
