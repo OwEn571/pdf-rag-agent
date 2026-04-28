@@ -102,6 +102,132 @@ def run_conversation_turn(
     return response.model_dump()
 
 
+def run_research_turn(
+    *,
+    agent: Any,
+    run_context: AgentRunContext,
+    query: str,
+    contract: QueryContract,
+    agent_plan: dict[str, Any],
+    web_enabled: bool,
+    explicit_web_search: bool,
+    max_web_results: int,
+    stream_answer: bool,
+) -> dict[str, Any]:
+    session = run_context.session
+    execution_steps = run_context.execution_steps
+    agent_state = agent.runtime.run_research_agent_loop(
+        contract=contract,
+        session=session,
+        agent_plan=agent_plan,
+        web_enabled=web_enabled,
+        explicit_web_search=explicit_web_search,
+        max_web_results=max_web_results,
+        emit=run_context.emit,
+        execution_steps=execution_steps,
+    )
+    contract = agent_state["contract"]
+    plan = agent_state["plan"]
+    screened_papers = agent_state["screened_papers"]
+    evidence = agent_state["evidence"]
+    claims = agent_state["claims"]
+    verification = agent_state["verification"]
+
+    if isinstance(verification, VerificationReport) and verification.status == "clarify":
+        forced_state = agent._force_best_effort_after_clarification_limit(
+            state=agent_state,
+            session=session,
+            web_enabled=web_enabled,
+            explicit_web_search=explicit_web_search,
+            max_web_results=max_web_results,
+            emit=run_context.emit,
+            execution_steps=execution_steps,
+        )
+        if forced_state is not None:
+            agent_state = forced_state
+            contract = agent_state["contract"]
+            plan = agent_state["plan"]
+            screened_papers = agent_state["screened_papers"]
+            evidence = agent_state["evidence"]
+            claims = agent_state["claims"]
+            verification = agent_state["verification"]
+
+    answer, citations = agent._compose_answer(
+        contract=contract,
+        claims=claims,
+        evidence=evidence,
+        papers=screened_papers,
+        verification=verification,
+        session=session,
+        stream_callback=(lambda text: run_context.emit("answer_delta", {"text": text})) if stream_answer else None,
+    )
+    focus_titles = agent._claim_focus_titles(claims=claims, papers=screened_papers)
+    active_titles = focus_titles if verification.status == "pass" else []
+    if verification.status == "pass":
+        agent._remember_research_outcome(
+            session=session,
+            contract=contract,
+            answer=answer,
+            claims=claims,
+            papers=screened_papers,
+            evidence=evidence,
+            citations=citations,
+        )
+    session.last_relation = contract.relation
+    active_research = agent._make_active_research(
+        relation=contract.relation,
+        targets=list(contract.targets),
+        titles=active_titles,
+        requested_fields=list(contract.requested_fields),
+        required_modalities=list(contract.required_modalities),
+        answer_shape=contract.answer_shape,
+        precision_requirement=contract.precision_requirement,
+        clean_query=contract.clean_query,
+    )
+    session.answered_titles = list(dict.fromkeys([*session.answered_titles, *active_research.titles]))
+    if verification.status == "clarify":
+        agent._store_pending_clarification(session=session, contract=contract)
+        agent._remember_clarification_attempt(session=session, contract=contract, verification=verification)
+    else:
+        agent._clear_pending_clarification(session)
+        agent._reset_clarification_tracking(session)
+    agent.sessions.commit_turn(
+        session,
+        SessionTurn.from_contract(
+            query=query,
+            answer=answer,
+            contract=contract,
+            titles=focus_titles,
+        ),
+        active=active_research,
+    )
+
+    response = AssistantResponse(
+        session_id=run_context.session_id,
+        interaction_mode=contract.interaction_mode,
+        answer=answer,
+        citations=citations,
+        query_contract=contract.model_dump(),
+        research_plan_summary=plan.model_dump(),
+        runtime_summary=agent._runtime_summary(
+            contract=contract,
+            session=session,
+            tool_plan=agent_plan,
+            research_plan=plan.model_dump(),
+            execution_steps=execution_steps,
+            verification_report=verification.model_dump(),
+            claims=claims,
+            citations=citations,
+        ),
+        execution_steps=execution_steps,
+        verification_report=verification.model_dump(),
+        needs_human=verification.status == "clarify",
+        clarification_question=agent._clarification_question(contract, session) if verification.status == "clarify" else "",
+        clarification_options=agent._clarification_options(contract) if verification.status == "clarify" else [],
+    )
+    return response.model_dump()
+
+
 def _string_list(value: object) -> list[str]:
     if isinstance(value, str):
         return [value.strip()] if value.strip() else []

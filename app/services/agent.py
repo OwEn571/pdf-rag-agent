@@ -32,7 +32,7 @@ from app.domain.models import (
 )
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
-from app.services.agent_loop import run_conversation_turn
+from app.services.agent_loop import run_conversation_turn, run_research_turn
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
@@ -312,116 +312,17 @@ class ResearchAssistantAgentV4(
             )
             return payload, run_context.events
 
-        agent_state = self.runtime.run_research_agent_loop(
+        payload = run_research_turn(
+            agent=self,
+            run_context=run_context,
+            query=query,
             contract=contract,
-            session=session,
             agent_plan=agent_plan,
             web_enabled=web_enabled,
             explicit_web_search=use_web_search,
             max_web_results=max_web_results,
-            emit=emit,
-            execution_steps=execution_steps,
+            stream_answer=event_callback is not None,
         )
-        contract = agent_state["contract"]
-        plan = agent_state["plan"]
-        screened_papers = agent_state["screened_papers"]
-        evidence = agent_state["evidence"]
-        claims = agent_state["claims"]
-        verification = agent_state["verification"]
-
-        if isinstance(verification, VerificationReport) and verification.status == "clarify":
-            forced_state = self._force_best_effort_after_clarification_limit(
-                state=agent_state,
-                session=session,
-                web_enabled=web_enabled,
-                explicit_web_search=use_web_search,
-                max_web_results=max_web_results,
-                emit=emit,
-                execution_steps=execution_steps,
-            )
-            if forced_state is not None:
-                agent_state = forced_state
-                contract = agent_state["contract"]
-                plan = agent_state["plan"]
-                screened_papers = agent_state["screened_papers"]
-                evidence = agent_state["evidence"]
-                claims = agent_state["claims"]
-                verification = agent_state["verification"]
-
-        answer, citations = self._compose_answer(
-            contract=contract,
-            claims=claims,
-            evidence=evidence,
-            papers=screened_papers,
-            verification=verification,
-            session=session,
-            stream_callback=(lambda text: emit("answer_delta", {"text": text})) if event_callback is not None else None,
-        )
-        focus_titles = self._claim_focus_titles(claims=claims, papers=screened_papers)
-        active_titles = focus_titles if verification.status == "pass" else []
-        if verification.status == "pass":
-            self._remember_research_outcome(
-                session=session,
-                contract=contract,
-                answer=answer,
-                claims=claims,
-                papers=screened_papers,
-                evidence=evidence,
-                citations=citations,
-            )
-        session.last_relation = contract.relation
-        active_research = self._make_active_research(
-            relation=contract.relation,
-            targets=list(contract.targets),
-            titles=active_titles,
-            requested_fields=list(contract.requested_fields),
-            required_modalities=list(contract.required_modalities),
-            answer_shape=contract.answer_shape,
-            precision_requirement=contract.precision_requirement,
-            clean_query=contract.clean_query,
-        )
-        session.answered_titles = list(dict.fromkeys([*session.answered_titles, *active_research.titles]))
-        if verification.status == "clarify":
-            self._store_pending_clarification(session=session, contract=contract)
-            self._remember_clarification_attempt(session=session, contract=contract, verification=verification)
-        else:
-            self._clear_pending_clarification(session)
-            self._reset_clarification_tracking(session)
-        self.sessions.commit_turn(
-            session,
-            SessionTurn.from_contract(
-                query=query,
-                answer=answer,
-                contract=contract,
-                titles=focus_titles,
-            ),
-            active=active_research,
-        )
-
-        response = AssistantResponse(
-            session_id=resolved_session_id,
-            interaction_mode=contract.interaction_mode,
-            answer=answer,
-            citations=citations,
-            query_contract=contract.model_dump(),
-            research_plan_summary=plan.model_dump(),
-            runtime_summary=self._runtime_summary(
-                contract=contract,
-                session=session,
-                tool_plan=agent_plan,
-                research_plan=plan.model_dump(),
-                execution_steps=execution_steps,
-                verification_report=verification.model_dump(),
-                claims=claims,
-                citations=citations,
-            ),
-            execution_steps=execution_steps,
-            verification_report=verification.model_dump(),
-            needs_human=verification.status == "clarify",
-            clarification_question=self._clarification_question(contract, session) if verification.status == "clarify" else "",
-            clarification_options=self._clarification_options(contract) if verification.status == "clarify" else [],
-        )
-        payload = response.model_dump()
         self._write_turn_trace(
             session_id=resolved_session_id,
             events=run_context.events,
