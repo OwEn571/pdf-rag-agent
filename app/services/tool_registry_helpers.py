@@ -25,12 +25,41 @@ def tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def tool_inputs_by_name(agent_plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_items = agent_plan.get("tool_call_args", []) if isinstance(agent_plan, dict) else []
+    if not isinstance(raw_items, list):
+        return {}
+    tool_inputs: dict[str, dict[str, Any]] = {}
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "") or "").strip()
+        args = item.get("args", {})
+        if not name or not isinstance(args, dict):
+            continue
+        tool_inputs.setdefault(name, dict(args))
+    return tool_inputs
+
+
 def planned_tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
     planned = tool_input_from_state(state, name)
     if planned:
         return planned
     current = state.get("current_tool_input", {})
     return dict(current) if isinstance(current, dict) else {}
+
+
+def tool_loop_ready_observation(
+    *,
+    tool: str,
+    actions: list[str],
+    tool_inputs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "tool": tool,
+        "summary": "tool_loop_ready",
+        "payload": {"actions": actions, "tool_inputs": tool_inputs},
+    }
 
 
 def conversation_intent_summary(contract: QueryContract) -> dict[str, Any]:

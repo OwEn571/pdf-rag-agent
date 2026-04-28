@@ -60,6 +60,8 @@ from app.services.tool_registry_helpers import (
     task_tool_request,
     todo_write_tool_payload,
     tool_input_from_state,
+    tool_inputs_by_name,
+    tool_loop_ready_observation,
     verify_claim_tool_payload,
 )
 from app.services.url_fetcher import FetchUrlResult
@@ -91,6 +93,15 @@ def test_tool_registry_helpers_normalize_and_store_todos() -> None:
 
 def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
     state = {"tool_inputs": {"fetch_url": {"url": "https://example.com"}, "bad": "nope"}}
+    agent_plan = {
+        "tool_call_args": [
+            {"name": " fetch_url ", "args": {"url": "https://example.com/a"}},
+            {"name": "fetch_url", "args": {"url": "https://example.com/b"}},
+            {"name": "summarize", "args": "bad"},
+            {"name": "", "args": {}},
+            "bad",
+        ]
+    }
     contract = QueryContract(
         clean_query="上一轮第一篇是什么？",
         interaction_mode="conversation",
@@ -103,6 +114,8 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
 
     assert tool_input_from_state(state, "fetch_url") == {"url": "https://example.com"}
     assert tool_input_from_state(state, "bad") == {}
+    assert tool_inputs_by_name(agent_plan) == {"fetch_url": {"url": "https://example.com/a"}}
+    assert tool_inputs_by_name({"tool_call_args": "bad"}) == {}
     assert planned_tool_input_from_state(
         {"tool_inputs": {"summarize": {"target_words": 80}}, "current_tool_input": {"target_words": 20}},
         "summarize",
@@ -115,6 +128,18 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
         "answer_slots": ["previous_rationale"],
         "requested_fields": ["previous_rationale"],
         "targets": ["DPO"],
+    }
+    assert tool_loop_ready_observation(
+        tool="compose",
+        actions=["read_memory", "compose"],
+        tool_inputs={"read_memory": {"max_turns": 4}},
+    ) == {
+        "tool": "compose",
+        "summary": "tool_loop_ready",
+        "payload": {
+            "actions": ["read_memory", "compose"],
+            "tool_inputs": {"read_memory": {"max_turns": 4}},
+        },
     }
     summary, payload = research_intent_summary(contract)
     assert summary == "previous_rationale"

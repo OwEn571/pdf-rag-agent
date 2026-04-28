@@ -20,6 +20,11 @@ from app.services.confidence import (
     confidence_payload,
     should_ask_human,
 )
+from app.services.tool_registry_helpers import (
+    tool_input_from_state,
+    tool_inputs_by_name,
+    tool_loop_ready_observation,
+)
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -48,16 +53,12 @@ class AgentRuntime:
             "verification_report": {"status": "pass", "recommended_action": "conversation_tool_answer"},
             "citation_candidates": [],
             "citation_lookup": {},
-            "tool_inputs": self._tool_inputs_by_name(agent_plan),
+            "tool_inputs": tool_inputs_by_name(agent_plan),
             "current_tool_input": {},
         }
         emit(
             "observation",
-            {
-                "tool": "compose",
-                "summary": "tool_loop_ready",
-                "payload": {"actions": actions, "tool_inputs": state["tool_inputs"]},
-            },
+            tool_loop_ready_observation(tool="compose", actions=actions, tool_inputs=state["tool_inputs"]),
         )
         execution_steps.append({"node": "agent_loop", "summary": " -> ".join(actions)})
         tools = build_conversation_tool_registry(
@@ -116,7 +117,7 @@ class AgentRuntime:
             "verification": None,
             "reflection": {},
             "excluded_titles": excluded_titles,
-            "tool_inputs": self._tool_inputs_by_name(agent_plan),
+            "tool_inputs": tool_inputs_by_name(agent_plan),
             "current_tool_input": {},
         }
         emit("plan", plan.model_dump())
@@ -129,13 +130,10 @@ class AgentRuntime:
             needs_reflection="exclude_previous_focus" in contract.notes
             or self.agent._is_negative_correction_query(contract.clean_query),
         )
+        ready_tool = "search_corpus" if "search_corpus" in actions else "compose"
         emit(
             "observation",
-            {
-                "tool": "search_corpus" if "search_corpus" in actions else "compose",
-                "summary": "tool_loop_ready",
-                "payload": {"actions": actions, "tool_inputs": state["tool_inputs"]},
-            },
+            tool_loop_ready_observation(tool=ready_tool, actions=actions, tool_inputs=state["tool_inputs"]),
         )
         execution_steps.append({"node": "agent_loop", "summary": " -> ".join(actions)})
 
@@ -223,7 +221,7 @@ class AgentRuntime:
                 action = fallback_next(executor.executed)
             if action is None or action not in allowed_tools:
                 break
-            tool_input = self._tool_input_for_action(state=state, action=action)
+            tool_input = tool_input_from_state(state, action)
             state["current_tool_input"] = tool_input
             self.agent._emit_agent_step(
                 emit=emit,
@@ -275,30 +273,6 @@ class AgentRuntime:
         except (TypeError, ValueError):
             parsed = fallback
         return max(1, parsed)
-
-    @staticmethod
-    def _tool_inputs_by_name(agent_plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        raw_items = agent_plan.get("tool_call_args", []) if isinstance(agent_plan, dict) else []
-        if not isinstance(raw_items, list):
-            return {}
-        tool_inputs: dict[str, dict[str, Any]] = {}
-        for item in raw_items:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "") or "").strip()
-            args = item.get("args", {})
-            if not name or not isinstance(args, dict):
-                continue
-            tool_inputs.setdefault(name, dict(args))
-        return tool_inputs
-
-    @staticmethod
-    def _tool_input_for_action(*, state: dict[str, Any], action: str) -> dict[str, Any]:
-        tool_inputs = state.get("tool_inputs", {})
-        if not isinstance(tool_inputs, dict):
-            return {}
-        payload = tool_inputs.get(action, {})
-        return dict(payload) if isinstance(payload, dict) else {}
 
     def _next_conversation_action(
         self,
