@@ -141,6 +141,8 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
         "rerank",
         "read_pdf_page",
         "grep_corpus",
+        "summarize",
+        "verify_claim",
         "web_search",
         "fetch_url",
         "query_library_metadata",
@@ -163,6 +165,11 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert read_page_schema["required"] == ["paper_id", "page_from"]
     grep_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "grep_corpus")
     assert grep_schema["required"] == ["regex"]
+    summarize_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "summarize")
+    assert summarize_schema["properties"]["target_words"]["maximum"] == 1000
+    verify_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "verify_claim")
+    assert verify_schema["required"] == ["claim"]
+    assert verify_schema["properties"]["min_overlap"]["default"] == 2
     todo_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "todo_write")
     assert todo_schema["required"] == ["items"]
     remember_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "remember")
@@ -248,6 +255,8 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "read_memory",
         "todo_write",
         "remember",
+        "summarize",
+        "verify_claim",
         "Task",
         "web_search",
         "fetch_url",
@@ -266,6 +275,8 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "rerank",
         "read_pdf_page",
         "grep_corpus",
+        "summarize",
+        "verify_claim",
         "web_search",
         "fetch_url",
         "compose",
@@ -331,6 +342,50 @@ def test_agent_runtime_preserves_structured_tool_arguments() -> None:
 
     assert research_state["tool_inputs"]["search_corpus"] == {"query": "custom PPO query", "top_k": 3}
     assert {"action": "search_corpus", "arguments": {"query": "custom PPO query", "top_k": 3}} in probe.step_payloads
+
+
+def test_summarize_and_verify_claim_tools_run_inside_research_loop() -> None:
+    probe = _RegistryProbeAgent()
+    runtime = AgentRuntime(agent=probe)
+    session = SessionContext(session_id="demo")
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    state = runtime.run_research_agent_loop(
+        contract=QueryContract(clean_query="PPO 目标函数", relation="formula_lookup", targets=["PPO"]),
+        session=session,
+        agent_plan={
+            "actions": ["summarize", "verify_claim", "compose"],
+            "tool_call_args": [
+                {
+                    "name": "summarize",
+                    "args": {
+                        "text": "PPO uses a clipped surrogate objective. This objective limits policy updates.",
+                        "target_words": 24,
+                        "focus": ["PPO", "clipped"],
+                    },
+                },
+                {
+                    "name": "verify_claim",
+                    "args": {
+                        "claim": "PPO uses a clipped surrogate objective",
+                        "evidence": ["The PPO algorithm optimizes a clipped surrogate objective to limit policy updates."],
+                    },
+                },
+            ],
+        },
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=0,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=steps,
+    )
+
+    assert state["summaries"][0]["source_chars"] > 0
+    assert "clipped surrogate objective" in state["summaries"][0]["summary"].lower()
+    assert state["claim_checks"][0]["status"] == "pass"
+    assert state["claim_checks"][0]["supporting_evidence_ids"] == ["inline::1"]
+    assert {"action": "verify_claim", "arguments": state["tool_inputs"]["verify_claim"]} in probe.step_payloads
 
 
 def test_todo_write_tool_updates_session_memory_and_emits_event() -> None:

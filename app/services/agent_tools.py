@@ -237,6 +237,60 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         research_executable=True,
     ),
     AgentToolSpec(
+        name="summarize",
+        when="Use to compress text or collected evidence into a focused summary before further reasoning or final composition.",
+        returns="A concise focused summary and the number of source characters summarized.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "target_words": {"type": "integer", "minimum": 20, "maximum": 1000, "default": 120},
+                "focus": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+        conversation_executable=True,
+    ),
+    AgentToolSpec(
+        name="verify_claim",
+        when="Use to check whether a specific claim is supported by provided or currently collected evidence before composing.",
+        returns="A pass/retry/clarify status, confidence, supporting evidence ids, and missing terms.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "claim": {"type": "string"},
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "doc_id": {"type": "string"},
+                                    "paper_id": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "page": {"type": "integer"},
+                                    "block_type": {"type": "string"},
+                                    "snippet": {"type": "string"},
+                                    "text": {"type": "string"},
+                                },
+                                "additionalProperties": True,
+                            },
+                        ],
+                    },
+                },
+                "min_overlap": {"type": "integer", "minimum": 1, "maximum": 20, "default": 2},
+            },
+            "required": ["claim"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+        conversation_executable=True,
+    ),
+    AgentToolSpec(
         name="web_search",
         when="Use for latest/current facts, external sources, citation counts, or when local corpus evidence is insufficient.",
         returns="External web evidence or citation-count lookup results. Treat them as dynamic and cite source URLs.",

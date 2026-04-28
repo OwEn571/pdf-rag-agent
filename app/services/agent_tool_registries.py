@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_tools import RegisteredAgentTool
+from app.services.evidence_tools import evidence_from_payload, summarize_evidence, summarize_text, verify_claim_against_evidence
 from app.services.learnings import remember_learning
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
@@ -60,6 +61,31 @@ def _format_fetched_urls_answer(fetched_urls: list[dict[str, Any]]) -> str:
         text = str(item.get("text", "") or "").strip()
         sections.append(f"### {title}\n\n来源：{url}\n\n{text}")
     return "\n\n".join(sections).strip()
+
+
+def _format_summaries_answer(summaries: list[dict[str, Any]]) -> str:
+    return "\n\n".join(str(item.get("summary", "") or "").strip() for item in summaries if str(item.get("summary", "") or "").strip())
+
+
+def _focus_values(raw: Any, fallback: list[str]) -> list[str]:
+    values = raw if isinstance(raw, list) else fallback
+    return [str(item).strip() for item in list(values or []) if str(item).strip()]
+
+
+def _evidence_blocks_from_state(state: dict[str, Any]) -> list[EvidenceBlock]:
+    evidence: list[EvidenceBlock] = []
+    for key in ("evidence", "web_evidence"):
+        for item in list(state.get(key, []) or []):
+            if isinstance(item, EvidenceBlock):
+                evidence.append(item)
+    evidence.extend(evidence_from_payload(state.get("fetched_urls", [])))
+    return list({item.doc_id or item.snippet: item for item in evidence}.values())
+
+
+def _summary_source_from_state(state: dict[str, Any]) -> str:
+    fetched_text = "\n".join(str(item.get("text", "") or "") for item in list(state.get("fetched_urls", []) or []))
+    task_text = "\n".join(str(item.get("answer", "") or "") for item in list(state.get("task_results", []) or []))
+    return "\n".join(part for part in [fetched_text, task_text] if part.strip())
 
 
 def _task_plan_with_allow_list(plan: dict[str, Any], tools_allowed: list[str]) -> dict[str, Any]:
@@ -261,6 +287,61 @@ def build_conversation_tool_registry(
             tool="remember",
             summary=f"key={key}",
             payload={"key": key, "path": str(path), "content_chars": len(content)},
+        )
+
+    def summarize() -> None:
+        planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
+        focus = _focus_values(planned_input.get("focus", contract.targets), contract.targets)
+        target_words = _coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
+        text = str(planned_input.get("text", "") or "").strip()
+        if text:
+            summary = summarize_text(text=text, target_words=target_words, focus=focus)
+            source_chars = len(text)
+        elif evidence := _evidence_blocks_from_state(state):
+            summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
+            source_chars = sum(len(item.snippet or "") for item in evidence)
+        else:
+            source_text = _summary_source_from_state(state)
+            summary = summarize_text(text=source_text, target_words=target_words, focus=focus)
+            source_chars = len(source_text)
+        payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
+        state.setdefault("summaries", []).append(payload)
+        if summary and not state.get("answer"):
+            agent._set_conversation_answer(state=state, answer=summary, emit=emit)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="summarize",
+            summary=f"chars={len(summary)}",
+            payload=payload,
+        )
+
+    def verify_claim() -> None:
+        planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
+        claim = str(planned_input.get("claim", "") or "").strip()
+        evidence = evidence_from_payload(planned_input.get("evidence", []))
+        if not evidence:
+            evidence = _evidence_blocks_from_state(state)
+        min_overlap = _coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
+        check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
+        payload = {
+            "claim": claim,
+            "status": check.status,
+            "confidence": check.confidence,
+            "supporting_evidence_ids": check.supporting_evidence_ids,
+            "matched_terms": check.matched_terms,
+            "missing_terms": check.missing_terms,
+            "min_overlap": min_overlap,
+            "reason": check.reason,
+        }
+        state.setdefault("claim_checks", []).append(payload)
+        state.setdefault("tool_verifications", []).append(payload)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="verify_claim",
+            summary=f"{check.status}:{check.confidence:.2f}",
+            payload=payload,
         )
 
     def run_task() -> None:
@@ -504,6 +585,10 @@ def build_conversation_tool_registry(
             answer = _format_fetched_urls_answer(list(state.get("fetched_urls", []) or []))
             if answer:
                 agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        elif state.get("summaries") and not state.get("answer"):
+            answer = _format_summaries_answer(list(state.get("summaries", []) or []))
+            if answer:
+                agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         elif contract.relation == "library_status":
             if not state.get("library_metadata_attempted"):
                 query_library_metadata()
@@ -569,6 +654,8 @@ def build_conversation_tool_registry(
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
         "remember": RegisteredAgentTool("remember", remember),
+        "summarize": RegisteredAgentTool("summarize", summarize),
+        "verify_claim": RegisteredAgentTool("verify_claim", verify_claim),
         "Task": RegisteredAgentTool("Task", run_task),
         "web_search": RegisteredAgentTool("web_search", web_search),
         "fetch_url": RegisteredAgentTool("fetch_url", fetch_url),
@@ -874,6 +961,55 @@ def build_research_tool_registry(
             {"regex": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits},
         )
 
+    def summarize() -> None:
+        planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
+        contract: QueryContract = state["contract"]
+        focus = _focus_values(planned_input.get("focus", contract.targets), contract.targets)
+        target_words = _coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
+        text = str(planned_input.get("text", "") or "").strip()
+        if text:
+            summary = summarize_text(text=text, target_words=target_words, focus=focus)
+            source_chars = len(text)
+        else:
+            evidence = evidence_from_payload(planned_input.get("evidence", [])) or _evidence_blocks_from_state(state)
+            summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
+            source_chars = sum(len(item.snippet or "") for item in evidence)
+        payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
+        state.setdefault("summaries", []).append(payload)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="summarize",
+            summary=f"chars={len(summary)}",
+            payload=payload,
+        )
+
+    def verify_claim() -> None:
+        planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
+        claim = str(planned_input.get("claim", "") or "").strip()
+        evidence = evidence_from_payload(planned_input.get("evidence", [])) or _evidence_blocks_from_state(state)
+        min_overlap = _coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
+        check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
+        payload = {
+            "claim": claim,
+            "status": check.status,
+            "confidence": check.confidence,
+            "supporting_evidence_ids": check.supporting_evidence_ids,
+            "matched_terms": check.matched_terms,
+            "missing_terms": check.missing_terms,
+            "min_overlap": min_overlap,
+            "reason": check.reason,
+        }
+        state.setdefault("claim_checks", []).append(payload)
+        state.setdefault("tool_verifications", []).append(payload)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="verify_claim",
+            summary=f"{check.status}:{check.confidence:.2f}",
+            payload=payload,
+        )
+
     def web_search() -> None:
         agent._agent_web_search(
             state=state,
@@ -993,6 +1129,8 @@ def build_research_tool_registry(
         "rerank": RegisteredAgentTool("rerank", rerank),
         "read_pdf_page": RegisteredAgentTool("read_pdf_page", read_pdf_page),
         "grep_corpus": RegisteredAgentTool("grep_corpus", grep_corpus),
+        "summarize": RegisteredAgentTool("summarize", summarize),
+        "verify_claim": RegisteredAgentTool("verify_claim", verify_claim),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),
         "compose": RegisteredAgentTool("compose", compose, terminal=True),
         "web_search": RegisteredAgentTool("web_search", web_search),
