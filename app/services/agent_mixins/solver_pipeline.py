@@ -6,6 +6,7 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext
 from app.services import formula_text_helpers as formula_helpers
+from app.services import metric_text_helpers as metric_helpers
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 
@@ -1386,28 +1387,10 @@ class SolverPipelineMixin:
         return any(marker in lowered for marker in negative_markers)
 
     def _extract_metric_lines(self, evidence: list[EvidenceBlock]) -> list[str]:
-        scored_lines: list[tuple[int, str]] = []
-        for item in evidence:
-            snippet = item.snippet.replace("\n", " ")
-            score = self._metric_line_score(snippet)
-            if score > 0:
-                scored_lines.append((score, snippet[:280]))
-        dedup: list[str] = []
-        seen: set[str] = set()
-        for _, line in sorted(scored_lines, key=lambda item: (-item[0], item[1])):
-            norm = " ".join(line.lower().split())
-            if norm not in seen:
-                seen.add(norm)
-                dedup.append(line)
-        return dedup
+        return metric_helpers.extract_metric_lines(evidence, token_weights=self.settings.solver_metric_token_weights)
 
     def _metric_line_score(self, text: str) -> int:
-        haystack = text.lower()
-        score = 0.0
-        for token, weight in self.settings.solver_metric_token_weights.items():
-            if token in haystack:
-                score += float(weight)
-        return int(score)
+        return metric_helpers.metric_line_score(text, token_weights=self.settings.solver_metric_token_weights)
 
     def _metric_block_score(
         self,
@@ -1416,27 +1399,19 @@ class SolverPipelineMixin:
         contract: QueryContract,
         paper_by_id: dict[str, CandidatePaper],
     ) -> float:
-        text = "\n".join([item.title, item.caption, item.snippet]).lower()
-        score = float(self._metric_line_score(text)) + float(item.score)
-        if item.block_type == "table":
-            score += 1.5
-        elif item.block_type == "caption":
-            score += 0.75
-        query = contract.clean_query.lower()
-        if "pba" in query and "pba" in text:
-            score += 5.0
-        if "win rate" in text:
-            score += 1.0
-        if "accuracy" in text or " acc" in f" {text}":
-            score += 1.0
-        for target in contract.targets:
-            normalized = target.strip().lower()
-            if normalized and normalized in text:
-                score += 4.0
         paper = paper_by_id.get(item.paper_id)
-        if paper is not None and contract.targets and self._paper_identity_matches_targets(paper=paper, targets=contract.targets):
-            score += 6.0
-        return score
+        target_paper_match = bool(
+            paper is not None
+            and contract.targets
+            and self._paper_identity_matches_targets(paper=paper, targets=contract.targets)
+        )
+        return metric_helpers.metric_block_score(
+            item=item,
+            contract=contract,
+            paper_by_id=paper_by_id,
+            token_weights=self.settings.solver_metric_token_weights,
+            target_paper_match=target_paper_match,
+        )
 
     def _formula_block_score(self, text: str, *, contract: QueryContract | None = None) -> float:
         return formula_helpers.formula_block_score(
