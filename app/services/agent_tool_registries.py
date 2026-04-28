@@ -10,9 +10,12 @@ from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
     conversation_artifact_answer_from_state,
+    conversation_clarification_report,
     conversation_intent_summary,
+    compose_done_payload,
     evidence_event_payload,
     evidence_result_observation_payload,
+    ensure_research_clarification_report,
     fetch_url_evidence,
     fetch_url_tool_payload,
     fetch_url_tool_request,
@@ -25,9 +28,11 @@ from app.services.tool_registry_helpers import (
     query_rewrite_tool_request,
     read_memory_tool_payload,
     read_pdf_page_tool_request,
+    reflect_previous_answer_payload,
     remember_tool_payload,
     rerank_observation_payload,
     rerank_tool_request,
+    research_compose_observation_payload,
     research_intent_summary,
     search_corpus_observation_payload,
     search_corpus_strategy,
@@ -159,9 +164,6 @@ def build_conversation_tool_registry(
             summary=summary,
             payload=payload,
         )
-
-    def read_memory() -> None:
-        read_conversation_memory()
 
     def todo_write() -> None:
         planned_input = planned_tool_input_from_state(state, "todo_write")
@@ -418,20 +420,11 @@ def build_conversation_tool_registry(
             execution_steps=execution_steps,
             tool="compose",
             summary="done",
-            payload={"has_answer": bool(state.get("answer"))},
+            payload=compose_done_payload(state),
         )
 
     def ask_human() -> None:
-        missing_fields = [
-            str(note).split("=", 1)[1]
-            for note in contract.notes
-            if str(note).startswith("ambiguous_slot=") and "=" in str(note)
-        ] or ["user_choice"]
-        state["verification_report"] = {
-            "status": "clarify",
-            "missing_fields": missing_fields,
-            "recommended_action": "ask_human",
-        }
+        state["verification_report"] = conversation_clarification_report(contract)
         answer = agent._clarification_question(contract, session)
         agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         agent._record_agent_observation(
@@ -450,11 +443,11 @@ def build_conversation_tool_registry(
             execution_steps=execution_steps,
             tool="compose_or_ask_human",
             summary="done",
-            payload={"has_answer": bool(state.get("answer"))},
+            payload=compose_done_payload(state),
         )
 
     return {
-        "read_memory": RegisteredAgentTool("read_memory", read_memory),
+        "read_memory": RegisteredAgentTool("read_memory", read_conversation_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
         "remember": RegisteredAgentTool("remember", remember),
         "propose_tool": RegisteredAgentTool("propose_tool", propose_tool),
@@ -492,12 +485,13 @@ def build_research_tool_registry(
         )
 
     def reflect_previous_answer() -> None:
+        summary, payload = reflect_previous_answer_payload(state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="reflect_previous_answer",
-            summary=f"excluded_titles={len(state['excluded_titles'])}",
-            payload={"excluded_titles": sorted(state["excluded_titles"])},
+            summary=summary,
+            payload=payload,
         )
 
     def read_memory() -> None:
@@ -754,19 +748,13 @@ def build_research_tool_registry(
             )
 
     def ask_human() -> None:
-        verification = state.get("verification")
-        if not isinstance(verification, VerificationReport) or verification.status != "clarify":
-            state["verification"] = VerificationReport(
-                status="clarify",
-                missing_fields=["user_choice"],
-                recommended_action="ask_human",
-            )
+        verification = ensure_research_clarification_report(state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="ask_human",
-            summary=str(state["verification"].recommended_action),
-            payload=state["verification"].model_dump(),
+            summary=str(verification.recommended_action),
+            payload=verification.model_dump(),
         )
 
     def compose() -> None:
@@ -776,17 +764,13 @@ def build_research_tool_registry(
                 solve_claims()
             if state.get("verification") is None:
                 verify_grounding()
+        summary, payload = research_compose_observation_payload(state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="compose",
-            summary=str(getattr(state.get("verification"), "status", "pending")),
-            payload={
-                "claim_count": len(state.get("claims", []) or []),
-                "verification": state["verification"].model_dump()
-                if isinstance(state.get("verification"), VerificationReport)
-                else None,
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def compose_or_ask_human() -> None:

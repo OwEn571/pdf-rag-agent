@@ -3,16 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.domain.models import ActiveResearch, EvidenceBlock, QueryContract, SessionContext, SessionTurn
+from app.domain.models import ActiveResearch, EvidenceBlock, QueryContract, SessionContext, SessionTurn, VerificationReport
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
     coerce_int,
     conversation_artifact_answer_from_state,
+    conversation_clarification_report,
     conversation_intent_summary,
+    compose_done_payload,
     evidence_blocks_from_state,
     evidence_event_payload,
     evidence_result_observation_payload,
+    ensure_research_clarification_report,
     fetch_url_evidence,
     fetch_url_payload,
     fetch_url_tool_payload,
@@ -31,9 +34,11 @@ from app.services.tool_registry_helpers import (
     query_rewrite_tool_request,
     read_memory_tool_payload,
     read_pdf_page_tool_request,
+    reflect_previous_answer_payload,
     remember_tool_payload,
     rerank_observation_payload,
     rerank_tool_request,
+    research_compose_observation_payload,
     research_intent_summary,
     search_corpus_observation_payload,
     search_corpus_strategy,
@@ -194,6 +199,37 @@ def test_tool_registry_helpers_build_conversation_artifact_answer() -> None:
     assert "Example" in fetched_answer
     assert fetched_citations == []
     assert conversation_artifact_answer_from_state({}) == (False, "", [])
+
+
+def test_tool_registry_helpers_build_clarification_and_compose_payloads() -> None:
+    contract = QueryContract(
+        clean_query="PBA 是什么",
+        notes=["ambiguous_slot=paper_title", "ambiguous_slot=acronym"],
+    )
+    state = {"answer": "ok", "excluded_titles": {"B", "A"}}
+    research_state = {"claims": [object()], "verification": VerificationReport(status="pass", recommended_action="done")}
+    clarify_state: dict[str, object] = {}
+
+    report = conversation_clarification_report(contract)
+    compose_payload = compose_done_payload(state)
+    reflect_summary, reflect_payload = reflect_previous_answer_payload(state)
+    verification = ensure_research_clarification_report(clarify_state)
+    research_summary, research_payload = research_compose_observation_payload(research_state)
+
+    assert report == {
+        "status": "clarify",
+        "missing_fields": ["paper_title", "acronym"],
+        "recommended_action": "ask_human",
+    }
+    assert conversation_clarification_report(QueryContract(clean_query="x"))["missing_fields"] == ["user_choice"]
+    assert compose_payload == {"has_answer": True}
+    assert reflect_summary == "excluded_titles=2"
+    assert reflect_payload == {"excluded_titles": ["A", "B"]}
+    assert verification.status == "clarify"
+    assert clarify_state["verification"] == verification
+    assert research_summary == "pass"
+    assert research_payload["claim_count"] == 1
+    assert research_payload["verification"]["status"] == "pass"
 
 
 def test_tool_registry_helpers_build_task_request_and_observation() -> None:

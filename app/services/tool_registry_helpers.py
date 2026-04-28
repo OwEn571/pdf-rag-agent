@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from app.domain.models import EvidenceBlock, QueryContract, SessionContext
+from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.contract_context import contract_answer_slots, note_value
 from app.services.evidence_tools import (
     evidence_from_payload,
@@ -246,6 +246,51 @@ def conversation_artifact_answer_from_state(state: dict[str, Any]) -> tuple[bool
     if state.get("summaries"):
         return True, format_summaries_answer(list(state.get("summaries", []) or [])), []
     return False, "", []
+
+
+def conversation_clarification_report(contract: QueryContract) -> dict[str, Any]:
+    missing_fields = [
+        str(note).split("=", 1)[1]
+        for note in contract.notes
+        if str(note).startswith("ambiguous_slot=") and "=" in str(note)
+    ] or ["user_choice"]
+    return {
+        "status": "clarify",
+        "missing_fields": missing_fields,
+        "recommended_action": "ask_human",
+    }
+
+
+def compose_done_payload(state: dict[str, Any]) -> dict[str, bool]:
+    return {"has_answer": bool(state.get("answer"))}
+
+
+def reflect_previous_answer_payload(state: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    excluded_titles = sorted(state["excluded_titles"])
+    return f"excluded_titles={len(excluded_titles)}", {"excluded_titles": excluded_titles}
+
+
+def ensure_research_clarification_report(state: dict[str, Any]) -> VerificationReport:
+    verification = state.get("verification")
+    if not isinstance(verification, VerificationReport) or verification.status != "clarify":
+        verification = VerificationReport(
+            status="clarify",
+            missing_fields=["user_choice"],
+            recommended_action="ask_human",
+        )
+        state["verification"] = verification
+    return verification
+
+
+def research_compose_observation_payload(state: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    verification = state.get("verification")
+    return (
+        str(getattr(verification, "status", "pending")),
+        {
+            "claim_count": len(state.get("claims", []) or []),
+            "verification": verification.model_dump() if isinstance(verification, VerificationReport) else None,
+        },
+    )
 
 
 def focus_values(raw: Any, fallback: list[str]) -> list[str]:
