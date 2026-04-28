@@ -71,7 +71,21 @@ from app.services.followup_relationship_intents import (
     has_followup_support_relation_signal,
     target_relation_cue_near_text,
 )
-from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score, has_explicit_figure_reference
+from app.services.evidence_presentation import (
+    build_figure_contexts,
+    chunk_text,
+    citations_from_doc_ids,
+    claim_evidence_ids,
+    evidence_ids_for_paper,
+    extract_topology_terms,
+    figure_fallback_summary,
+    formula_terms,
+    join_unique_text,
+    paper_recommendation_reason,
+    safe_year,
+    top_evidence_ids,
+)
+from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
     citation_ranking_has_library_context,
@@ -5651,200 +5665,45 @@ class ResearchAssistantAgentV4(
 
     def _paper_recommendation_reason(self, paper: CandidatePaper) -> str:
         summary = self._paper_summary_text(paper.paper_id)
-        compact = " ".join(summary.split())
-        if not compact:
-            return "与当前主题直接相关。"
-        if len(compact) > 120:
-            compact = compact[:117].rstrip() + "..."
-        return compact
+        return paper_recommendation_reason(summary)
 
     @staticmethod
     def _extract_topology_terms(evidence: list[EvidenceBlock]) -> list[str]:
-        joined = "\n".join(item.snippet.lower() for item in evidence[:8])
-        ordered_terms = [
-            ("dag", ["dag"]),
-            ("irregular/random", ["irregular", "random"]),
-            ("chain", ["chain"]),
-            ("tree", ["tree"]),
-            ("mesh", ["mesh"]),
-            ("star", ["star"]),
-        ]
-        found: list[str] = []
-        for label, tokens in ordered_terms:
-            if any(token in joined for token in tokens):
-                found.append(label)
-        if not found:
-            found = ["dag", "chain", "tree", "mesh", "irregular/random"]
-        return found
+        return extract_topology_terms(evidence)
 
     @staticmethod
     def _formula_terms(text: str) -> list[str]:
-        joined = text.lower()
-        mapping = {
-            "pi_theta": ["pi_theta", "πθ", "\\pi_\\theta", "\\pi_{\\theta}", "policy"],
-            "pi_phi": ["pi_phi", "πϕ", "πφ", "\\pi_\\phi", "\\pi_{\\phi}", "\\pi_\\varphi"],
-            "pi_ref": ["pi_ref", "πref", "\\pi_{\\mathrm{ref}}", "\\pi_ref", "reference"],
-            "p_tilde": ["p̃", "\\tilde{p}", "preference direction vector"],
-            "beta": ["β", "beta"],
-            "preferred": ["preferred", "y_w", "yw"],
-            "rejected": ["rejected", "y_l", "yl"],
-            "log_sigma": ["log σ", "log sigma", "\\log \\sigma", "sigmoid"],
-            "ratio": ["r_t", "ratio", "probability ratio"],
-            "advantage": ["advantage", "\\hat{a}", "â", "a_t"],
-            "epsilon": ["epsilon", "\\epsilon", "ϵ"],
-            "clip": ["clip", "clipped"],
-        }
-        found: list[str] = []
-        for label, tokens in mapping.items():
-            if any(token in joined for token in tokens):
-                found.append(label)
-        return found
+        return formula_terms(text)
 
     @staticmethod
     def _top_evidence_ids(evidence: list[EvidenceBlock], *, limit: int) -> list[str]:
-        return [item.doc_id for item in evidence[:limit]]
+        return top_evidence_ids(evidence, limit=limit)
 
     @staticmethod
     def _evidence_ids_for_paper(evidence: list[EvidenceBlock], paper_id: str, *, limit: int) -> list[str]:
-        return [item.doc_id for item in evidence if item.paper_id == paper_id][:limit]
+        return evidence_ids_for_paper(evidence, paper_id, limit=limit)
 
     @staticmethod
     def _claim_evidence_ids(claims: list[Claim]) -> list[str]:
-        doc_ids: list[str] = []
-        for claim in claims:
-            for doc_id in claim.evidence_ids:
-                if doc_id not in doc_ids:
-                    doc_ids.append(doc_id)
-        return doc_ids
+        return claim_evidence_ids(claims)
 
     def _citations_from_doc_ids(self, doc_ids: list[str], evidence: list[EvidenceBlock]) -> list[AssistantCitation]:
-        by_id = {item.doc_id: item for item in evidence}
-        citations: list[AssistantCitation] = []
-        seen: set[str] = set()
-        for doc_id in doc_ids:
-            if doc_id in seen:
-                continue
-            seen.add(doc_id)
-            item = by_id.get(doc_id)
-            if item is not None:
-                tags_raw = str(item.metadata.get("tags", ""))
-                citations.append(
-                    AssistantCitation(
-                        doc_id=item.doc_id,
-                        paper_id=item.paper_id,
-                        title=item.title,
-                        authors=str(item.metadata.get("authors", "")),
-                        year=str(item.metadata.get("year", "")),
-                        tags=[tag for tag in tags_raw.split("||") if tag],
-                        file_path=item.file_path,
-                        page=item.page,
-                        block_type=item.block_type,
-                        caption=item.caption,
-                        snippet=item.snippet[:220],
-                    )
-                )
-                continue
-            lookup_id = doc_id.split("paper::", maxsplit=1)[1] if doc_id.startswith("paper::") else doc_id
-            doc = self.retriever.block_doc_by_id(doc_id) or self.retriever.paper_doc_by_id(lookup_id)
-            if doc is None:
-                continue
-            meta = dict(doc.metadata or {})
-            tags_raw = str(meta.get("tags", ""))
-            snippet = " ".join(str(doc.page_content or "").split())[:220]
-            citations.append(
-                AssistantCitation(
-                    doc_id=str(meta.get("doc_id", doc_id)),
-                    paper_id=str(meta.get("paper_id", lookup_id)),
-                    title=str(meta.get("title", "")),
-                    authors=str(meta.get("authors", "")),
-                    year=str(meta.get("year", "")),
-                    tags=[tag for tag in tags_raw.split("||") if tag],
-                    file_path=str(meta.get("file_path", "")),
-                    page=int(meta.get("page", 0) or 0),
-                    block_type=str(meta.get("block_type", "paper_card")),
-                    caption=str(meta.get("caption", "")),
-                    snippet=snippet,
-                )
-            )
-        return citations
+        return citations_from_doc_ids(
+            doc_ids,
+            evidence,
+            block_doc_lookup=self.retriever.block_doc_by_id,
+            paper_doc_lookup=self.retriever.paper_doc_by_id,
+        )
 
     def _prefer_identity_matching_papers(self, *, candidates: list[CandidatePaper], targets: list[str]) -> list[CandidatePaper]:
         matched = [item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)]
         return matched or candidates
 
     def _build_figure_contexts(self, evidence: list[EvidenceBlock], limit: int = 2) -> list[dict[str, Any]]:
-        groups: dict[tuple[str, int], dict[str, Any]] = {}
-        for item in evidence:
-            if item.block_type not in {"figure", "caption", "page_text"}:
-                continue
-            key = (item.file_path, item.page)
-            group = groups.setdefault(
-                key,
-                {
-                    "paper_id": item.paper_id,
-                    "file_path": item.file_path,
-                    "page": item.page,
-                    "title": item.title,
-                    "doc_ids": [],
-                    "caption_parts": [],
-                    "figure_parts": [],
-                    "page_parts": [],
-                    "score": 0.0,
-                    "page_text_score": 0.0,
-                },
-            )
-            if item.doc_id not in group["doc_ids"]:
-                group["doc_ids"].append(item.doc_id)
-            if item.block_type == "caption" and item.snippet:
-                group["caption_parts"].append(item.snippet)
-                group["score"] += 2.0 + (self._figure_signal_score(item.snippet) * 1.5)
-            elif item.block_type == "figure" and item.snippet:
-                group["figure_parts"].append(item.snippet)
-                group["score"] += 3.0 + (self._figure_signal_score(item.snippet) * 1.5)
-            elif item.block_type == "page_text" and item.snippet:
-                group["page_parts"].append(item.snippet)
-                page_score = 0.8 + (self._figure_signal_score(item.snippet) * 1.8)
-                if has_explicit_figure_reference(item.snippet):
-                    page_score += 6.0
-                if page_score > float(group.get("page_text_score", 0.0)):
-                    group["score"] += page_score - float(group.get("page_text_score", 0.0))
-                    group["page_text_score"] = page_score
-        ranked = sorted(groups.values(), key=lambda item: (-item["score"], item["page"]))
-        contexts: list[dict[str, Any]] = []
-        for item in ranked[:limit]:
-            contexts.append(
-                {
-                    "paper_id": item["paper_id"],
-                    "file_path": item["file_path"],
-                    "page": item["page"],
-                    "title": item["title"],
-                    "doc_ids": item["doc_ids"][:6],
-                    "caption": self._join_unique_text(item["caption_parts"], limit=500),
-                    "figure_text": self._join_unique_text(item["figure_parts"], limit=500),
-                    "page_text": self._join_unique_text(item["page_parts"], limit=700),
-                }
-            )
-        return contexts
+        return build_figure_contexts(evidence, limit=limit)
 
     def _figure_fallback_summary(self, contexts: list[dict[str, Any]]) -> str:
-        item = contexts[0]
-        caption = str(item.get("caption", "")).strip()
-        page_text = str(item.get("page_text", "")).strip()
-        parts = [part for part in [caption, page_text] if part]
-        if not parts:
-            return "当前没有足够的图像证据。"
-        combined = " ".join(parts)
-        if "figure 1" not in combined.lower() and "图1" not in combined:
-            combined = f"Figure 1 / 图1 相关内容：{combined}"
-        benchmarks = extract_figure_benchmarks(combined)
-        benchmark_suffix = ""
-        if len(benchmarks) >= 3:
-            benchmark_suffix = " 图中提到的 benchmark 包括：" + "、".join(benchmarks) + "。"
-        if benchmark_suffix:
-            remaining = max(80, 700 - len(benchmark_suffix))
-            combined = combined[:remaining].rstrip() + benchmark_suffix
-            return combined[:700]
-        return combined[:700]
+        return figure_fallback_summary(contexts)
 
     @staticmethod
     def _figure_signal_score(text: str) -> int:
@@ -5904,22 +5763,7 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _join_unique_text(items: list[str], *, limit: int) -> str:
-        parts: list[str] = []
-        seen: set[str] = set()
-        total = 0
-        for item in items:
-            text = str(item or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            remaining = max(0, limit - total)
-            if remaining <= 0:
-                break
-            if len(text) > remaining:
-                text = text[: max(0, remaining - 3)] + "..."
-            parts.append(text)
-            total += len(text) + 1
-        return "\n".join(parts).strip()
+        return join_unique_text(items, limit=limit)
 
     def _clarification_question(self, contract: QueryContract, session: SessionContext) -> str:
         ambiguity_options = self._ambiguity_options_from_notes(contract.notes)
@@ -6014,13 +5858,8 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _safe_year(value: str) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return 9999
+        return safe_year(value)
 
     @staticmethod
     def _chunk_text(text: str, *, size: int) -> list[str]:
-        if not text:
-            return []
-        return [text[index : index + size] for index in range(0, len(text), size)]
+        return chunk_text(text, size=size)
