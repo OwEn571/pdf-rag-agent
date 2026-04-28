@@ -16,10 +16,13 @@ from app.services.tool_registry_helpers import (
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
+    grep_corpus_tool_request,
     normalize_todo_items,
     planned_tool_input_from_state,
     propose_tool_payload,
+    query_rewrite_tool_request,
     read_memory_tool_payload,
+    read_pdf_page_tool_request,
     remember_tool_payload,
     research_intent_summary,
     store_session_todos,
@@ -188,6 +191,40 @@ def test_tool_registry_helpers_small_coercions() -> None:
     assert coerce_int("5", default=1, minimum=1, maximum=10) == 5
     assert coerce_int("bad", default=7, minimum=1, maximum=10) == 7
     assert coerce_int(99, default=1, minimum=1, maximum=10) == 10
+
+
+def test_tool_registry_helpers_build_research_retrieval_requests() -> None:
+    contract = QueryContract(clean_query="DPO loss", targets=["DPO"])
+    screened = [SimpleNamespace(paper_id="paper-1")]
+    state = {"screened_papers": screened, "rewritten_queries": ["rewritten DPO"]}
+
+    read_request = read_pdf_page_tool_request(
+        planned_input={"page_from": "2", "page_to": "4", "max_chars": "800"},
+        state=state,
+    )
+    grep_request, grep_payload = grep_corpus_tool_request(
+        planned_input={"scope": "blocks", "paper_ids": [" paper-1 ", "", "paper-2"], "max_hits": 5},
+        state=state,
+    )
+    rewrite_request = query_rewrite_tool_request(
+        planned_input={"targets": [" DPO ", ""], "max_queries": 99, "mode": "step_back"},
+        contract=contract,
+    )
+
+    assert read_request == {"paper_id": "paper-1", "page_from": 2, "page_to": 4, "max_chars": 800}
+    assert grep_request == {
+        "pattern": "rewritten DPO",
+        "scope": "blocks",
+        "paper_ids": ["paper-1", "paper-2"],
+        "max_hits": 5,
+    }
+    assert grep_payload == {
+        "regex": "rewritten DPO",
+        "scope": "blocks",
+        "paper_ids": ["paper-1", "paper-2"],
+        "max_hits": 5,
+    }
+    assert rewrite_request == {"query": "DPO loss", "targets": ["DPO"], "mode": "step_back", "max_queries": 8}
 
 
 def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_path: Path) -> None:

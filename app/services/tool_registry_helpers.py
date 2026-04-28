@@ -192,6 +192,48 @@ def focus_values(raw: Any, fallback: list[str]) -> list[str]:
     return [str(item).strip() for item in list(values or []) if str(item).strip()]
 
 
+def string_list_values(raw: Any) -> list[str]:
+    values = raw if isinstance(raw, list) else []
+    return [str(item).strip() for item in list(values or []) if str(item).strip()]
+
+
+def read_pdf_page_tool_request(*, planned_input: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    paper_id = str(planned_input.get("paper_id", "") or "").strip()
+    if not paper_id:
+        screened = list(state.get("screened_papers", []) or [])
+        paper_id = str(getattr(screened[0], "paper_id", "") or "") if screened else ""
+    page_from = coerce_int(planned_input.get("page_from", 1), default=1, minimum=1, maximum=10000)
+    page_to = coerce_int(planned_input.get("page_to", page_from), default=page_from, minimum=page_from, maximum=10000)
+    max_chars = coerce_int(planned_input.get("max_chars", 4000), default=4000, minimum=200, maximum=20000)
+    return {"paper_id": paper_id, "page_from": page_from, "page_to": page_to, "max_chars": max_chars}
+
+
+def grep_corpus_tool_request(*, planned_input: dict[str, Any], state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    rewritten_queries = list(state.get("rewritten_queries", []) or [])
+    pattern = str(
+        planned_input.get("regex", "")
+        or planned_input.get("pattern", "")
+        or (rewritten_queries[0] if rewritten_queries else "")
+    ).strip()
+    scope = str(planned_input.get("scope", "") or "auto").strip()
+    paper_ids = string_list_values(planned_input.get("paper_ids", []))
+    max_hits = planned_input.get("max_hits", 20)
+    request = {"pattern": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits}
+    return request, {"regex": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits}
+
+
+def query_rewrite_tool_request(*, planned_input: dict[str, Any], contract: QueryContract) -> dict[str, Any]:
+    query = str(planned_input.get("query", "") or contract.clean_query).strip()
+    targets = string_list_values(planned_input.get("targets", contract.targets))
+    max_queries = coerce_int(planned_input.get("max_queries", 3), default=3, minimum=1, maximum=8)
+    return {
+        "query": query,
+        "targets": targets,
+        "mode": str(planned_input.get("mode", "") or "multi_query"),
+        "max_queries": max_queries,
+    }
+
+
 def evidence_blocks_from_state(state: dict[str, Any]) -> list[EvidenceBlock]:
     evidence: list[EvidenceBlock] = []
     for key in ("evidence", "web_evidence"):

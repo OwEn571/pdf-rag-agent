@@ -18,9 +18,12 @@ from app.services.tool_registry_helpers import (
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
+    grep_corpus_tool_request,
     planned_tool_input_from_state,
     propose_tool_payload,
+    query_rewrite_tool_request,
     read_memory_tool_payload,
+    read_pdf_page_tool_request,
     remember_tool_payload,
     research_intent_summary,
     summarize_tool_payload,
@@ -737,66 +740,20 @@ def build_research_tool_registry(
 
     def read_pdf_page() -> None:
         planned_input = planned_tool_input_from_state(state, "read_pdf_page")
-        paper_id = str(planned_input.get("paper_id", "") or "").strip()
-        if not paper_id:
-            screened = list(state.get("screened_papers", []) or [])
-            paper_id = str(getattr(screened[0], "paper_id", "") or "") if screened else ""
-        page_from = coerce_int(planned_input.get("page_from", 1), default=1, minimum=1, maximum=10000)
-        page_to = coerce_int(planned_input.get("page_to", page_from), default=page_from, minimum=page_from, maximum=10000)
-        max_chars = coerce_int(planned_input.get("max_chars", 4000), default=4000, minimum=200, maximum=20000)
-        evidence = agent.retriever.read_pdf_pages(
-            paper_id=paper_id,
-            page_from=page_from,
-            page_to=page_to,
-            max_chars=max_chars,
-        )
-        add_evidence_result(
-            "read_pdf_page",
-            evidence,
-            {"paper_id": paper_id, "page_from": page_from, "page_to": page_to, "max_chars": max_chars},
-        )
+        request = read_pdf_page_tool_request(planned_input=planned_input, state=state)
+        evidence = agent.retriever.read_pdf_pages(**request)
+        add_evidence_result("read_pdf_page", evidence, request)
 
     def grep_corpus() -> None:
         planned_input = planned_tool_input_from_state(state, "grep_corpus")
-        rewritten_queries = list(state.get("rewritten_queries", []) or [])
-        pattern = str(planned_input.get("regex", "") or planned_input.get("pattern", "") or (rewritten_queries[0] if rewritten_queries else "")).strip()
-        scope = str(planned_input.get("scope", "") or "auto").strip()
-        raw_paper_ids = planned_input.get("paper_ids", [])
-        paper_ids = [
-            str(item).strip()
-            for item in (raw_paper_ids if isinstance(raw_paper_ids, list) else [])
-            if str(item).strip()
-        ]
-        max_hits = planned_input.get("max_hits", 20)
-        evidence = agent.retriever.grep_corpus(
-            pattern=pattern,
-            scope=scope,
-            paper_ids=paper_ids,
-            max_hits=max_hits,
-        )
-        add_evidence_result(
-            "grep_corpus",
-            evidence,
-            {"regex": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits},
-        )
+        request, payload = grep_corpus_tool_request(planned_input=planned_input, state=state)
+        evidence = agent.retriever.grep_corpus(**request)
+        add_evidence_result("grep_corpus", evidence, payload)
 
     def query_rewrite() -> None:
         planned_input = planned_tool_input_from_state(state, "query_rewrite")
         contract: QueryContract = state["contract"]
-        query = str(planned_input.get("query", "") or contract.clean_query).strip()
-        raw_targets = planned_input.get("targets", contract.targets)
-        targets = [
-            str(item).strip()
-            for item in (raw_targets if isinstance(raw_targets, list) else [])
-            if str(item).strip()
-        ]
-        max_queries = coerce_int(planned_input.get("max_queries", 3), default=3, minimum=1, maximum=8)
-        result = rewrite_query(
-            query=query,
-            targets=targets,
-            mode=str(planned_input.get("mode", "") or "multi_query"),
-            max_queries=max_queries,
-        )
+        result = rewrite_query(**query_rewrite_tool_request(planned_input=planned_input, contract=contract))
         payload = result.payload()
         state.setdefault("query_rewrites", []).append(payload)
         state["rewritten_queries"] = list(payload.get("queries", []) or [])
