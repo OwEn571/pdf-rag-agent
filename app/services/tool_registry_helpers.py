@@ -13,6 +13,7 @@ from app.services.evidence_tools import (
     verify_claim_against_evidence,
 )
 from app.services.learnings import remember_learning
+from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.url_fetcher import FetchUrlResult
 
 
@@ -187,6 +188,30 @@ def remember_tool_payload(
     state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
     payload = {"key": key, "path": str(path), "content_chars": len(content)}
     return payload, f"key={key}"
+
+
+def propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str, Any]:
+    settings = getattr(agent, "settings", None)
+    data_dir = Path(getattr(settings, "data_dir", "data"))
+    try:
+        proposal = record_tool_proposal(
+            data_dir=data_dir,
+            name=str(planned_input.get("name", "") or ""),
+            description=str(planned_input.get("description", "") or ""),
+            input_schema=dict(planned_input.get("input_schema", {}) or {}),
+            python_code=str(planned_input.get("python_code", "") or ""),
+            rationale=str(planned_input.get("rationale", "") or ""),
+        )
+    except (TypeError, ValueError) as exc:
+        return {
+            "status": "rejected",
+            "error": str(exc),
+            "admin_approval_required": True,
+        }
+    return {
+        **proposal.payload(),
+        "admin_approval_required": True,
+    }
 
 
 def summarize_tool_payload(

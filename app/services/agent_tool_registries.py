@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Callable
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
@@ -9,7 +8,6 @@ from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import (
     evidence_from_payload,
 )
-from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     coerce_int,
@@ -19,6 +17,7 @@ from app.services.tool_registry_helpers import (
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
+    propose_tool_payload,
     remember_tool_payload,
     research_intent_summary,
     summarize_tool_payload,
@@ -29,30 +28,6 @@ from app.services.tool_registry_helpers import (
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
-
-
-def _propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str, Any]:
-    settings = getattr(agent, "settings", None)
-    data_dir = Path(getattr(settings, "data_dir", "data"))
-    try:
-        proposal = record_tool_proposal(
-            data_dir=data_dir,
-            name=str(planned_input.get("name", "") or ""),
-            description=str(planned_input.get("description", "") or ""),
-            input_schema=dict(planned_input.get("input_schema", {}) or {}),
-            python_code=str(planned_input.get("python_code", "") or ""),
-            rationale=str(planned_input.get("rationale", "") or ""),
-        )
-    except (TypeError, ValueError) as exc:
-        return {
-            "status": "rejected",
-            "error": str(exc),
-            "admin_approval_required": True,
-        }
-    return {
-        **proposal.payload(),
-        "admin_approval_required": True,
-    }
 
 
 def build_conversation_tool_registry(
@@ -208,7 +183,7 @@ def build_conversation_tool_registry(
 
     def propose_tool() -> None:
         planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
-        payload = _propose_tool_payload(agent, planned_input)
+        payload = propose_tool_payload(agent, planned_input)
         state.setdefault("tool_proposals", []).append(payload)
         emit("tool_proposal", payload)
         if payload.get("status") == "pending_review" and not state.get("answer"):
@@ -595,7 +570,7 @@ def build_research_tool_registry(
 
     def propose_tool() -> None:
         planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
-        payload = _propose_tool_payload(agent, planned_input)
+        payload = propose_tool_payload(agent, planned_input)
         state.setdefault("tool_proposals", []).append(payload)
         emit("tool_proposal", payload)
         agent._record_agent_observation(

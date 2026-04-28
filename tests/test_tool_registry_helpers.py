@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.tool_registry_helpers import (
@@ -14,6 +15,7 @@ from app.services.tool_registry_helpers import (
     format_summaries_answer,
     format_task_results_answer,
     normalize_todo_items,
+    propose_tool_payload,
     remember_tool_payload,
     research_intent_summary,
     store_session_todos,
@@ -165,6 +167,28 @@ def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_p
     assert payload["content_chars"] == len("remember this")
     assert state["learnings"] == [{"key": "DPO", "path": payload["path"], "content": "remember this"}]
     assert "remember this" in Path(str(payload["path"])).read_text(encoding="utf-8")
+
+
+def test_tool_registry_helpers_build_propose_tool_payload(tmp_path: Path) -> None:
+    agent = SimpleNamespace(settings=SimpleNamespace(data_dir=tmp_path))
+
+    payload = propose_tool_payload(
+        agent,
+        {
+            "name": "extract_metric",
+            "description": "Extract a metric.",
+            "input_schema": {"type": "object", "properties": {"metric": {"type": "string"}}},
+            "python_code": "async def run(args, ctx, session):\n    return {'ok': True}",
+            "rationale": "Reusable metric extraction.",
+        },
+    )
+    rejected = propose_tool_payload(agent, {"name": "../bad"})
+
+    assert payload["status"] == "pending_review"
+    assert payload["admin_approval_required"] is True
+    assert Path(str(payload["path"])).exists()
+    assert rejected["status"] == "rejected"
+    assert "tool name" in rejected["error"]
 
 
 def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() -> None:
