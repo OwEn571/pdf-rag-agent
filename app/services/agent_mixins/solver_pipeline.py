@@ -723,47 +723,12 @@ class SolverPipelineMixin:
         )
 
     @staticmethod
-    def _formula_payload_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        return formula_helpers.formula_payload_candidates(payload)
-
-    @classmethod
-    def _normalize_formula_variables(cls, value: object) -> list[dict[str, str]]:
-        return formula_helpers.normalize_formula_variables(value)
-
-    @staticmethod
     def _normalize_formula_variable_symbol(symbol: str) -> str:
         return formula_helpers.normalize_formula_variable_symbol(symbol)
-
-    def _formula_terms_from_variables(self, variables: list[dict[str, str]]) -> list[str]:
-        return formula_helpers.formula_terms_from_variables(variables, term_extractor=self._formula_terms)
-
-    @staticmethod
-    def _normalize_formula_text(text: str) -> str:
-        return formula_helpers.normalize_formula_text(text)
 
     @classmethod
     def _normalize_extracted_formula_text(cls, text: str) -> str:
         return formula_helpers.normalize_extracted_formula_text(text)
-
-    @staticmethod
-    def _latex_symbol_token(value: str) -> str:
-        return formula_helpers.latex_symbol_token(value)
-
-    @classmethod
-    def _normalize_latex_like_math(cls, text: str) -> str:
-        return formula_helpers.normalize_latex_like_math(text)
-
-    @staticmethod
-    def _normalize_formula_label(text: str) -> str:
-        return formula_helpers.normalize_formula_label(text)
-
-    @staticmethod
-    def _best_formula_window(text: str) -> str:
-        return formula_helpers.best_formula_window(text)
-
-    @staticmethod
-    def _looks_like_latex_formula(text: str) -> bool:
-        return formula_helpers.looks_like_latex_formula(text)
 
     def _solve_table(self, *, contract: QueryContract, papers: list[CandidatePaper], evidence: list[EvidenceBlock]) -> list[Claim]:
         table_blocks = [
