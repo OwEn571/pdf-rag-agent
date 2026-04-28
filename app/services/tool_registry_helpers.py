@@ -230,6 +230,24 @@ def format_summaries_answer(summaries: list[dict[str, Any]]) -> str:
     )
 
 
+def conversation_artifact_answer_from_state(state: dict[str, Any]) -> tuple[bool, str, list[Any]]:
+    if state.get("task_results"):
+        task_results = list(state.get("task_results", []) or [])
+        answer = format_task_results_answer(task_results)
+        citations = [
+            citation
+            for result in task_results
+            if isinstance(result, dict)
+            for citation in list(result.get("citations", []) or [])
+        ]
+        return True, answer, citations
+    if state.get("fetched_urls"):
+        return True, format_fetched_urls_answer(list(state.get("fetched_urls", []) or [])), []
+    if state.get("summaries"):
+        return True, format_summaries_answer(list(state.get("summaries", []) or [])), []
+    return False, "", []
+
+
 def focus_values(raw: Any, fallback: list[str]) -> list[str]:
     values = raw if isinstance(raw, list) else fallback
     return [str(item).strip() for item in list(values or []) if str(item).strip()]

@@ -8,6 +8,7 @@ from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
     coerce_int,
+    conversation_artifact_answer_from_state,
     conversation_intent_summary,
     evidence_blocks_from_state,
     evidence_event_payload,
@@ -176,6 +177,23 @@ def test_tool_registry_helpers_format_compose_sources() -> None:
     assert "### A" in fetched_answer
     assert "读取失败" in fetched_answer
     assert summaries_answer == "one\n\ntwo"
+
+
+def test_tool_registry_helpers_build_conversation_artifact_answer() -> None:
+    matched, answer, citations = conversation_artifact_answer_from_state(
+        {"task_results": [{"prompt": "A", "answer": "answer A", "citations": [{"doc_id": "ev-1"}]}]}
+    )
+    fetched_matched, fetched_answer, fetched_citations = conversation_artifact_answer_from_state(
+        {"fetched_urls": [{"ok": True, "url": "https://example.com", "title": "Example", "text": "body"}]}
+    )
+
+    assert matched is True
+    assert "answer A" in answer
+    assert citations == [{"doc_id": "ev-1"}]
+    assert fetched_matched is True
+    assert "Example" in fetched_answer
+    assert fetched_citations == []
+    assert conversation_artifact_answer_from_state({}) == (False, "", [])
 
 
 def test_tool_registry_helpers_build_task_request_and_observation() -> None:

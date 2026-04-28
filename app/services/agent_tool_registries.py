@@ -9,15 +9,13 @@ from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
+    conversation_artifact_answer_from_state,
     conversation_intent_summary,
     evidence_event_payload,
     evidence_result_observation_payload,
     fetch_url_evidence,
     fetch_url_tool_payload,
     fetch_url_tool_request,
-    format_fetched_urls_answer,
-    format_summaries_answer,
-    format_task_results_answer,
     grep_corpus_tool_request,
     library_metadata_observation_payload,
     library_metadata_tool_request,
@@ -388,23 +386,11 @@ def build_conversation_tool_registry(
         )
 
     def compose() -> None:
-        if state.get("task_results") and not state.get("answer"):
-            answer = format_task_results_answer(list(state.get("task_results", []) or []))
+        artifact_answer_matched, answer, citations = conversation_artifact_answer_from_state(state)
+        if artifact_answer_matched and not state.get("answer"):
             if answer:
-                citations = [
-                    citation
-                    for result in list(state.get("task_results", []) or [])
-                    for citation in list(result.get("citations", []) or [])
-                ]
-                state["citations"] = citations
-                agent._set_conversation_answer(state=state, answer=answer, emit=emit)
-        elif state.get("fetched_urls") and not state.get("answer"):
-            answer = format_fetched_urls_answer(list(state.get("fetched_urls", []) or []))
-            if answer:
-                agent._set_conversation_answer(state=state, answer=answer, emit=emit)
-        elif state.get("summaries") and not state.get("answer"):
-            answer = format_summaries_answer(list(state.get("summaries", []) or []))
-            if answer:
+                if citations:
+                    state["citations"] = citations
                 agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         elif contract.relation == "library_status":
             if not state.get("library_metadata_attempted"):
