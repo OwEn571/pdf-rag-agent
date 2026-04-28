@@ -265,6 +265,34 @@ def compose_done_payload(state: dict[str, Any]) -> dict[str, bool]:
     return {"has_answer": bool(state.get("answer"))}
 
 
+def store_citation_candidates_payload(*, state: dict[str, Any], candidates: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+    state["citation_candidates"] = candidates
+    return f"candidates={len(candidates)}", {"titles": [item["title"] for item in candidates[:6]]}
+
+
+def store_citation_lookup_payload(*, state: dict[str, Any], lookup: dict[str, Any]) -> tuple[str, dict[str, int]]:
+    state["citation_lookup"] = lookup
+    return (
+        f"web_enabled={lookup.get('web_enabled')}, evidence={len(lookup.get('evidence', []) or [])}",
+        {"result_count": len(lookup.get("results", []) or [])},
+    )
+
+
+def citation_ranking_result_payload(lookup: dict[str, Any]) -> tuple[list[EvidenceBlock], list[str], dict[str, str], str]:
+    evidence = [item for item in list(lookup.get("evidence", []) or []) if isinstance(item, EvidenceBlock)]
+    citation_doc_ids = [
+        str(item.get("doc_id", ""))
+        for item in list(lookup.get("results", []) or [])
+        if item.get("citation_count") is not None and item.get("doc_id")
+    ]
+    counted = [item for item in list(lookup.get("results", []) or []) if item.get("citation_count") is not None]
+    report = {
+        "status": "pass" if counted else "retry",
+        "recommended_action": "ranked_by_external_citation_count" if counted else "citation_count_not_found_in_web_snippets",
+    }
+    return evidence, citation_doc_ids, report, f"counted={len(counted)}"
+
+
 def reflect_previous_answer_payload(state: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     excluded_titles = sorted(state["excluded_titles"])
     return f"excluded_titles={len(excluded_titles)}", {"excluded_titles": excluded_titles}

@@ -7,6 +7,7 @@ from app.domain.models import ActiveResearch, EvidenceBlock, QueryContract, Sess
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
+    citation_ranking_result_payload,
     coerce_int,
     conversation_artifact_answer_from_state,
     conversation_clarification_report,
@@ -43,6 +44,8 @@ from app.services.tool_registry_helpers import (
     search_corpus_observation_payload,
     search_corpus_strategy,
     store_claim_check_payload,
+    store_citation_candidates_payload,
+    store_citation_lookup_payload,
     store_fetch_url_evidence_result,
     store_research_evidence_result,
     store_session_todos,
@@ -230,6 +233,41 @@ def test_tool_registry_helpers_build_clarification_and_compose_payloads() -> Non
     assert research_summary == "pass"
     assert research_payload["claim_count"] == 1
     assert research_payload["verification"]["status"] == "pass"
+
+
+def test_tool_registry_helpers_build_citation_ranking_payloads() -> None:
+    evidence = EvidenceBlock(
+        doc_id="ev-1",
+        paper_id="p1",
+        title="Paper",
+        file_path="",
+        page=1,
+        block_type="web",
+        snippet="Paper has 10 citations",
+    )
+    state: dict[str, object] = {}
+    candidates = [{"title": "A"}, {"title": "B"}]
+    lookup = {
+        "web_enabled": True,
+        "evidence": [evidence],
+        "results": [{"doc_id": "ev-1", "citation_count": 10}, {"doc_id": "ev-2", "citation_count": None}],
+    }
+
+    candidate_summary, candidate_payload = store_citation_candidates_payload(state=state, candidates=candidates)
+    lookup_summary, lookup_payload = store_citation_lookup_payload(state=state, lookup=lookup)
+    result_evidence, citation_doc_ids, report, ranking_summary = citation_ranking_result_payload(lookup)
+
+    assert state["citation_candidates"] == candidates
+    assert candidate_summary == "candidates=2"
+    assert candidate_payload == {"titles": ["A", "B"]}
+    assert state["citation_lookup"] == lookup
+    assert lookup_summary == "web_enabled=True, evidence=1"
+    assert lookup_payload == {"result_count": 2}
+    assert result_evidence == [evidence]
+    assert citation_doc_ids == ["ev-1"]
+    assert report == {"status": "pass", "recommended_action": "ranked_by_external_citation_count"}
+    assert ranking_summary == "counted=1"
+    assert citation_ranking_result_payload({"results": []})[2]["recommended_action"] == "citation_count_not_found_in_web_snippets"
 
 
 def test_tool_registry_helpers_build_task_request_and_observation() -> None:

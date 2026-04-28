@@ -9,6 +9,7 @@ from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
     atomic_search_tool_request,
+    citation_ranking_result_payload,
     conversation_artifact_answer_from_state,
     conversation_clarification_report,
     conversation_intent_summary,
@@ -37,6 +38,8 @@ from app.services.tool_registry_helpers import (
     search_corpus_observation_payload,
     search_corpus_strategy,
     store_claim_check_payload,
+    store_citation_candidates_payload,
+    store_citation_lookup_payload,
     store_fetch_url_evidence_result,
     store_research_evidence_result,
     summarize_tool_payload,
@@ -294,14 +297,14 @@ def build_conversation_tool_registry(
 
     def recover_previous_recommendation_candidates() -> None:
         candidates = agent._select_citation_ranking_candidates(session=session, query=query, limit=6)
-        state["citation_candidates"] = candidates
+        summary, payload = store_citation_candidates_payload(state=state, candidates=candidates)
         agent._emit_agent_tool_call(emit=emit, tool="recover_previous_recommendation_candidates", arguments={"query": query, "limit": 6})
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="recover_previous_recommendation_candidates",
-            summary=f"candidates={len(candidates)}",
-            payload={"titles": [item["title"] for item in candidates[:6]]},
+            summary=summary,
+            payload=payload,
         )
 
     def web_citation_lookup() -> None:
@@ -312,13 +315,13 @@ def build_conversation_tool_registry(
             emit=emit,
             execution_steps=execution_steps,
         )
-        state["citation_lookup"] = lookup
+        summary, payload = store_citation_lookup_payload(state=state, lookup=lookup)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="web_citation_lookup",
-            summary=f"web_enabled={lookup.get('web_enabled')}, evidence={len(lookup.get('evidence', []) or [])}",
-            payload={"result_count": len(lookup.get("results", []) or [])},
+            summary=summary,
+            payload=payload,
         )
 
     def rank_by_verified_citation_count() -> None:
@@ -329,18 +332,9 @@ def build_conversation_tool_registry(
             citation_results=list(lookup.get("results", []) or []),
             web_enabled=bool(lookup.get("web_enabled")),
         )
-        evidence = [item for item in list(lookup.get("evidence", []) or []) if isinstance(item, EvidenceBlock)]
-        citation_doc_ids = [
-            str(item.get("doc_id", ""))
-            for item in list(lookup.get("results", []) or [])
-            if item.get("citation_count") is not None and item.get("doc_id")
-        ]
+        evidence, citation_doc_ids, report, summary = citation_ranking_result_payload(lookup)
         state["citations"] = agent._dedupe_citations(agent._citations_from_doc_ids(citation_doc_ids, evidence))
-        counted = [item for item in list(lookup.get("results", []) or []) if item.get("citation_count") is not None]
-        state["verification_report"] = {
-            "status": "pass" if counted else "retry",
-            "recommended_action": "ranked_by_external_citation_count" if counted else "citation_count_not_found_in_web_snippets",
-        }
+        state["verification_report"] = report
         agent._remember_conversation_tool_result(
             session=session,
             contract=contract,
@@ -353,7 +347,7 @@ def build_conversation_tool_registry(
             emit=emit,
             execution_steps=execution_steps,
             tool="rank_by_verified_citation_count",
-            summary=f"counted={len(counted)}",
+            summary=summary,
             payload=state["verification_report"],
         )
 
