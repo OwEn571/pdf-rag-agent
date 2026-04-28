@@ -30,7 +30,8 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
-from app.services.agent_emit import AgentEventRecorder, write_turn_trace_safe
+from app.services.agent_context import AgentRunContext
+from app.services.agent_emit import write_turn_trace_safe
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
@@ -252,9 +253,13 @@ class ResearchAssistantAgentV4(
         resolved_session_id = session_id or uuid4().hex[:12]
         session = self.sessions.get(resolved_session_id)
         self._compress_session_history_if_needed(session)
-        event_recorder = AgentEventRecorder(callback=event_callback)
-        execution_steps: list[dict[str, Any]] = []
-        emit = event_recorder.emit
+        run_context = AgentRunContext.create(
+            session_id=resolved_session_id,
+            session=session,
+            event_callback=event_callback,
+        )
+        emit = run_context.emit
+        execution_steps = run_context.execution_steps
 
         emit("session", {"session_id": resolved_session_id})
         compound_result = self._run_compound_query_if_needed(
@@ -268,11 +273,11 @@ class ResearchAssistantAgentV4(
         if compound_result is not None:
             self._write_turn_trace(
                 session_id=resolved_session_id,
-                events=event_recorder.events,
+                events=run_context.events,
                 final_payload=compound_result,
                 execution_steps=execution_steps,
             )
-            return compound_result, event_recorder.events
+            return compound_result, run_context.events
 
         contract = self._extract_query_contract(
             query=query,
@@ -376,11 +381,11 @@ class ResearchAssistantAgentV4(
             payload = response.model_dump()
             self._write_turn_trace(
                 session_id=resolved_session_id,
-                events=event_recorder.events,
+                events=run_context.events,
                 final_payload=payload,
                 execution_steps=execution_steps,
             )
-            return payload, event_recorder.events
+            return payload, run_context.events
 
         agent_state = self.runtime.run_research_agent_loop(
             contract=contract,
@@ -494,11 +499,11 @@ class ResearchAssistantAgentV4(
         payload = response.model_dump()
         self._write_turn_trace(
             session_id=resolved_session_id,
-            events=event_recorder.events,
+            events=run_context.events,
             final_payload=payload,
             execution_steps=execution_steps,
         )
-        return payload, event_recorder.events
+        return payload, run_context.events
 
     def _write_turn_trace(
         self,
