@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from app.services.formula_text_helpers import (
     best_formula_window,
+    fallback_formula_payload,
     formula_block_score,
+    formula_claim_from_payload,
     formula_query_wants_gradient,
     llm_formula_payload_from_response,
     normalize_extracted_formula_text,
     normalize_formula_variables,
 )
+from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 
 
 def test_normalize_extracted_formula_text_converts_compact_unicode_math() -> None:
@@ -77,3 +80,62 @@ def test_llm_formula_payload_from_response_filters_evidence_and_normalizes_terms
     assert payload["evidence_ids"] == ["ev-1"]
     assert payload["terms"] == ["policy"]
     assert payload["source"] == "llm_formula_extractor"
+
+
+def test_fallback_formula_payload_extracts_window_and_evidence_ids() -> None:
+    evidence = [
+        EvidenceBlock(
+            doc_id="ev-1",
+            paper_id="p1",
+            title="Formula Paper",
+            file_path="/tmp/formula.pdf",
+            page=1,
+            block_type="page_text",
+            snippet="Intro text\nL_DPO = -log σ(β log πθ)\nVariables follow.",
+        )
+    ]
+
+    payload = fallback_formula_payload(evidence, term_extractor=lambda text: ["beta"] if "beta" in text or "β" in text else [])
+
+    assert payload["evidence_ids"] == ["ev-1"]
+    assert payload["source"] == "formula_window_extractor"
+    assert payload["confidence"] == 0.74
+    assert r"L_{\mathrm{DPO}}" in payload["formula_text"]
+
+
+def test_formula_claim_from_payload_builds_structured_claim() -> None:
+    paper = CandidatePaper(paper_id="p1", title="Formula Paper", year="2025")
+    block = EvidenceBlock(
+        doc_id="ev-1",
+        paper_id="p1",
+        title="Formula Paper",
+        file_path="/tmp/formula.pdf",
+        page=1,
+        block_type="page_text",
+        snippet="formula text",
+    )
+
+    claim = formula_claim_from_payload(
+        contract=QueryContract(clean_query="DPO 公式", targets=["DPO"]),
+        paper=paper,
+        matched_targets=["DPO"],
+        formula_payload={
+            "formula_text": r"L_{\mathrm{DPO}} = -\log \sigma(\beta \Delta)",
+            "formula_format": "latex",
+            "evidence_ids": ["ev-1"],
+            "variables": [{"symbol": r"\beta", "description": "temperature"}],
+            "terms": ["log_sigma"],
+            "confidence": "high",
+        },
+        formula_blocks=[block],
+        fallback_evidence_ids=["fallback"],
+        fallback_term_text="temperature",
+        term_extractor=lambda text: ["beta"] if "temperature" in text or "beta" in text or r"\beta" in text else [],
+    )
+
+    assert claim is not None
+    assert claim.claim_type == "formula"
+    assert claim.entity == "DPO"
+    assert claim.evidence_ids == ["ev-1"]
+    assert {"log_sigma", "beta"} <= set(claim.structured_data["terms"])
+    assert claim.confidence == 0.88

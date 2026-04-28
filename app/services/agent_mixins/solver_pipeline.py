@@ -646,49 +646,19 @@ class SolverPipelineMixin:
                 formula_blocks=formula_blocks,
                 fallback_evidence=paper_evidence,
             )
-            formula_text = str(formula_payload.get("formula_text", "") or "").strip()
-            if not formula_text:
-                continue
-            payload_evidence_ids = [
-                str(item).strip()
-                for item in list(formula_payload.get("evidence_ids", []) or [])
-                if str(item).strip()
-            ]
-            evidence_ids = payload_evidence_ids or [item.doc_id for item in formula_blocks[:3]] or self._evidence_ids_for_paper(evidence, paper.paper_id, limit=3)
-            variables = [
-                item
-                for item in list(formula_payload.get("variables", []) or [])
-                if isinstance(item, dict) and str(item.get("symbol", "") or "").strip()
-            ]
-            formula_terms = list(dict.fromkeys([
-                *[str(item).strip() for item in list(formula_payload.get("terms", []) or []) if str(item).strip()],
-                *self._formula_terms_from_variables(variables),
-                *self._formula_terms(formula_text or "\n".join(item.snippet for item in paper_evidence[:3])),
-            ]))
-            formula_format = str(formula_payload.get("formula_format") or ("latex" if self._looks_like_latex_formula(formula_text) else "text"))
-            formula_latex = formula_text if formula_format == "latex" else str(formula_payload.get("formula_latex", "") or "")
-            claims.append(
-                Claim(
-                    claim_type="formula",
-                    entity=" / ".join(matched_targets or contract.targets[:1]) if (matched_targets or contract.targets) else paper.title,
-                    value=formula_text,
-                    structured_data={
-                        "formula_text": formula_text,
-                        "formula_latex": formula_latex,
-                        "variables": variables,
-                        "terms": formula_terms,
-                        "formula_format": formula_format,
-                        "paper_id": paper.paper_id,
-                        "paper_title": paper.title,
-                        "paper_year": paper.year,
-                        "evidence_ids": evidence_ids,
-                        "source": str(formula_payload.get("source") or "formula_window_extractor"),
-                    },
-                    evidence_ids=evidence_ids,
-                    paper_ids=[paper.paper_id],
-                    confidence=self._coerce_confidence(formula_payload.get("confidence", 0.82)),
-                )
+            claim = formula_helpers.formula_claim_from_payload(
+                contract=contract,
+                paper=paper,
+                matched_targets=matched_targets,
+                formula_payload=formula_payload,
+                formula_blocks=formula_blocks,
+                fallback_evidence_ids=self._evidence_ids_for_paper(evidence, paper.paper_id, limit=3),
+                fallback_term_text="\n".join(item.snippet for item in paper_evidence[:3]),
+                term_extractor=self._formula_terms,
             )
+            if claim is None:
+                continue
+            claims.append(claim)
             if len(claims) >= 6:
                 break
         return claims
@@ -704,20 +674,7 @@ class SolverPipelineMixin:
         llm_payload = self._llm_extract_formula_claim_payload(contract=contract, evidence=selected_evidence)
         if llm_payload:
             return llm_payload
-        raw = "\n".join(item.snippet[:1200] for item in selected_evidence)
-        normalized = self._normalize_formula_text(raw)
-        formula_text = self._normalize_extracted_formula_text(self._best_formula_window(normalized))
-        evidence_ids = [item.doc_id for item in selected_evidence[:3]]
-        return {
-            "formula_text": formula_text,
-            "formula_latex": formula_text if self._looks_like_latex_formula(formula_text) else "",
-            "evidence_ids": evidence_ids,
-            "terms": self._formula_terms(formula_text or raw),
-            "variables": [],
-            "formula_format": "latex" if self._looks_like_latex_formula(formula_text) else "text",
-            "source": "formula_window_extractor",
-            "confidence": 0.74 if formula_text else 0.0,
-        }
+        return formula_helpers.fallback_formula_payload(selected_evidence, term_extractor=self._formula_terms)
 
     def _llm_extract_formula_claim_payload(self, *, contract: QueryContract, evidence: list[EvidenceBlock]) -> dict[str, Any]:
         if self.clients.chat is None or not evidence:
