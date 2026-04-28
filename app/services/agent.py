@@ -56,6 +56,15 @@ from app.services.followup_intents import (
     looks_like_formula_location_correction,
     looks_like_paper_scope_correction,
 )
+from app.services.followup_relationship_intents import (
+    followup_relationship_recheck_requested,
+    followup_relevance_score,
+    has_followup_domain_signal,
+    has_followup_seed_intro_signal,
+    has_followup_soft_relation_signal,
+    has_followup_support_relation_signal,
+    target_relation_cue_near_text,
+)
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
     citation_ranking_has_library_context,
@@ -2719,20 +2728,7 @@ class ResearchAssistantAgentV4(
             return contract
         clean_query = str(contract.clean_query or "")
         normalized_query = self._normalize_lookup_text(clean_query)
-        followup_cues = [
-            "严格后续",
-            "严格意义",
-            "仔细",
-            "确认",
-            "确定",
-            "真是",
-            "是不是",
-            "是吗",
-            "后续工作",
-            "strict",
-            "really",
-        ]
-        if not any(cue in normalized_query or cue in clean_query for cue in followup_cues):
+        if not followup_relationship_recheck_requested(clean_query, normalized_query):
             return contract
         if not self._contract_allows_active_context_override(contract) and contract.relation != "followup_research":
             return contract
@@ -5668,11 +5664,9 @@ class ResearchAssistantAgentV4(
             author_overlap = len(seed_author_tokens & self._paper_author_tokens([paper]))
             if author_overlap:
                 score += min(0.8, author_overlap * 0.25)
-            relation_cues = ["extend", "extension", "transfer", "continual", "streaming", "behavioral", "follow-up", "subsequent"]
-            lowered = haystack.lower()
-            if any(token in lowered for token in relation_cues):
+            if has_followup_soft_relation_signal(haystack):
                 score += 0.35
-            score += self._followup_relevance_score(haystack)
+            score += followup_relevance_score(haystack)
             assessment = self._followup_relationship_assessment(contract=contract, seed_papers=seed_papers, paper=paper)
             if assessment["score"] < 0.3:
                 continue
@@ -5720,7 +5714,7 @@ class ResearchAssistantAgentV4(
         for alias in target_aliases:
             if alias and self._matches_target(haystack, alias):
                 target_seen = alias
-                if self._target_relation_cue_near_text(text=haystack, target=alias):
+                if target_relation_cue_near_text(text=haystack, target=alias):
                     score += 3.2
                     explicit_direct_signals.append(f"候选摘要/元数据明确提到并使用、评测或扩展 {alias}")
                 else:
@@ -5765,11 +5759,10 @@ class ResearchAssistantAgentV4(
         if author_overlap:
             score += min(1.0, len(author_overlap) * 0.35)
             support_signals.append("存在作者重合")
-        relation_cues = ["extend", "extension", "builds on", "based on", "uses", "evaluate", "benchmark", "transfer", "follow-up", "subsequent"]
-        if any(token in lowered for token in relation_cues):
+        if has_followup_support_relation_signal(lowered):
             score += 0.45
             support_signals.append("包含扩展、使用、评测或迁移类关系词")
-        if self._followup_domain_signal(lowered):
+        if has_followup_domain_signal(lowered):
             score += 0.35
             support_signals.append("主题属于 personalized preference / alignment 相邻方向")
         if explicit_direct_signals:
@@ -5822,36 +5815,6 @@ class ResearchAssistantAgentV4(
                 normalized.append(alias)
         return normalized
 
-    def _target_relation_cue_near_text(self, *, text: str, target: str) -> bool:
-        if not text or not target:
-            return False
-        lowered = str(text).lower()
-        target_lower = target.lower()
-        pattern = re.compile(rf"(?<![a-z0-9\-]){re.escape(target_lower)}(?![a-z0-9\-])")
-        cues = [
-            "extend",
-            "extends",
-            "extension",
-            "builds on",
-            "based on",
-            "uses",
-            "using",
-            "evaluate",
-            "evaluates",
-            "evaluation",
-            "benchmark",
-            "trained on",
-            "derived from",
-            "follow-up",
-            "subsequent",
-            "successor",
-        ]
-        for match in pattern.finditer(lowered):
-            window = lowered[max(0, match.start() - 90) : match.end() + 120]
-            if any(cue in window for cue in cues):
-                return True
-        return False
-
     def _filter_followup_candidates(self, *, contract: QueryContract, candidates: list[CandidatePaper]) -> list[CandidatePaper]:
         if not candidates:
             return []
@@ -5867,48 +5830,11 @@ class ResearchAssistantAgentV4(
                 and target not in summary_lower
                 and target not in str(item.metadata.get("abstract_note", "")).lower()
                 and target not in card_text
-                and not self._followup_domain_signal(title_lower + "\n" + card_text + "\n" + summary_lower)
+                and not has_followup_domain_signal(title_lower + "\n" + card_text + "\n" + summary_lower)
             ):
                 continue
             filtered.append(item)
         return filtered or candidates[: min(8, len(candidates))]
-
-    @staticmethod
-    def _followup_domain_signal(text: str) -> bool:
-        lowered = str(text or "").lower()
-        tokens = [
-            "personalization",
-            "personalized",
-            "preference",
-            "user-level",
-            "persona",
-            "alignment",
-            "benchmark",
-            "dataset",
-            "inference",
-            "transferable",
-            "conditioned generation",
-            "profile",
-        ]
-        return sum(1 for token in tokens if token in lowered) >= 2
-
-    @staticmethod
-    def _followup_relevance_score(text: str) -> float:
-        lowered = str(text or "").lower()
-        weighted_tokens = {
-            "preference inference": 1.2,
-            "personalized preference": 1.1,
-            "user-level alignment": 1.0,
-            "transferable personalization": 1.0,
-            "conditioned generation": 1.0,
-            "personalized alignment": 0.9,
-            "user preference": 0.8,
-            "personalization": 0.7,
-            "modular": 0.5,
-            "benchmark": 0.3,
-            "dataset": 0.3,
-        }
-        return sum(weight for token, weight in weighted_tokens.items() if token in lowered)
 
     @staticmethod
     def _merge_followup_rankings(
@@ -5943,8 +5869,7 @@ class ResearchAssistantAgentV4(
         for target in contract.targets:
             if target and self._matches_target(haystack, target.lower()):
                 score += 1.1
-        intro_cues = ["introduce", "introduces", "we introduce", "propose", "present", "dataset", "benchmark", "定义", "提出", "数据集"]
-        if any(token in haystack for token in intro_cues):
+        if has_followup_seed_intro_signal(haystack):
             score += 1.2
         year = self._safe_year(paper.year)
         if year < 9999:
@@ -5964,7 +5889,7 @@ class ResearchAssistantAgentV4(
     def _followup_expansion_terms(self, paper: CandidatePaper) -> str:
         text = f"{paper.title}\n{self._paper_summary_text(paper.paper_id)}\n{paper.metadata.get('paper_card_text', '')}".lower()
         terms = self._extract_followup_keyphrases(text)
-        if self._followup_domain_signal(text):
+        if has_followup_domain_signal(text):
             terms.extend(["follow-up", "extension", "downstream", "benchmark", "transfer", "personalization", "preference"])
         return " ".join(dict.fromkeys(item for item in terms if item))[:600]
 
