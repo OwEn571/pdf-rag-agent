@@ -40,8 +40,12 @@ from app.services.tool_registry_helpers import (
     store_claim_check_payload,
     store_citation_candidates_payload,
     store_citation_lookup_payload,
+    store_conversation_answer_result,
+    store_fetched_url_payload,
     store_fetch_url_evidence_result,
     store_research_evidence_result,
+    store_summary_payload,
+    store_tool_proposal_payload,
     summarize_tool_payload,
     task_result_observation_payload,
     task_tool_request,
@@ -79,27 +83,31 @@ def build_conversation_tool_registry(
     def answer_conversation() -> None:
         agent._emit_agent_tool_call(emit=emit, tool="answer_conversation", arguments={"intent": intent_summary()})
         answer = agent._compose_conversation_response(contract=contract, query=query, session=session)
-        agent._remember_conversation_tool_result(session=session, contract=contract, tool="answer_conversation", query=query, answer=answer)
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        payload = store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="answer_conversation", query=query, answer=answer,
+        )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="answer_conversation",
             summary="conversation_answer_ready",
-            payload={"chars": len(answer)},
+            payload=payload,
         )
 
     def get_library_status() -> None:
         agent._emit_agent_tool_call(emit=emit, tool="get_library_status", arguments={"query": query})
         answer = agent._compose_library_status_response(query=query)
-        agent._remember_conversation_tool_result(session=session, contract=contract, tool="get_library_status", query=query, answer=answer)
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        payload = store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="get_library_status", query=query, answer=answer,
+        )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="get_library_status",
             summary="library_status_ready",
-            payload={"chars": len(answer)},
+            payload=payload,
         )
 
     def query_library_metadata() -> None:
@@ -116,15 +124,10 @@ def build_conversation_tool_registry(
         answer = str(result.get("answer", "") or "").strip()
         if answer:
             artifact = agent._conversation_tool_result_artifact(tool="query_library_metadata", result=result)
-            agent._remember_conversation_tool_result(
-                session=session,
-                contract=contract,
-                tool="query_library_metadata",
-                query=query,
-                answer=answer,
-                artifact=artifact,
+            store_conversation_answer_result(
+                agent=agent, state=state, session=session, contract=contract, emit=emit,
+                tool="query_library_metadata", query=query, answer=answer, artifact=artifact,
             )
-            agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         summary, payload = library_metadata_observation_payload(result=result, answer=answer)
         agent._record_agent_observation(
             emit=emit,
@@ -137,20 +140,16 @@ def build_conversation_tool_registry(
     def get_library_recommendation() -> None:
         agent._emit_agent_tool_call(emit=emit, tool="get_library_recommendation", arguments={"query": query})
         answer = agent._compose_library_recommendation_response(query=query, session=session)
-        agent._remember_conversation_tool_result(
-            session=session,
-            contract=contract,
-            tool="get_library_recommendation",
-            query=query,
-            answer=answer,
+        payload = store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="get_library_recommendation", query=query, answer=answer,
         )
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="get_library_recommendation",
             summary="library_recommendation_ready",
-            payload={"chars": len(answer)},
+            payload=payload,
         )
 
     def read_conversation_memory() -> None:
@@ -194,7 +193,7 @@ def build_conversation_tool_registry(
     def propose_tool() -> None:
         planned_input = planned_tool_input_from_state(state, "propose_tool")
         payload = propose_tool_payload(agent, planned_input)
-        state.setdefault("tool_proposals", []).append(payload)
+        summary = store_tool_proposal_payload(state=state, payload=payload)
         emit("tool_proposal", payload)
         if payload.get("status") == "pending_review" and not state.get("answer"):
             agent._set_conversation_answer(state=state, answer="已记录工具提案，等待人工审核后才能启用。", emit=emit)
@@ -202,7 +201,7 @@ def build_conversation_tool_registry(
             emit=emit,
             execution_steps=execution_steps,
             tool="propose_tool",
-            summary=str(payload.get("status", "")),
+            summary=summary,
             payload=payload,
         )
 
@@ -214,14 +213,14 @@ def build_conversation_tool_registry(
             targets=contract.targets,
             fallback_to_summary_source=True,
         )
-        state.setdefault("summaries", []).append(payload)
+        summary = store_summary_payload(state=state, payload=payload)
         if payload["summary"] and not state.get("answer"):
             agent._set_conversation_answer(state=state, answer=payload["summary"], emit=emit)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="summarize",
-            summary=f"chars={len(payload['summary'])}",
+            summary=summary,
             payload=payload,
         )
 
@@ -270,14 +269,16 @@ def build_conversation_tool_registry(
             arguments={"query": query, "targets": contract.targets},
         )
         answer = agent._compose_memory_followup_answer(query=query, session=session, contract=contract)
-        agent._remember_conversation_tool_result(session=session, contract=contract, tool="answer_from_memory", query=query, answer=answer)
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        payload = store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="answer_from_memory", query=query, answer=answer,
+        )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="answer_from_memory",
             summary="memory_answer_ready",
-            payload={"chars": len(answer)},
+            payload=payload,
         )
 
     def synthesize_previous_results() -> None:
@@ -285,14 +286,16 @@ def build_conversation_tool_registry(
         answer = agent._compose_memory_synthesis_answer(query=query, session=session, contract=contract)
         bindings = agent._active_memory_bindings(session)
         state["citations"] = agent._citations_from_memory_bindings(bindings)
-        agent._remember_conversation_tool_result(session=session, contract=contract, tool="synthesize_previous_results", query=query, answer=answer)
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        payload = store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="synthesize_previous_results", query=query, answer=answer,
+        )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="synthesize_previous_results",
             summary="memory_synthesis_ready",
-            payload={"binding_count": len(bindings), "chars": len(answer)},
+            payload={"binding_count": len(bindings), **payload},
         )
 
     def recover_previous_recommendation_candidates() -> None:
@@ -335,14 +338,10 @@ def build_conversation_tool_registry(
         evidence, citation_doc_ids, report, summary = citation_ranking_result_payload(lookup)
         state["citations"] = agent._dedupe_citations(agent._citations_from_doc_ids(citation_doc_ids, evidence))
         state["verification_report"] = report
-        agent._remember_conversation_tool_result(
-            session=session,
-            contract=contract,
-            tool="rank_by_verified_citation_count",
-            query=query,
-            answer=answer,
+        store_conversation_answer_result(
+            agent=agent, state=state, session=session, contract=contract, emit=emit,
+            tool="rank_by_verified_citation_count", query=query, answer=answer,
         )
-        agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
@@ -372,7 +371,7 @@ def build_conversation_tool_registry(
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments=request)
         result = fetch_url_text(client=agent.clients.http_client, **request)
         payload, summary, observation_payload = fetch_url_tool_payload(result)
-        state.setdefault("fetched_urls", []).append(payload)
+        store_fetched_url_payload(state=state, payload=payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
@@ -529,13 +528,13 @@ def build_research_tool_registry(
     def propose_tool() -> None:
         planned_input = planned_tool_input_from_state(state, "propose_tool")
         payload = propose_tool_payload(agent, planned_input)
-        state.setdefault("tool_proposals", []).append(payload)
+        summary = store_tool_proposal_payload(state=state, payload=payload)
         emit("tool_proposal", payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="propose_tool",
-            summary=str(payload.get("status", "")),
+            summary=summary,
             payload=payload,
         )
 
@@ -672,12 +671,12 @@ def build_research_tool_registry(
             targets=contract.targets,
             fallback_to_summary_source=False,
         )
-        state.setdefault("summaries", []).append(payload)
+        summary = store_summary_payload(state=state, payload=payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="summarize",
-            summary=f"chars={len(payload['summary'])}",
+            summary=summary,
             payload=payload,
         )
 
@@ -708,7 +707,7 @@ def build_research_tool_registry(
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments=request)
         result = fetch_url_text(client=agent.clients.http_client, **request)
         payload, summary, observation_payload = fetch_url_tool_payload(result)
-        state.setdefault("fetched_urls", []).append(payload)
+        store_fetched_url_payload(state=state, payload=payload)
         event_payload = store_fetch_url_evidence_result(agent=agent, state=state, evidence=fetch_url_evidence(result))
         if event_payload is not None:
             emit("web_search", event_payload)

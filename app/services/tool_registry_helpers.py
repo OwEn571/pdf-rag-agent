@@ -76,6 +76,32 @@ def library_metadata_observation_payload(*, result: dict[str, Any], answer: str)
     )
 
 
+def store_conversation_answer_result(
+    *,
+    agent: Any,
+    state: dict[str, Any],
+    session: SessionContext,
+    contract: QueryContract,
+    emit: Any,
+    tool: str,
+    query: str,
+    answer: str,
+    artifact: dict[str, Any] | None = None,
+) -> dict[str, int]:
+    remember_kwargs: dict[str, Any] = {
+        "session": session,
+        "contract": contract,
+        "tool": tool,
+        "query": query,
+        "answer": answer,
+    }
+    if artifact is not None:
+        remember_kwargs["artifact"] = artifact
+    agent._remember_conversation_tool_result(**remember_kwargs)
+    agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+    return {"chars": len(answer)}
+
+
 def read_memory_tool_payload(
     *,
     agent: Any,
@@ -202,6 +228,10 @@ def fetch_url_payload(result: FetchUrlResult) -> dict[str, Any]:
 def fetch_url_tool_payload(result: FetchUrlResult) -> tuple[dict[str, Any], str, dict[str, Any]]:
     payload = fetch_url_payload(result)
     return payload, "ok" if result.ok else result.error, {**payload, "text": result.text[:600]}
+
+
+def store_fetched_url_payload(*, state: dict[str, Any], payload: dict[str, Any]) -> None:
+    state.setdefault("fetched_urls", []).append(payload)
 
 
 def fetch_url_evidence(result: FetchUrlResult) -> EvidenceBlock | None:
@@ -608,6 +638,11 @@ def summarize_tool_payload(
     return {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
 
 
+def store_summary_payload(*, state: dict[str, Any], payload: dict[str, Any]) -> str:
+    state.setdefault("summaries", []).append(payload)
+    return f"chars={len(str(payload.get('summary', '') or ''))}"
+
+
 def verify_claim_tool_payload(*, planned_input: dict[str, Any], state: dict[str, Any]) -> tuple[dict[str, Any], str]:
     claim = str(planned_input.get("claim", "") or "").strip()
     evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
@@ -629,3 +664,8 @@ def verify_claim_tool_payload(*, planned_input: dict[str, Any], state: dict[str,
 def store_claim_check_payload(*, state: dict[str, Any], payload: dict[str, Any]) -> None:
     state.setdefault("claim_checks", []).append(payload)
     state.setdefault("tool_verifications", []).append(payload)
+
+
+def store_tool_proposal_payload(*, state: dict[str, Any], payload: dict[str, Any]) -> str:
+    state.setdefault("tool_proposals", []).append(payload)
+    return str(payload.get("status", ""))

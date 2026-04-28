@@ -46,10 +46,14 @@ from app.services.tool_registry_helpers import (
     store_claim_check_payload,
     store_citation_candidates_payload,
     store_citation_lookup_payload,
+    store_conversation_answer_result,
+    store_fetched_url_payload,
     store_fetch_url_evidence_result,
     store_research_evidence_result,
     store_session_todos,
     summary_source_from_state,
+    store_summary_payload,
+    store_tool_proposal_payload,
     summarize_tool_payload,
     task_result_observation_payload,
     task_tool_request,
@@ -144,6 +148,40 @@ def test_tool_registry_helpers_build_library_metadata_payloads() -> None:
         "error": "",
         "has_answer": True,
     }
+
+
+def test_tool_registry_helpers_store_conversation_answer_result() -> None:
+    calls: dict[str, object] = {}
+
+    class _Agent:
+        def _remember_conversation_tool_result(self, **kwargs: object) -> None:
+            calls["remember"] = kwargs
+
+        def _set_conversation_answer(self, *, state: dict[str, object], answer: str, **_: object) -> None:
+            state["answer"] = answer
+
+    state: dict[str, object] = {}
+    session = SessionContext(session_id="s1")
+    contract = QueryContract(clean_query="query", relation="greeting")
+
+    payload = store_conversation_answer_result(
+        agent=_Agent(),
+        state=state,
+        session=session,
+        contract=contract,
+        emit=lambda *_: None,
+        tool="answer_conversation",
+        query="query",
+        answer="hello",
+        artifact={"items": []},
+    )
+
+    assert payload == {"chars": 5}
+    assert state["answer"] == "hello"
+    remember_call = calls["remember"]
+    assert isinstance(remember_call, dict)
+    assert remember_call["tool"] == "answer_conversation"
+    assert remember_call["artifact"] == {"items": []}
 
 
 def test_tool_registry_helpers_build_read_memory_payload() -> None:
@@ -326,6 +364,9 @@ def test_tool_registry_helpers_convert_fetch_result_payload_and_evidence() -> No
     assert evidence.snippet == "x" * 1600
     assert evidence.metadata["url"] == "https://example.com/a"
     assert fetch_url_evidence(failed) is None
+    state: dict[str, object] = {}
+    store_fetched_url_payload(state=state, payload=payload)
+    assert state["fetched_urls"] == [payload]
 
 
 def test_tool_registry_helpers_collect_evidence_and_summary_source() -> None:
@@ -567,6 +608,9 @@ def test_tool_registry_helpers_build_propose_tool_payload(tmp_path: Path) -> Non
     assert Path(str(payload["path"])).exists()
     assert rejected["status"] == "rejected"
     assert "tool name" in rejected["error"]
+    state: dict[str, object] = {}
+    assert store_tool_proposal_payload(state=state, payload=payload) == "pending_review"
+    assert state["tool_proposals"] == [payload]
 
 
 def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() -> None:
@@ -616,3 +660,6 @@ def test_tool_registry_helpers_build_summarize_payload_from_text_and_source_fall
     assert text_payload["source_chars"] == len("DPO optimizes preferences. Other content.")
     assert "Task answer" in fallback_payload["summary"]
     assert fallback_payload["source_chars"] == len("Task answer about RAG.")
+    state: dict[str, object] = {}
+    assert store_summary_payload(state=state, payload=text_payload) == f"chars={len(text_payload['summary'])}"
+    assert state["summaries"] == [text_payload]
