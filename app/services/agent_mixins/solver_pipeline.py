@@ -16,6 +16,10 @@ from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
     is_unusable_topology_recommendation_text,
 )
+from app.services.visual_claim_helpers import (
+    figure_conclusion_claim_from_vlm_payload,
+    table_metric_claim_from_vlm_payload,
+)
 
 
 class SolverPipelineMixin:
@@ -1015,21 +1019,11 @@ class SolverPipelineMixin:
             human_content=content,
             fallback={"claims": [], "draft_answer": ""},
         )
-        raw_claims = payload.get("claims", []) if isinstance(payload, dict) else []
-        raw_claim = raw_claims[0] if isinstance(raw_claims, list) and raw_claims and isinstance(raw_claims[0], dict) else {}
-        claim_text = str(raw_claim.get("claim", "") or (payload.get("draft_answer", "") if isinstance(payload, dict) else "")).strip()
-        if not claim_text:
-            return None
-        raw_lines = raw_claim.get("metric_lines", [])
-        metric_lines = [str(item).strip() for item in raw_lines if str(item).strip()] if isinstance(raw_lines, list) else []
-        return Claim(
-            claim_type="metric_value",
+        return table_metric_claim_from_vlm_payload(
+            payload,
             entity=contract.targets[0] if contract.targets else selected_paper.title,
-            value=claim_text,
-            structured_data={"metric_lines": metric_lines or [claim_text], "mode": "vlm_table"},
             evidence_ids=evidence_ids,
             paper_ids=paper_ids,
-            confidence=self._coerce_confidence(raw_claim.get("confidence", 0.84)),
         )
 
     def _solve_figure(self, *, contract: QueryContract, papers: list[CandidatePaper], evidence: list[EvidenceBlock]) -> list[Claim]:
@@ -1074,21 +1068,16 @@ class SolverPipelineMixin:
                     human_content=content,
                     fallback={"claims": [], "draft_answer": ""},
                 )
-        if payload.get("claims"):
-            raw_claim = payload["claims"][0]
-            vlm_text = str(raw_claim.get("claim", "")) or str(payload.get("draft_answer", ""))
-            if self._figure_signal_score(vlm_text) >= max(3, self._figure_signal_score(fallback_text)):
-                return [
-                    Claim(
-                        claim_type="figure_conclusion",
-                        entity=contract.targets[0] if contract.targets else figure_contexts[0]["title"],
-                        value=vlm_text,
-                        structured_data={"mode": "vlm"},
-                        evidence_ids=figure_contexts[0]["doc_ids"],
-                        paper_ids=[figure_contexts[0]["paper_id"]],
-                        confidence=self._coerce_confidence(raw_claim.get("confidence", 0.82)),
-                    )
-                ]
+        vlm_claim = figure_conclusion_claim_from_vlm_payload(
+            payload,
+            entity=contract.targets[0] if contract.targets else figure_contexts[0]["title"],
+            evidence_ids=figure_contexts[0]["doc_ids"],
+            paper_id=figure_contexts[0]["paper_id"],
+            fallback_text=fallback_text,
+            signal_score=self._figure_signal_score,
+        )
+        if vlm_claim is not None:
+            return [vlm_claim]
         text_summary = self._summarize_figure_text(contract=contract, fallback_text=fallback_text, evidence=evidence)
         if text_summary:
             return [
