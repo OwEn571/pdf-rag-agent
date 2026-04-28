@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from app.services.agent_trace_diff import diff_agent_traces
 from app.services.agent_trace import write_agent_trace
 
 
@@ -26,3 +27,62 @@ def test_write_agent_trace_records_events_and_compact_final(tmp_path) -> None:
     assert lines[2]["data"]["answer_chars"] == 2000
     assert len(lines[2]["data"]["answer_preview"]) == 1200
     assert lines[2]["data"]["execution_steps"][0]["node"] == "agent_loop"
+
+
+def test_diff_agent_traces_ignores_volatile_fields() -> None:
+    expected = [
+        {"index": 1, "event": "tool_call", "data": {"id": "a", "type": "tool_use", "name": "search_corpus"}},
+        {
+            "index": 2,
+            "event": "observation",
+            "data": {"id": "a", "type": "tool_result", "name": "search_corpus", "ok": True, "took_ms": 10},
+        },
+        {
+            "index": 3,
+            "event": "final",
+            "data": {
+                "answer_chars": 380,
+                "answer_preview": "old",
+                "execution_steps": [{"node": "agent_loop", "summary": "old"}],
+            },
+        },
+    ]
+    actual = [
+        {"index": 1, "event": "tool_call", "data": {"id": "b", "type": "tool_use", "name": "search_corpus"}},
+        {
+            "index": 2,
+            "event": "observation",
+            "data": {"id": "b", "type": "tool_result", "name": "search_corpus", "ok": True, "took_ms": 200},
+        },
+        {
+            "index": 3,
+            "event": "final",
+            "data": {
+                "answer_chars": 399,
+                "answer_preview": "new",
+                "execution_steps": [{"node": "agent_loop", "summary": "new"}],
+            },
+        },
+    ]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is True
+    assert diff.differences == []
+
+
+def test_diff_agent_traces_reports_stable_signal_changes() -> None:
+    expected = [
+        {"event": "tool_call", "data": {"type": "tool_use", "name": "search_corpus"}},
+        {"event": "observation", "data": {"type": "tool_result", "name": "search_corpus", "ok": True}},
+    ]
+    actual = [
+        {"event": "tool_call", "data": {"type": "tool_use", "name": "web_search"}},
+        {"event": "observation", "data": {"type": "tool_result", "name": "web_search", "ok": False}},
+    ]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is False
+    assert "search_corpus" in diff.differences[0]
+    assert "web_search" in diff.differences[0]

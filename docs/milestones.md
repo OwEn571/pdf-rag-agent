@@ -74,3 +74,4 @@
 - 2026-04-28 继续推进 review §9：新增 `retrieval_filter_formula_heavy_non_formula` 配置项，默认保持非公式类实体检索中过滤 formula-heavy snippet 的旧行为，但可关闭该 heuristic，避免检索层硬规则不可控。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 188 个测试。
 - 2026-04-28 按 review §11 收口 subprocess 安全：确认 `agent.py` 中 `subprocess` 用于 PDF page 渲染，保留但增加 `ALLOWED_SUBPROCESS_COMMANDS={"pdftoppm"}` 白名单，只允许 bare `pdftoppm` 命令，阻断路径形式或其他命令。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 189 个测试。
 - 2026-04-28 按 review §10 补 tool 维度 Prometheus 指标：新增 `tool_calls_total{name,ok}` 与 `tool_latency_seconds{name}`，Agent 工具执行器负责真实 latency/成功失败计数，事件归一化层覆盖旧 observation 路径并避免执行器内双计数。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 193 个测试。
+- 2026-04-28 按 review §10/M3 起步 eval trace 回归：新增 `agent_trace_diff` 稳定签名比较与 `scripts/diff_agent_traces.py` CLI，可对 `data/traces/*.jsonl` 做事件序列、工具名、ok/count/status、final execution nodes 的回归 diff，同时忽略 id/took_ms/answer_preview 等易变字段。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 195 个测试。
