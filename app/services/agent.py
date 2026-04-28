@@ -42,6 +42,7 @@ from app.services.clarification_intents import (
     looks_like_clarification_choice_text,
     pending_clarification_selection_index,
 )
+from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
@@ -886,40 +887,16 @@ class ResearchAssistantAgentV4(
 
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
         normalized = self._normalize_lookup_text(clean_query)
-        if len(normalized) < 8:
-            return False
-        if ("论文库" in clean_query or "知识库" in clean_query or "zotero" in normalized) and any(
-            token in clean_query for token in ["多少", "几篇", "有哪些", "列表"]
-        ) and any(token in clean_query for token in ["推荐", "值得", "哪篇"]):
-            return True
-        if any(token in normalized or token in clean_query for token in ["两者", "区别", "比较", "对比", "不同"]):
-            memory = dict((session.working_memory if session is not None else {}) or {})
-            bindings = dict(memory.get("target_bindings", {}) or {})
-            if bindings or (session is not None and session.effective_active_research().targets):
-                return True
+        memory = dict((session.working_memory if session is not None else {}) or {})
+        bindings = dict(memory.get("target_bindings", {}) or {})
+        has_memory_context = bool(bindings or (session is not None and session.effective_active_research().targets))
         target_count = len({target.lower() for target in self._extract_targets(clean_query)})
-        has_multiple_targets = target_count >= 2
-        if not has_multiple_targets:
-            return False
-        compound_cues = [
-            "分别",
-            "各自",
-            "同时",
-            "顺便",
-            "比较",
-            "对比",
-            "区别",
-            "不同",
-            "又",
-            "以及",
-            "和",
-            " vs ",
-            " versus ",
-        ]
-        if any(cue in normalized for cue in compound_cues) or any(cue in clean_query for cue in compound_cues):
-            return True
-        task_cues = ["公式", "结果", "实验", "指标", "是什么", "核心结论", "figure", "图"]
-        return sum(1 for cue in task_cues if cue in normalized or cue in clean_query) >= 2
+        return should_try_compound_decomposition_heuristic(
+            clean_query,
+            normalized_query=normalized,
+            target_count=target_count,
+            has_memory_context=has_memory_context,
+        )
 
     def _llm_decompose_compound_query(self, *, clean_query: str, session: SessionContext) -> list[QueryContract]:
         if self.clients.chat is None:

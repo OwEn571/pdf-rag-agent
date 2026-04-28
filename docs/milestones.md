@@ -92,3 +92,4 @@
 - 2026-04-28 继续按 review §3.1/§8 收敛 H7-H9：新增 `followup_intents.py` 集中公式解释、语言偏好、公式纠错、论文范围纠错、active paper reference、上下文 metric 与负向纠正 classifier，`agent.py` 删除对应 marker 函数并仅保留运行时状态编排/兼容 wrapper。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 219 个测试。
 - 2026-04-28 继续按 review §3.1/§8 收敛硬编码判断：`followup_intents.py` 接管公式查询能否绑定当前论文的上下文/实体名判断，`research_intents.py` 接管最新/引用数等外部搜索触发判断，并让 `IntentRecognizer` 复用同一 helper；`agent.py` 删除对应 marker 块，仅保留运行时参数拼装。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 221 个测试。
 - 2026-04-28 继续按 review §3.1/§8 收敛 clarification 选择解析：新增 `clarification_intents.py` 集中“第几个/选哪个/choose/select”等 pending clarification 文字选择 classifier，`agent.py` 删除对应静态 marker 方法，只保留 option 匹配。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 223 个测试。
+- 2026-04-28 继续按 review §4.3/M2 薄化 compound 入口：新增 `compound_intents.py` 集中复合查询预判 heuristic，`agent.py` 只负责计算 target 数和 session memory context，再交给纯函数判断是否进入 LLM compound decomposition。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 226 个测试。
