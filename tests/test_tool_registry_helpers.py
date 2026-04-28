@@ -15,6 +15,7 @@ from app.services.tool_registry_helpers import (
     research_intent_summary,
     store_session_todos,
     summary_source_from_state,
+    summarize_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
 )
@@ -166,3 +167,23 @@ def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() 
     assert payload["supporting_evidence_ids"] == ["ev-1"]
     assert payload["min_overlap"] == 2
     assert summary.startswith("pass:")
+
+
+def test_tool_registry_helpers_build_summarize_payload_from_text_and_source_fallback() -> None:
+    text_payload = summarize_tool_payload(
+        planned_input={"text": "DPO optimizes preferences. Other content.", "target_words": 20},
+        state={},
+        targets=["DPO"],
+        fallback_to_summary_source=False,
+    )
+    fallback_payload = summarize_tool_payload(
+        planned_input={"target_words": 20},
+        state={"task_results": [{"answer": "Task answer about RAG."}]},
+        targets=["RAG"],
+        fallback_to_summary_source=True,
+    )
+
+    assert "DPO" in text_payload["summary"]
+    assert text_payload["source_chars"] == len("DPO optimizes preferences. Other content.")
+    assert "Task answer" in fallback_payload["summary"]
+    assert fallback_payload["source_chars"] == len("Task answer about RAG.")

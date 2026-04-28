@@ -5,7 +5,12 @@ from typing import Any
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.contract_context import contract_answer_slots, note_value
-from app.services.evidence_tools import evidence_from_payload, verify_claim_against_evidence
+from app.services.evidence_tools import (
+    evidence_from_payload,
+    summarize_evidence,
+    summarize_text,
+    verify_claim_against_evidence,
+)
 from app.services.url_fetcher import FetchUrlResult
 
 
@@ -156,6 +161,31 @@ def coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def summarize_tool_payload(
+    *,
+    planned_input: dict[str, Any],
+    state: dict[str, Any],
+    targets: list[str],
+    fallback_to_summary_source: bool,
+) -> dict[str, Any]:
+    focus = focus_values(planned_input.get("focus", targets), targets)
+    target_words = coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
+    text = str(planned_input.get("text", "") or "").strip()
+    if text:
+        summary = summarize_text(text=text, target_words=target_words, focus=focus)
+        source_chars = len(text)
+    else:
+        evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
+        if evidence or not fallback_to_summary_source:
+            summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
+            source_chars = sum(len(item.snippet or "") for item in evidence)
+        else:
+            source_text = summary_source_from_state(state)
+            summary = summarize_text(text=source_text, target_words=target_words, focus=focus)
+            source_chars = len(source_text)
+    return {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
 
 
 def verify_claim_tool_payload(*, planned_input: dict[str, Any], state: dict[str, Any]) -> tuple[dict[str, Any], str]:

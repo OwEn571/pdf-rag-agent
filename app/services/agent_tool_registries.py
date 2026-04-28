@@ -8,8 +8,6 @@ from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import (
     evidence_from_payload,
-    summarize_evidence,
-    summarize_text,
 )
 from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
@@ -17,8 +15,6 @@ from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     coerce_int,
     conversation_intent_summary,
-    evidence_blocks_from_state,
-    focus_values,
     fetch_url_evidence,
     fetch_url_payload,
     format_fetched_urls_answer,
@@ -27,7 +23,7 @@ from app.services.tool_registry_helpers import (
     normalize_todo_items,
     research_intent_summary,
     store_session_todos,
-    summary_source_from_state,
+    summarize_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
 )
@@ -232,28 +228,20 @@ def build_conversation_tool_registry(
 
     def summarize() -> None:
         planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
-        focus = focus_values(planned_input.get("focus", contract.targets), contract.targets)
-        target_words = coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
-        text = str(planned_input.get("text", "") or "").strip()
-        if text:
-            summary = summarize_text(text=text, target_words=target_words, focus=focus)
-            source_chars = len(text)
-        elif evidence := evidence_blocks_from_state(state):
-            summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
-            source_chars = sum(len(item.snippet or "") for item in evidence)
-        else:
-            source_text = summary_source_from_state(state)
-            summary = summarize_text(text=source_text, target_words=target_words, focus=focus)
-            source_chars = len(source_text)
-        payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
+        payload = summarize_tool_payload(
+            planned_input=planned_input,
+            state=state,
+            targets=contract.targets,
+            fallback_to_summary_source=True,
+        )
         state.setdefault("summaries", []).append(payload)
-        if summary and not state.get("answer"):
-            agent._set_conversation_answer(state=state, answer=summary, emit=emit)
+        if payload["summary"] and not state.get("answer"):
+            agent._set_conversation_answer(state=state, answer=payload["summary"], emit=emit)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="summarize",
-            summary=f"chars={len(summary)}",
+            summary=f"chars={len(payload['summary'])}",
             payload=payload,
         )
 
@@ -867,23 +855,18 @@ def build_research_tool_registry(
     def summarize() -> None:
         planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
         contract: QueryContract = state["contract"]
-        focus = focus_values(planned_input.get("focus", contract.targets), contract.targets)
-        target_words = coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
-        text = str(planned_input.get("text", "") or "").strip()
-        if text:
-            summary = summarize_text(text=text, target_words=target_words, focus=focus)
-            source_chars = len(text)
-        else:
-            evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
-            summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
-            source_chars = sum(len(item.snippet or "") for item in evidence)
-        payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
+        payload = summarize_tool_payload(
+            planned_input=planned_input,
+            state=state,
+            targets=contract.targets,
+            fallback_to_summary_source=False,
+        )
         state.setdefault("summaries", []).append(payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="summarize",
-            summary=f"chars={len(summary)}",
+            summary=f"chars={len(payload['summary'])}",
             payload=payload,
         )
 
