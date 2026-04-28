@@ -123,6 +123,30 @@ def format_task_results_answer(task_results: list[dict[str, Any]]) -> str:
     return "\n\n".join(sections).strip()
 
 
+def task_tool_request(*, planned_input: dict[str, Any], fallback_prompt: str) -> dict[str, Any]:
+    prompt = " ".join(str(planned_input.get("prompt", "") or planned_input.get("description", "") or fallback_prompt).split())
+    raw_tools_allowed = planned_input.get("tools_allowed", [])
+    tools_allowed = string_list_values(raw_tools_allowed)
+    return {
+        "prompt": prompt,
+        "description": str(planned_input.get("description", "") or ""),
+        "tools_allowed": tools_allowed,
+        "max_steps": planned_input.get("max_steps", None),
+    }
+
+
+def task_result_observation_payload(*, request: dict[str, Any], result: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    answer = str(result.get("answer", "") or "")
+    return (
+        f"task_answer_chars={len(answer)}",
+        {
+            "prompt": str(request.get("prompt", "") or ""),
+            "verification": result.get("verification", {}),
+            "answer_chars": len(answer),
+        },
+    )
+
+
 def format_fetched_urls_answer(fetched_urls: list[dict[str, Any]]) -> str:
     sections: list[str] = []
     for item in fetched_urls:

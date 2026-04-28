@@ -38,6 +38,8 @@ from app.services.tool_registry_helpers import (
     store_session_todos,
     summary_source_from_state,
     summarize_tool_payload,
+    task_result_observation_payload,
+    task_tool_request,
     todo_write_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
@@ -140,6 +142,33 @@ def test_tool_registry_helpers_format_compose_sources() -> None:
     assert "### A" in fetched_answer
     assert "读取失败" in fetched_answer
     assert summaries_answer == "one\n\ntwo"
+
+
+def test_tool_registry_helpers_build_task_request_and_observation() -> None:
+    request = task_tool_request(
+        planned_input={
+            "description": " 子任务 ",
+            "prompt": "  explain   DPO ",
+            "tools_allowed": [" compose ", "", "fetch_url"],
+            "max_steps": 4,
+        },
+        fallback_prompt="fallback",
+    )
+    fallback_request = task_tool_request(planned_input={}, fallback_prompt=" fallback query ")
+    summary, payload = task_result_observation_payload(
+        request=request,
+        result={"answer": "done", "verification": {"status": "pass"}},
+    )
+
+    assert request == {
+        "prompt": "explain DPO",
+        "description": " 子任务 ",
+        "tools_allowed": ["compose", "fetch_url"],
+        "max_steps": 4,
+    }
+    assert fallback_request["prompt"] == "fallback query"
+    assert summary == "task_answer_chars=4"
+    assert payload == {"prompt": "explain DPO", "verification": {"status": "pass"}, "answer_chars": 4}
 
 
 def test_tool_registry_helpers_convert_fetch_result_payload_and_evidence() -> None:

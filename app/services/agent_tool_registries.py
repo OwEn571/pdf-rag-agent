@@ -33,6 +33,8 @@ from app.services.tool_registry_helpers import (
     search_corpus_strategy,
     store_research_evidence_result,
     summarize_tool_payload,
+    task_result_observation_payload,
+    task_tool_request,
     todo_write_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
@@ -241,38 +243,28 @@ def build_conversation_tool_registry(
 
     def run_task() -> None:
         planned_input = planned_tool_input_from_state(state, "Task")
-        prompt = " ".join(str(planned_input.get("prompt", "") or planned_input.get("description", "") or query).split())
-        if not prompt:
+        request = task_tool_request(planned_input=planned_input, fallback_prompt=query)
+        if not request["prompt"]:
             return
-        raw_tools_allowed = planned_input.get("tools_allowed", [])
-        tools_allowed = [
-            str(item).strip()
-            for item in (raw_tools_allowed if isinstance(raw_tools_allowed, list) else [])
-            if str(item).strip()
-        ]
-        max_steps = planned_input.get("max_steps", None)
         result = run_task_subagent(
             agent=agent,
-            prompt=prompt,
-            description=str(planned_input.get("description", "") or ""),
-            tools_allowed=tools_allowed,
-            max_steps=max_steps,
+            prompt=str(request["prompt"]),
+            description=str(request["description"]),
+            tools_allowed=list(request["tools_allowed"]),
+            max_steps=request["max_steps"],
             session=session,
             max_web_results=max_web_results,
             emit=emit,
             execution_steps=execution_steps,
         )
         state.setdefault("task_results", []).append(result)
+        summary, payload = task_result_observation_payload(request=request, result=result)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="Task",
-            summary=f"task_answer_chars={len(str(result.get('answer', '') or ''))}",
-            payload={
-                "prompt": prompt,
-                "verification": result.get("verification", {}),
-                "answer_chars": len(str(result.get("answer", "") or "")),
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def answer_from_memory() -> None:
