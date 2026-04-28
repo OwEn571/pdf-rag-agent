@@ -831,6 +831,11 @@ def build_research_tool_registry(
         )
 
     def search_corpus() -> None:
+        planned_input = tool_input("search_corpus") or dict(state.get("current_tool_input", {}) or {})
+        strategy = str(planned_input.get("strategy", "") or "auto").strip()
+        if strategy in {"bm25", "vector", "hybrid"}:
+            run_atomic_search(f"{strategy}_search")
+            return
         if not state.get("screened_papers"):
             search_papers()
         if not state.get("evidence"):

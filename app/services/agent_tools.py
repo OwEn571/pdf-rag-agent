@@ -115,6 +115,12 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
                     "default": "auto",
                     "description": "Whether to search paper metadata, evidence blocks, or both.",
                 },
+                "strategy": {
+                    "type": "string",
+                    "enum": ["auto", "legacy", "bm25", "vector", "hybrid"],
+                    "default": "auto",
+                    "description": "Optional retrieval strategy. auto/legacy preserve the broad corpus search; bm25/vector/hybrid delegate to atomic retrieval tools.",
+                },
                 "top_k": {
                     "type": "integer",
                     "minimum": 1,

@@ -111,6 +111,15 @@ class _RegistryProbeAgent:
     def _agent_reflect(self, *, state: dict[str, object], **_: object) -> None:
         state["reflection"] = {"checked": True}
 
+    def _merge_evidence(self, existing: list[EvidenceBlock], new: list[EvidenceBlock]) -> list[EvidenceBlock]:
+        merged: dict[str, EvidenceBlock] = {item.doc_id: item for item in existing if isinstance(item, EvidenceBlock)}
+        for item in new:
+            merged[item.doc_id] = item
+        return list(merged.values())
+
+    def _candidate_from_paper_id(self, paper_id: str) -> None:
+        return None
+
 
 class _RerankProbeRetriever:
     def rerank_evidence(
@@ -128,6 +137,27 @@ class _RerankProbeRetriever:
             return sum(1 for term in terms if term in text)
 
         return sorted(evidence, key=score, reverse=True)[:top_k]
+
+
+class _AtomicSearchProbeRetriever:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def hybrid_search(self, **kwargs: object) -> list[EvidenceBlock]:
+        self.calls.append(dict(kwargs))
+        return [
+            EvidenceBlock(
+                doc_id="hybrid-1",
+                paper_id="paper-1",
+                title="DPO paper",
+                file_path="",
+                page=1,
+                block_type="text",
+                snippet="DPO objective evidence",
+                score=0.9,
+                metadata={"search_source": "hybrid_search"},
+            )
+        ]
 
 
 def _planner_agent(tmp_path, clients: object) -> ResearchAssistantAgentV4:
@@ -177,6 +207,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     search_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "search_corpus")
     assert search_schema["required"] == ["query"]
     assert search_schema["properties"]["top_k"]["maximum"] == 50
+    assert search_schema["properties"]["strategy"]["enum"] == ["auto", "legacy", "bm25", "vector", "hybrid"]
     bm25_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "bm25_search")
     assert bm25_schema["required"] == ["query"]
     hybrid_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "hybrid_search")
@@ -504,6 +535,41 @@ def test_rerank_tool_accepts_explicit_candidates() -> None:
     observation = next(payload for event, payload in events if event == "observation" and payload["tool"] == "rerank")
     assert observation["payload"]["used_explicit_candidates"] is True
     assert observation["payload"]["input_candidate_count"] == 2
+
+
+def test_search_corpus_can_delegate_to_atomic_strategy() -> None:
+    probe = _RegistryProbeAgent()
+    probe.settings = SimpleNamespace(evidence_limit_default=2)
+    retriever = _AtomicSearchProbeRetriever()
+    probe.retriever = retriever
+    runtime = AgentRuntime(agent=probe)
+    session = SessionContext(session_id="demo")
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    state = runtime.run_research_agent_loop(
+        contract=QueryContract(clean_query="DPO objective", relation="formula_lookup", targets=["DPO"]),
+        session=session,
+        agent_plan={
+            "actions": ["search_corpus", "compose"],
+            "tool_call_args": [
+                {
+                    "name": "search_corpus",
+                    "args": {"strategy": "hybrid", "query": "DPO objective", "top_k": 1},
+                }
+            ],
+        },
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=0,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=steps,
+    )
+
+    assert retriever.calls[0]["query"] == "DPO objective"
+    assert retriever.calls[0]["limit"] == 1
+    assert [item.doc_id for item in state["evidence"]] == ["hybrid-1"]
+    assert any(event == "observation" and payload["tool"] == "hybrid_search" for event, payload in events)
 
 
 def test_todo_write_tool_updates_session_memory_and_emits_event() -> None:
