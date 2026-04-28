@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext
+from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 
 
 class SolverPipelineMixin:
@@ -76,6 +77,7 @@ class SolverPipelineMixin:
                 "paper_summary/followup_research/recommendation/general_answer。"
                 "每条 claim 必须引用能支撑它的 evidence_ids；证据不足就返回空 claims。"
                 "不要编造 evidence 中不存在的论文、指标、公式或结论。"
+                f"{DOCUMENT_SAFETY_INSTRUCTION}"
             ),
             human_prompt=json.dumps(
                 {
@@ -105,7 +107,13 @@ class SolverPipelineMixin:
                             "page": item.page,
                             "block_type": item.block_type,
                             "caption": item.caption,
-                            "snippet": item.snippet[:1200],
+                            "snippet": wrap_untrusted_document_text(
+                                item.snippet,
+                                doc_id=item.doc_id,
+                                title=item.title,
+                                source=item.block_type or "pdf",
+                                max_chars=1200,
+                            ),
                         }
                         for item in evidence[:40]
                     ],

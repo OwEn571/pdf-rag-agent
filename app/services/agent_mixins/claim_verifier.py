@@ -4,6 +4,7 @@ import json
 import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
+from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 
 
 class ClaimVerifierMixin:
@@ -60,6 +61,7 @@ class ClaimVerifierMixin:
                 "不要按 relation 写分支规则。"
                 "给定 query_contract、required_claims、claims 和 evidence，"
                 "判断 claims 是否被 evidence 覆盖。"
+                f"{DOCUMENT_SAFETY_INSTRUCTION}"
                 "只输出 JSON：status(pass|retry|clarify), missing_fields, recommended_action, contradictions。"
                 "retry 表示可以通过更多检索补足；clarify 表示必须让用户消歧或补槽。"
             ),
@@ -84,7 +86,13 @@ class ClaimVerifierMixin:
                             "title": item.title,
                             "page": item.page,
                             "block_type": item.block_type,
-                            "snippet": item.snippet[:1000],
+                            "snippet": wrap_untrusted_document_text(
+                                item.snippet,
+                                doc_id=item.doc_id,
+                                title=item.title,
+                                source=item.block_type or "pdf",
+                                max_chars=1000,
+                            ),
                         }
                         for item in evidence[:40]
                     ],

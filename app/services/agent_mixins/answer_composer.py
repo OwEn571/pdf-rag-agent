@@ -17,6 +17,7 @@ from app.domain.models import (
     SessionContext,
     VerificationReport,
 )
+from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.zotero_sqlite import ZoteroSQLiteReader
 
 
@@ -306,6 +307,7 @@ class AnswerComposerMixin:
                 "如果 evidence 同时包含“某篇论文使用它”和“它本身的定义/机制”两类证据，优先解释这个技术本身是什么、如何工作，再补充是谁在使用它。"
                 "不要输出半截 Markdown 标题，不要输出裸露的 #### 小标题，不要生成未在 evidence/citations 中出现的外链。"
                 "如果证据有不确定性，就明确写出不确定，而不是编造。"
+                f"{DOCUMENT_SAFETY_INSTRUCTION}"
             )
         if stream_callback is not None and hasattr(self.clients, "stream_text"):
             response_text = self.clients.stream_text(
@@ -478,7 +480,13 @@ class AnswerComposerMixin:
             limit = 620
         else:
             limit = 460
-        return item.snippet[:limit]
+        return wrap_untrusted_document_text(
+            item.snippet,
+            doc_id=item.doc_id,
+            title=item.title,
+            source=item.block_type or "pdf",
+            max_chars=limit,
+        )
 
     def _compose_structured_research_answer(
         self,
@@ -534,7 +542,13 @@ class AnswerComposerMixin:
                     {
                         "title": item.title,
                         "url": item.file_path,
-                        "snippet": item.snippet[:900],
+                        "snippet": wrap_untrusted_document_text(
+                            item.snippet,
+                            doc_id=item.doc_id,
+                            title=item.title,
+                            source="web",
+                            max_chars=900,
+                        ),
                     }
                     for item in web_evidence[:10]
                 ],
@@ -545,6 +559,7 @@ class AnswerComposerMixin:
             system_prompt=(
                 "你是论文研究助手的 Web 证据整理器。"
                 "只基于输入的 web_results 回答，不要使用记忆补充事实。"
+                f"{DOCUMENT_SAFETY_INSTRUCTION}"
                 "如果是最新/新闻/新论文问题，要明确这是基于当前 Web 检索结果。"
                 "优先用简洁中文 Markdown，总结要点并在每条后写来源标题。"
                 "如果证据不足，就说明还需要继续搜索，而不是编造。"
