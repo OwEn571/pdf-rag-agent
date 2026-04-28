@@ -40,6 +40,13 @@ from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
 from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.intent import IntentRecognizer
+from app.services.library_intents import (
+    citation_ranking_has_library_context,
+    is_citation_ranking_query,
+    is_library_count_query,
+    is_library_status_query,
+    is_scoped_library_recommendation_query,
+)
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
     AnswerComposerMixin,
@@ -1424,61 +1431,6 @@ class ResearchAssistantAgentV4(
         normalized = ResearchAssistantAgentV4._demote_markdown_headings(str(answer or "").strip())
         return f"{ResearchAssistantAgentV4._compound_section_heading(contract=contract, index=index)}\n\n{normalized}".strip()
 
-    @staticmethod
-    def _is_citation_ranking_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        citation_markers = [
-            "引用数",
-            "引用量",
-            "被引",
-            "按引用",
-            "citation",
-            "citations",
-            "cited by",
-            "citation count",
-        ]
-        rank_markers = [
-            "按",
-            "排序",
-            "排行",
-            "排名",
-            "最高",
-            "最多",
-            "哪篇",
-            "推荐",
-            "最值得",
-            "rank",
-            "sort",
-            "most cited",
-        ]
-        has_citation = any(marker in normalized or marker in compact for marker in citation_markers)
-        has_rank = any(marker in normalized or marker in compact for marker in rank_markers)
-        return has_citation and (has_rank or len(compact) <= 20)
-
-    @classmethod
-    def _citation_ranking_has_library_context(cls, *, clean_query: str, session: SessionContext) -> bool:
-        normalized = " ".join(str(clean_query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        library_scope_markers = ["知识库", "论文库", "库中", "库里", "zotero", "本地论文", "我的论文"]
-        if any(marker in normalized or marker in compact for marker in library_scope_markers):
-            return True
-        if cls._is_library_recommendation_query(clean_query) or cls._is_library_status_query(clean_query):
-            return True
-        for turn in reversed(session.turns[-4:]):
-            if turn.relation == "library_recommendation":
-                return True
-            if turn.relation == "compound_query" and (
-                "library_recommendation" in turn.requested_fields
-                or "默认推荐" in turn.answer
-                or "最值得" in turn.query
-                or "推荐" in turn.answer
-            ):
-                return True
-            if turn.relation == "library_citation_ranking":
-                return True
-        return False
-
     def _select_citation_ranking_candidates(
         self,
         *,
@@ -2667,7 +2619,7 @@ class ResearchAssistantAgentV4(
         clean_query: str,
         session: SessionContext,
     ) -> QueryContract:
-        if self._is_citation_ranking_query(clean_query) and self._citation_ranking_has_library_context(
+        if is_citation_ranking_query(clean_query) and citation_ranking_has_library_context(
             clean_query=clean_query,
             session=session,
         ):
@@ -2732,11 +2684,11 @@ class ResearchAssistantAgentV4(
                 continuation_mode="followup",
                 notes=["agent_tool", "conversation_memory_synthesis"],
             )
-        if self._is_scoped_library_recommendation_query(clean_query) and not self._is_library_count_query(clean_query):
+        if is_scoped_library_recommendation_query(clean_query) and not is_library_count_query(clean_query):
             return self._library_recommendation_contract(clean_query).model_copy(
                 update={"notes": list(dict.fromkeys([*contract.notes, "agent_tool", "dynamic_library_recommendation"]))}
             )
-        if self._is_library_status_query(clean_query):
+        if is_library_status_query(clean_query):
             return self._library_status_contract(clean_query).model_copy(
                 update={"notes": list(dict.fromkeys([*contract.notes, "agent_tool", "dynamic_library_stats"]))}
             )
@@ -2760,73 +2712,6 @@ class ResearchAssistantAgentV4(
                 }
             )
         return contract
-
-    @staticmethod
-    def _is_library_status_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        scope_markers = ["论文", "paper", "papers", "知识库", "库里", "zotero", "pdf"]
-        count_markers = [
-            "多少",
-            "几篇",
-            "一共",
-            "总共",
-            "总计",
-            "数量",
-            "规模",
-            "count",
-            "how many",
-            "total",
-        ]
-        list_markers = ["有哪些论文", "有哪些文章", "论文列表", "文章列表", "列出论文", "列出文章", "list papers"]
-        has_scope = any(marker in normalized or marker in compact for marker in scope_markers)
-        asks_count = any(marker in normalized or marker in compact for marker in count_markers)
-        asks_list = any(marker in normalized or marker in compact for marker in list_markers)
-        return has_scope and (asks_count or asks_list)
-
-    @staticmethod
-    def _is_library_count_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        count_markers = [
-            "多少",
-            "几篇",
-            "一共",
-            "总共",
-            "总计",
-            "数量",
-            "规模",
-            "count",
-            "how many",
-            "total",
-        ]
-        return any(marker in normalized or marker in compact for marker in count_markers)
-
-    @staticmethod
-    def _is_library_recommendation_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        markers = [
-            "最值得",
-            "值得一读",
-            "值得读",
-            "值得一看",
-            "值得看",
-            "推荐",
-            "哪篇",
-            "哪几篇",
-            "must read",
-            "worth reading",
-            "recommend",
-        ]
-        return any(marker in normalized or marker in compact for marker in markers)
-
-    @classmethod
-    def _is_scoped_library_recommendation_query(cls, query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        scope_markers = ["知识库", "论文库", "库中", "库里", "zotero", "本地论文", "我的论文", "你有的论文"]
-        return cls._is_library_recommendation_query(query) and any(marker in normalized or marker in compact for marker in scope_markers)
 
     def _normalize_followup_direction_contract(self, *, contract: QueryContract) -> QueryContract:
         clean_query = " ".join(str(contract.clean_query or "").split())

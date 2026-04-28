@@ -7,6 +7,11 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.library_intents import (
+    is_citation_query,
+    is_library_status_query,
+    is_scoped_library_recommendation_query,
+)
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
 ConversationMessagesFn = Callable[[SessionContext], list[dict[str, str]]]
@@ -809,7 +814,7 @@ class IntentRecognizer:
         refers_previous = self._looks_like_memory_reference(clean_query) or (
             bool(active.targets) and self._is_short_followup(clean_query)
         )
-        if self._is_library_status_query(lowered, compact):
+        if is_library_status_query(clean_query):
             return Intent(
                 intent_kind="meta_library",
                 topic_state="new",
@@ -820,7 +825,7 @@ class IntentRecognizer:
                 confidence=0.9,
                 notes=["local_intent_library_status"],
             )
-        if self._is_library_recommendation_query(lowered, compact):
+        if is_scoped_library_recommendation_query(clean_query):
             return Intent(
                 intent_kind="meta_library",
                 topic_state="continue" if session.turns else "new",
@@ -831,7 +836,7 @@ class IntentRecognizer:
                 confidence=0.86,
                 notes=["local_intent_library_recommendation"],
             )
-        if self._is_citation_query(lowered, compact):
+        if is_citation_query(clean_query):
             return Intent(
                 intent_kind="meta_library",
                 topic_state="continue" if session.turns else "new",
@@ -1036,41 +1041,6 @@ class IntentRecognizer:
             ]
         )
         return has_multi_agent and has_design_signal
-
-    @staticmethod
-    def _is_library_status_query(lowered: str, compact: str) -> bool:
-        scope_markers = ["论文", "paper", "papers", "知识库", "库里", "zotero", "pdf"]
-        count_markers = ["多少", "几篇", "一共", "总共", "总计", "数量", "规模", "count", "how many", "total"]
-        list_markers = ["有哪些论文", "有哪些文章", "论文列表", "文章列表", "列出论文", "列出文章", "list papers"]
-        has_scope = any(marker in lowered or marker in compact for marker in scope_markers)
-        return has_scope and (
-            any(marker in lowered or marker in compact for marker in count_markers)
-            or any(marker in lowered or marker in compact for marker in list_markers)
-        )
-
-    @staticmethod
-    def _is_library_recommendation_query(lowered: str, compact: str) -> bool:
-        recommend = [
-            "最值得",
-            "值得一读",
-            "值得读",
-            "值得一看",
-            "值得看",
-            "再推荐",
-            "换一篇",
-            "推荐",
-            "must read",
-            "worth reading",
-            "recommend",
-        ]
-        scoped = ["知识库", "论文库", "库中", "库里", "zotero", "本地论文", "我的论文", "你有的论文"]
-        return any(marker in lowered or marker in compact for marker in recommend) and any(
-            marker in lowered or marker in compact for marker in scoped
-        )
-
-    @staticmethod
-    def _is_citation_query(lowered: str, compact: str) -> bool:
-        return any(marker in lowered or marker in compact for marker in ["引用数", "引用量", "被引", "citation", "citations"])
 
     @staticmethod
     def _is_memory_comparison_query(lowered: str) -> bool:
