@@ -39,6 +39,17 @@ from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
 from app.services.confidence import confidence_from_verification_report, confidence_payload
+from app.services.followup_intents import (
+    is_formula_interpretation_followup_query,
+    is_language_preference_followup,
+    is_memory_synthesis_query,
+    is_negative_correction_query,
+    looks_like_active_paper_reference,
+    looks_like_contextual_metric_query,
+    looks_like_formula_answer_correction,
+    looks_like_formula_location_correction,
+    looks_like_paper_scope_correction,
+)
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
     citation_ranking_has_library_context,
@@ -821,14 +832,7 @@ class ResearchAssistantAgentV4(
         )
 
     @staticmethod
-    def _is_memory_synthesis_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        return any(token in normalized for token in ["区别", "比较", "对比", "两者", "二者", "它们", "difference", "compare"])
-
-    @staticmethod
     def _is_formula_interpretation_followup(*, clean_query: str, session: SessionContext) -> bool:
-        normalized = " ".join(str(clean_query or "").lower().split())
-        compact = normalized.replace(" ", "")
         active = session.effective_active_research()
         had_formula_context = active.relation == "formula_lookup" or any(
             turn.relation == "formula_lookup"
@@ -836,37 +840,11 @@ class ResearchAssistantAgentV4(
             or "formula" in {str(item) for item in list(turn.answer_slots or [])}
             for turn in session.turns[-3:]
         )
-        if not had_formula_context:
-            return False
-        interpretation_cues = [
-            "怎么理解",
-            "如何理解",
-            "怎样理解",
-            "怎么读",
-            "如何读",
-            "什么意思",
-            "解释一下",
-            "讲一下",
-            "直觉",
-            "intuition",
-            "interpret",
-            "understand",
-        ]
-        formula_reference = any(marker in compact for marker in ["这个公式", "该公式", "这个式子", "这条公式", "公式"])
-        return formula_reference and any(marker in normalized or marker in compact for marker in interpretation_cues)
+        return is_formula_interpretation_followup_query(clean_query, had_formula_context=had_formula_context)
 
     @staticmethod
     def _is_language_preference_followup(*, clean_query: str, session: SessionContext) -> bool:
-        if not session.turns:
-            return False
-        normalized = " ".join(str(clean_query or "").lower().split())
-        compact = normalized.replace(" ", "")
-        language_cues = ["中文", "全中文", "不要英文", "中英文混杂", "用中文", "说中文", "chinese"]
-        if not any(cue in normalized or cue in compact for cue in language_cues):
-            return False
-        research_cues = ["公式", "是什么", "多少", "结果", "实验", "对比", "比较", "区别", "figure", "table"]
-        has_new_research_request = any(cue in normalized or cue in compact for cue in research_cues)
-        return not has_new_research_request
+        return is_language_preference_followup(clean_query, has_turns=bool(session.turns))
 
     @staticmethod
     def _is_comparison_query(query: str) -> bool:
@@ -2638,7 +2616,7 @@ class ResearchAssistantAgentV4(
             )
         active = session.effective_active_research()
         active_formula = active.relation == "formula_lookup" or "formula" in {str(field) for field in active.requested_fields}
-        if active_formula and active.targets and self._looks_like_formula_answer_correction(clean_query):
+        if active_formula and active.targets and looks_like_formula_answer_correction(clean_query):
             return self._formula_answer_correction_contract(contract=contract, session=session)
         if self._is_formula_interpretation_followup(clean_query=clean_query, session=session):
             return QueryContract(
@@ -2667,7 +2645,7 @@ class ResearchAssistantAgentV4(
                 continuation_mode="followup",
                 notes=["agent_tool", "answer_language_preference"],
             )
-        if self._is_memory_synthesis_query(clean_query) and (
+        if is_memory_synthesis_query(clean_query) and (
             len(self._active_memory_bindings(session)) >= 2
             or len(list(dict((session.working_memory or {}).get("last_compound_query", {}) or {}).get("subtasks", []) or [])) >= 2
         ):
@@ -3223,7 +3201,7 @@ class ResearchAssistantAgentV4(
         active_formula = active.relation == "formula_lookup" or "formula" in {str(field) for field in active.requested_fields}
         if not active_formula or not active.targets:
             return contract
-        if not self._looks_like_formula_answer_correction(contract.clean_query):
+        if not looks_like_formula_answer_correction(contract.clean_query):
             return contract
         return self._formula_answer_correction_contract(contract=contract, session=session)
 
@@ -3237,7 +3215,7 @@ class ResearchAssistantAgentV4(
             return contract
         if contract.interaction_mode == "conversation":
             return contract
-        if not self._looks_like_formula_location_correction(contract.clean_query):
+        if not looks_like_formula_location_correction(contract.clean_query):
             return contract
         paper = self._paper_from_query_hint(contract.clean_query)
         if paper is None:
@@ -3319,7 +3297,7 @@ class ResearchAssistantAgentV4(
         active = session.effective_active_research()
         if not active.has_content() or not active.targets:
             return contract
-        if not self._looks_like_paper_scope_correction(contract.clean_query):
+        if not looks_like_paper_scope_correction(contract.clean_query):
             return contract
         paper = self._paper_from_query_hint(contract.clean_query)
         if paper is None:
@@ -3352,7 +3330,7 @@ class ResearchAssistantAgentV4(
             return contract
         if "exclude_previous_focus" in contract.notes or self._is_negative_correction_query(contract.clean_query):
             return contract
-        if not self._looks_like_active_paper_reference(contract.clean_query):
+        if not looks_like_active_paper_reference(contract.clean_query):
             return contract
         active = session.effective_active_research()
         if not active.titles:
@@ -3378,73 +3356,6 @@ class ResearchAssistantAgentV4(
         return self._promote_contextual_metric_contract(scoped)
 
     @staticmethod
-    def _looks_like_active_paper_reference(query: str) -> bool:
-        text = str(query or "")
-        lowered = " ".join(text.lower().split())
-        compact = re.sub(r"\s+", "", text.lower())
-        markers = [
-            "这篇论文",
-            "这篇文章",
-            "这篇",
-            "该论文",
-            "该文",
-            "文中",
-            "论文中",
-            "论文里",
-            "里面",
-            "其中",
-            "this paper",
-            "the paper",
-            "in this paper",
-        ]
-        return any(marker in lowered or marker in compact or marker in text for marker in markers)
-
-    @staticmethod
-    def _looks_like_formula_answer_correction(query: str) -> bool:
-        text = str(query or "")
-        lowered = " ".join(text.lower().split())
-        compact = re.sub(r"\s+", "", text.lower())
-        formula_markers = ["公式", "式子", "目标函数", "损失", "objective", "loss", "formula"]
-        correction_markers = [
-            "不是这个",
-            "不是这个公式",
-            "不应该是这个",
-            "我觉得不是",
-            "不对",
-            "错了",
-            "好像不是",
-            "应该不是",
-            "not this",
-            "wrong formula",
-        ]
-        return (
-            any(marker in lowered or marker in compact or marker in text for marker in correction_markers)
-            and any(marker in lowered or marker in compact or marker in text for marker in formula_markers)
-        )
-
-    @staticmethod
-    def _looks_like_paper_scope_correction(query: str) -> bool:
-        text = str(query or "")
-        lowered = " ".join(text.lower().split())
-        compact = re.sub(r"\s+", "", text.lower())
-        correction_markers = [
-            "我问的是",
-            "我问的就是",
-            "问的是",
-            "问的就是",
-            "限定在",
-            "不是这篇",
-            "不是这个",
-            "i mean",
-            "i meant",
-        ]
-        scope_markers = ["论文中", "论文里", "文中", "这篇", "该论文", "paper"]
-        return (
-            any(marker in lowered or marker in compact or marker in text for marker in correction_markers)
-            and any(marker in lowered or marker in compact or marker in text for marker in scope_markers)
-        )
-
-    @staticmethod
     def _active_paper_reference_notes(*, notes: list[str], paper: CandidatePaper, marker: str) -> list[str]:
         return list(
             dict.fromkeys(
@@ -3461,7 +3372,11 @@ class ResearchAssistantAgentV4(
     def _promote_contextual_metric_contract(self, contract: QueryContract) -> QueryContract:
         if contract.relation == "metric_value_lookup":
             return contract
-        if not self._looks_like_contextual_metric_query(contract):
+        if not looks_like_contextual_metric_query(
+            contract.clean_query,
+            targets=list(contract.targets),
+            is_short_acronym=self._is_short_acronym,
+        ):
             return contract
         requested_fields = list(dict.fromkeys([*contract.requested_fields, "metric_value", "setting", "evidence"]))
         required_modalities = list(dict.fromkeys([*contract.required_modalities, "table", "caption", "page_text"]))
@@ -3478,31 +3393,6 @@ class ResearchAssistantAgentV4(
                 "notes": notes,
             }
         )
-
-    def _looks_like_contextual_metric_query(self, contract: QueryContract) -> bool:
-        if not contract.targets:
-            return False
-        text = str(contract.clean_query or "")
-        lowered = " ".join(text.lower().split())
-        compact = re.sub(r"\s+", "", text.lower())
-        markers = [
-            "具体效果",
-            "效果如何",
-            "表现如何",
-            "结果分别",
-            "分别如何",
-            "准确率",
-            "得分",
-            "指标",
-            "win rate",
-            "accuracy",
-            "score",
-            "performance",
-        ]
-        if not any(marker in lowered or marker in compact or marker in text for marker in markers):
-            return False
-        acronym_targets = [target for target in contract.targets if self._is_short_acronym(target)]
-        return len(contract.targets) >= 2 or bool(acronym_targets)
 
     def _formula_query_allows_active_paper_context(
         self,
@@ -3576,30 +3466,6 @@ class ResearchAssistantAgentV4(
             if self._is_short_acronym(candidate) or self._normalize_lookup_text(candidate) in active_keys:
                 return candidate
         return str(active.targets[0] or "").strip()
-
-    @staticmethod
-    def _looks_like_formula_location_correction(query: str) -> bool:
-        text = " ".join(str(query or "").strip().split())
-        lowered = text.lower()
-        if not text:
-            return False
-        markers = [
-            "就在",
-            "论文里",
-            "论文中",
-            "那篇",
-            "这篇",
-            "中啊",
-            "里啊",
-            "in the paper",
-            "in ",
-        ]
-        if any(marker in lowered or marker in text for marker in markers):
-            return True
-        return bool(
-            re.search(r"在\s*[A-Za-z0-9][^。？！?]{8,}\s*(?:中|里|里面)", text)
-            or re.search(r"\bFrom\s+1[,0-9]*\s+Users\b", text, flags=re.IGNORECASE)
-        )
 
     def _paper_from_query_hint(self, query: str) -> CandidatePaper | None:
         query_text = str(query or "").strip()
@@ -4827,20 +4693,7 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _is_negative_correction_query(query: str) -> bool:
-        lowered = str(query or "").lower()
-        markers = [
-            "不是这个",
-            "不是这篇",
-            "不是它",
-            "另一个",
-            "不对",
-            "错了",
-            "不一样",
-            "not this",
-            "another",
-            "different one",
-        ]
-        return any(marker in lowered for marker in markers)
+        return is_negative_correction_query(query)
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
         goals = self._research_plan_goals(contract)
