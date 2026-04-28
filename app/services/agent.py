@@ -30,9 +30,8 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
-from app.services.agent_events import normalize_agent_event
+from app.services.agent_emit import AgentEventRecorder, write_turn_trace_safe
 from app.services.model_clients import ModelClients
-from app.services.agent_trace import write_agent_trace
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
@@ -253,14 +252,9 @@ class ResearchAssistantAgentV4(
         resolved_session_id = session_id or uuid4().hex[:12]
         session = self.sessions.get(resolved_session_id)
         self._compress_session_history_if_needed(session)
-        events: list[dict[str, Any]] = []
+        event_recorder = AgentEventRecorder(callback=event_callback)
         execution_steps: list[dict[str, Any]] = []
-
-        def emit(event: str, data: dict[str, Any]) -> None:
-            item = {"event": event, "data": normalize_agent_event(event, data)}
-            events.append(item)
-            if event_callback is not None:
-                event_callback(item)
+        emit = event_recorder.emit
 
         emit("session", {"session_id": resolved_session_id})
         compound_result = self._run_compound_query_if_needed(
@@ -274,11 +268,11 @@ class ResearchAssistantAgentV4(
         if compound_result is not None:
             self._write_turn_trace(
                 session_id=resolved_session_id,
-                events=events,
+                events=event_recorder.events,
                 final_payload=compound_result,
                 execution_steps=execution_steps,
             )
-            return compound_result, events
+            return compound_result, event_recorder.events
 
         contract = self._extract_query_contract(
             query=query,
@@ -382,11 +376,11 @@ class ResearchAssistantAgentV4(
             payload = response.model_dump()
             self._write_turn_trace(
                 session_id=resolved_session_id,
-                events=events,
+                events=event_recorder.events,
                 final_payload=payload,
                 execution_steps=execution_steps,
             )
-            return payload, events
+            return payload, event_recorder.events
 
         agent_state = self.runtime.run_research_agent_loop(
             contract=contract,
@@ -500,11 +494,11 @@ class ResearchAssistantAgentV4(
         payload = response.model_dump()
         self._write_turn_trace(
             session_id=resolved_session_id,
-            events=events,
+            events=event_recorder.events,
             final_payload=payload,
             execution_steps=execution_steps,
         )
-        return payload, events
+        return payload, event_recorder.events
 
     def _write_turn_trace(
         self,
@@ -514,18 +508,15 @@ class ResearchAssistantAgentV4(
         final_payload: dict[str, Any],
         execution_steps: list[dict[str, Any]],
     ) -> None:
-        if not bool(getattr(self.settings, "agent_trace_enabled", True)):
-            return
-        try:
-            write_agent_trace(
-                data_dir=self.settings.data_dir,
-                session_id=session_id,
-                events=events,
-                final_payload=final_payload,
-                execution_steps=execution_steps,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("failed to write agent trace: %s", exc)
+        write_turn_trace_safe(
+            enabled=bool(getattr(self.settings, "agent_trace_enabled", True)),
+            data_dir=self.settings.data_dir,
+            session_id=session_id,
+            events=events,
+            final_payload=final_payload,
+            execution_steps=execution_steps,
+            logger=logger,
+        )
 
     def _set_conversation_answer(
         self,
