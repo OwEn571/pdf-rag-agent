@@ -64,6 +64,11 @@ def is_scoped_library_recommendation_query(query: str) -> bool:
     return is_library_recommendation_query(query) and has_library_scope(query)
 
 
+def library_query_prefers_previous_candidates(query: str) -> bool:
+    normalized, compact = normalized_query_text(query)
+    return not any(marker in normalized or marker in compact for marker in ["全库", "所有", "全部"])
+
+
 def is_citation_query(query: str) -> bool:
     normalized, compact = normalized_query_text(query)
     return any(marker in normalized or marker in compact for marker in ["引用数", "引用量", "被引", "citation", "citations"])

@@ -65,6 +65,7 @@ from app.services.followup_relationship_intents import (
     has_followup_support_relation_signal,
     target_relation_cue_near_text,
 )
+from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score, has_explicit_figure_reference
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
     citation_ranking_has_library_context,
@@ -72,6 +73,7 @@ from app.services.library_intents import (
     is_library_count_query,
     is_library_status_query,
     is_scoped_library_recommendation_query,
+    library_query_prefers_previous_candidates,
 )
 from app.services.research_intents import query_needs_external_search
 from app.services.web_search import TavilyWebSearchClient
@@ -1442,8 +1444,7 @@ class ResearchAssistantAgentV4(
                 }
             )
 
-        prefer_previous_candidates = not any(marker in query for marker in ["全库", "所有", "全部"])
-        if prefer_previous_candidates:
+        if library_query_prefers_previous_candidates(query):
             for turn in reversed(session.turns[-4:]):
                 if turn.relation not in {"library_recommendation", "compound_query", "library_citation_ranking"}:
                     continue
@@ -6174,7 +6175,7 @@ class ResearchAssistantAgentV4(
             elif item.block_type == "page_text" and item.snippet:
                 group["page_parts"].append(item.snippet)
                 page_score = 0.8 + (self._figure_signal_score(item.snippet) * 1.8)
-                if self._has_explicit_figure_reference(item.snippet):
+                if has_explicit_figure_reference(item.snippet):
                     page_score += 6.0
                 if page_score > float(group.get("page_text_score", 0.0)):
                     group["score"] += page_score - float(group.get("page_text_score", 0.0))
@@ -6206,7 +6207,7 @@ class ResearchAssistantAgentV4(
         combined = " ".join(parts)
         if "figure 1" not in combined.lower() and "图1" not in combined:
             combined = f"Figure 1 / 图1 相关内容：{combined}"
-        benchmarks = self._extract_figure_benchmarks(combined)
+        benchmarks = extract_figure_benchmarks(combined)
         benchmark_suffix = ""
         if len(benchmarks) >= 3:
             benchmark_suffix = " 图中提到的 benchmark 包括：" + "、".join(benchmarks) + "。"
@@ -6218,41 +6219,11 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _figure_signal_score(text: str) -> int:
-        haystack = str(text or "").lower()
-        tokens = [
-            "figure 1",
-            "benchmark performance",
-            "aime",
-            "codeforces",
-            "gpqa",
-            "math-500",
-            "mmlu",
-            "swe-bench",
-        ]
-        return sum(1 for token in tokens if token in haystack)
-
-    @staticmethod
-    def _has_explicit_figure_reference(text: str) -> bool:
-        haystack = str(text or "").lower()
-        return any(token in haystack for token in ["figure 1", "fig. 1", "fig 1", "figure1", "图1"])
+        return figure_signal_score(text)
 
     @staticmethod
     def _extract_figure_benchmarks(text: str) -> list[str]:
-        haystack = str(text or "").lower()
-        mapping = [
-            ("AIME 2024", ["aime 2024", "aime"]),
-            ("Codeforces", ["codeforces"]),
-            ("GPQA Diamond", ["gpqa diamond", "gpqa"]),
-            ("MATH-500", ["math-500"]),
-            ("MMLU", ["mmlu"]),
-            ("SWE-bench Verified", ["swe-bench verified", "swe-bench"]),
-            ("LiveCodeBench", ["livecodebench"]),
-        ]
-        found: list[str] = []
-        for label, tokens in mapping:
-            if any(token in haystack for token in tokens):
-                found.append(label)
-        return found
+        return extract_figure_benchmarks(text)
 
     def _render_page_image_data_url(self, *, file_path: str, page: int) -> str:
         pdf_path = str(file_path or "").strip()

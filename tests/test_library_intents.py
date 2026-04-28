@@ -7,6 +7,7 @@ from app.services.library_intents import (
     is_library_count_query,
     is_library_status_query,
     is_scoped_library_recommendation_query,
+    library_query_prefers_previous_candidates,
 )
 
 
@@ -15,6 +16,8 @@ def test_library_status_and_recommendation_intents_share_classifier() -> None:
     assert is_library_count_query("how many papers in zotero?")
     assert is_scoped_library_recommendation_query("你的知识库里哪篇最值得一看")
     assert not is_scoped_library_recommendation_query("再推荐一篇别的")
+    assert library_query_prefers_previous_candidates("再推荐一篇")
+    assert not library_query_prefers_previous_candidates("全库里推荐一篇")
 
 
 def test_citation_ranking_uses_recent_library_context() -> None:
