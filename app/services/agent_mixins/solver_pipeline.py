@@ -17,6 +17,8 @@ from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_qu
 from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
     is_unusable_topology_recommendation_text,
+    topology_discovery_claim,
+    topology_recommendation_claim,
 )
 from app.services.visual_claim_helpers import (
     figure_conclusion_claim_from_vlm_payload,
@@ -314,33 +316,13 @@ class SolverPipelineMixin:
         evidence: list[EvidenceBlock],
         session: SessionContext,
     ) -> list[Claim]:
-        if not papers:
-            return []
         topology_terms = self._extract_topology_terms(evidence)
-        relevant_papers: list[dict[str, str]] = []
-        evidence_ids: list[str] = []
-        paper_ids: list[str] = []
-        for paper in papers[:5]:
-            ids = self._evidence_ids_for_paper(evidence, paper.paper_id, limit=2)
-            if not ids and not paper.doc_ids:
-                continue
-            relevant_papers.append({"title": paper.title, "year": paper.year, "paper_id": paper.paper_id})
-            evidence_ids.extend(ids or paper.doc_ids[:1])
-            paper_ids.append(paper.paper_id)
-        if not relevant_papers:
-            relevant_papers = [{"title": paper.title, "year": paper.year, "paper_id": paper.paper_id} for paper in papers[:3]]
-            paper_ids = [paper.paper_id for paper in papers[:3]]
-        return [
-            Claim(
-                claim_type="topology_discovery",
-                entity="agent topology",
-                value="; ".join(item["title"] for item in relevant_papers),
-                structured_data={"topology_terms": topology_terms, "relevant_papers": relevant_papers},
-                evidence_ids=list(dict.fromkeys(evidence_ids)),
-                paper_ids=list(dict.fromkeys(paper_ids)),
-                confidence=0.82,
-            )
-        ]
+        claim = topology_discovery_claim(
+            papers=papers,
+            topology_terms=topology_terms,
+            evidence_ids_for_paper=lambda paper_id: self._evidence_ids_for_paper(evidence, paper_id, limit=2),
+        )
+        return [claim] if claim is not None else []
 
     def _solve_topology_recommendation_text(
         self,
@@ -354,22 +336,7 @@ class SolverPipelineMixin:
         if not topology_terms and not evidence:
             return []
         recommendation = self._derive_topology_recommendation(evidence=evidence, topology_terms=topology_terms)
-        return [
-            Claim(
-                claim_type="topology_recommendation",
-                entity="agent topology",
-                value=recommendation.get("summary", ""),
-                structured_data={
-                    "topology_terms": topology_terms,
-                    "overall_best": recommendation.get("overall_best", ""),
-                    "engineering_best": recommendation.get("engineering_best", ""),
-                    "rationale": recommendation.get("rationale", ""),
-                },
-                evidence_ids=evidence[:3] and [item.doc_id for item in evidence[:3]] or [],
-                paper_ids=list(dict.fromkeys(item.paper_id for item in evidence[:3])),
-                confidence=0.8,
-            )
-        ]
+        return [topology_recommendation_claim(recommendation=recommendation, topology_terms=topology_terms, evidence=evidence)]
 
     def _solve_paper_summary_results_text(
         self,

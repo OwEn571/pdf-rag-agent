@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
+from app.domain.models import CandidatePaper, Claim, EvidenceBlock
+
+
+EvidenceIdsForPaper = Callable[[str], list[str]]
+
 
 def fallback_topology_recommendation(topology_terms: list[str]) -> dict[str, str]:
     terms_text = " / ".join(topology_terms) if topology_terms else "chain / tree / mesh / DAG"
@@ -28,3 +35,57 @@ def is_unusable_topology_recommendation_text(text: str) -> bool:
         "不包含",
     ]
     return any(marker in lowered for marker in negative_markers)
+
+
+def topology_discovery_claim(
+    *,
+    papers: list[CandidatePaper],
+    topology_terms: list[str],
+    evidence_ids_for_paper: EvidenceIdsForPaper,
+) -> Claim | None:
+    if not papers:
+        return None
+    relevant_papers: list[dict[str, str]] = []
+    evidence_ids: list[str] = []
+    paper_ids: list[str] = []
+    for paper in papers[:5]:
+        ids = evidence_ids_for_paper(paper.paper_id)
+        if not ids and not paper.doc_ids:
+            continue
+        relevant_papers.append({"title": paper.title, "year": paper.year, "paper_id": paper.paper_id})
+        evidence_ids.extend(ids or paper.doc_ids[:1])
+        paper_ids.append(paper.paper_id)
+    if not relevant_papers:
+        relevant_papers = [{"title": paper.title, "year": paper.year, "paper_id": paper.paper_id} for paper in papers[:3]]
+        paper_ids = [paper.paper_id for paper in papers[:3]]
+    return Claim(
+        claim_type="topology_discovery",
+        entity="agent topology",
+        value="; ".join(item["title"] for item in relevant_papers),
+        structured_data={"topology_terms": topology_terms, "relevant_papers": relevant_papers},
+        evidence_ids=list(dict.fromkeys(evidence_ids)),
+        paper_ids=list(dict.fromkeys(paper_ids)),
+        confidence=0.82,
+    )
+
+
+def topology_recommendation_claim(
+    *,
+    recommendation: dict[str, str],
+    topology_terms: list[str],
+    evidence: list[EvidenceBlock],
+) -> Claim:
+    return Claim(
+        claim_type="topology_recommendation",
+        entity="agent topology",
+        value=recommendation.get("summary", ""),
+        structured_data={
+            "topology_terms": topology_terms,
+            "overall_best": recommendation.get("overall_best", ""),
+            "engineering_best": recommendation.get("engineering_best", ""),
+            "rationale": recommendation.get("rationale", ""),
+        },
+        evidence_ids=evidence[:3] and [item.doc_id for item in evidence[:3]] or [],
+        paper_ids=list(dict.fromkeys(item.paper_id for item in evidence[:3])),
+        confidence=0.8,
+    )
