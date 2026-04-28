@@ -140,6 +140,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
         "query_library_metadata",
         "compose",
         "todo_write",
+        "remember",
         "Task",
         "ask_human",
     }
@@ -148,6 +149,8 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert search_schema["properties"]["top_k"]["maximum"] == 50
     todo_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "todo_write")
     assert todo_schema["required"] == ["items"]
+    remember_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "remember")
+    assert remember_schema["required"] == ["key", "content"]
     task_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "Task")
     assert task_schema["required"] == ["description", "prompt"]
     fetch_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "fetch_url")
@@ -228,6 +231,7 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
     assert set(conversation_tools) == {
         "read_memory",
         "todo_write",
+        "remember",
         "Task",
         "web_search",
         "fetch_url",
@@ -235,7 +239,16 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "compose",
         "ask_human",
     }
-    assert set(research_tools) == {"read_memory", "todo_write", "search_corpus", "web_search", "fetch_url", "compose", "ask_human"}
+    assert set(research_tools) == {
+        "read_memory",
+        "todo_write",
+        "remember",
+        "search_corpus",
+        "web_search",
+        "fetch_url",
+        "compose",
+        "ask_human",
+    }
     assert "search_corpus" in research_tools
 
 

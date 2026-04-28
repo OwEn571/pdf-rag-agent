@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     agent_max_clarification_attempts: int = 2
     agent_disambiguation_auto_resolve_threshold: float = 0.85
     agent_disambiguation_recommend_threshold: float = 0.65
+    agent_trace_enabled: bool = True
     ingestion_excluded_tags: tuple[str, ...] = ("书籍", "book", "books")
     ingestion_allowed_item_types: tuple[str, ...] = (
         "journalArticle",

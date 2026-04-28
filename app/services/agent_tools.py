@@ -294,6 +294,22 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         conversation_executable=True,
     ),
     AgentToolSpec(
+        name="remember",
+        when="Use to persist a reusable learning, routing correction, or durable user preference for future turns.",
+        returns="The learning key and file path where the memory was stored.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["key", "content"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+        conversation_executable=True,
+    ),
+    AgentToolSpec(
         name="Task",
         when=(
             "Use for an independent subtask that should run through the agent's normal research/conversation tools, "

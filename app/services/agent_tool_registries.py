@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_tools import RegisteredAgentTool
+from app.services.learnings import remember_learning
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -238,6 +239,20 @@ def build_conversation_tool_registry(
             tool="todo_write",
             summary=f"todos={len(items)}",
             payload={"items": items},
+        )
+
+    def remember() -> None:
+        planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
+        key = str(planned_input.get("key", "") or "general").strip()
+        content = str(planned_input.get("content", "") or "").strip()
+        path = remember_learning(data_dir=agent.settings.data_dir, key=key, content=content)
+        state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="remember",
+            summary=f"key={key}",
+            payload={"key": key, "path": str(path), "content_chars": len(content)},
         )
 
     def run_task() -> None:
@@ -545,6 +560,7 @@ def build_conversation_tool_registry(
     return {
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
+        "remember": RegisteredAgentTool("remember", remember),
         "Task": RegisteredAgentTool("Task", run_task),
         "web_search": RegisteredAgentTool("web_search", web_search),
         "fetch_url": RegisteredAgentTool("fetch_url", fetch_url),
@@ -639,6 +655,20 @@ def build_research_tool_registry(
             tool="todo_write",
             summary=f"todos={len(items)}",
             payload={"items": items},
+        )
+
+    def remember() -> None:
+        planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
+        key = str(planned_input.get("key", "") or "general").strip()
+        content = str(planned_input.get("content", "") or "").strip()
+        path = remember_learning(data_dir=agent.settings.data_dir, key=key, content=content)
+        state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="remember",
+            summary=f"key={key}",
+            payload={"key": key, "path": str(path), "content_chars": len(content)},
         )
 
     def search_papers() -> None:
@@ -784,6 +814,7 @@ def build_research_tool_registry(
     return {
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
+        "remember": RegisteredAgentTool("remember", remember),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),
         "compose": RegisteredAgentTool("compose", compose, terminal=True),
         "web_search": RegisteredAgentTool("web_search", web_search),

@@ -32,6 +32,8 @@ from app.domain.models import (
 )
 from app.services.agent_events import normalize_agent_event
 from app.services.model_clients import ModelClients
+from app.services.agent_trace import write_agent_trace
+from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
@@ -81,6 +83,7 @@ CANONICAL_TOOL_NAMES = {
     "query_library_metadata",
     "compose",
     "todo_write",
+    "remember",
     "Task",
     "ask_human",
 }
@@ -251,6 +254,12 @@ class ResearchAssistantAgentV4(
             execution_steps=execution_steps,
         )
         if compound_result is not None:
+            self._write_turn_trace(
+                session_id=resolved_session_id,
+                events=events,
+                final_payload=compound_result,
+                execution_steps=execution_steps,
+            )
             return compound_result, events
 
         contract = self._extract_query_contract(
@@ -352,7 +361,14 @@ class ResearchAssistantAgentV4(
                 clarification_question=self._clarification_question(contract, session) if conversation_needs_human else "",
                 clarification_options=self._clarification_options(contract) if conversation_needs_human else [],
             )
-            return response.model_dump(), events
+            payload = response.model_dump()
+            self._write_turn_trace(
+                session_id=resolved_session_id,
+                events=events,
+                final_payload=payload,
+                execution_steps=execution_steps,
+            )
+            return payload, events
 
         agent_state = self.runtime.run_research_agent_loop(
             contract=contract,
@@ -463,7 +479,35 @@ class ResearchAssistantAgentV4(
             clarification_question=self._clarification_question(contract, session) if verification.status == "clarify" else "",
             clarification_options=self._clarification_options(contract) if verification.status == "clarify" else [],
         )
-        return response.model_dump(), events
+        payload = response.model_dump()
+        self._write_turn_trace(
+            session_id=resolved_session_id,
+            events=events,
+            final_payload=payload,
+            execution_steps=execution_steps,
+        )
+        return payload, events
+
+    def _write_turn_trace(
+        self,
+        *,
+        session_id: str,
+        events: list[dict[str, Any]],
+        final_payload: dict[str, Any],
+        execution_steps: list[dict[str, Any]],
+    ) -> None:
+        if not bool(getattr(self.settings, "agent_trace_enabled", True)):
+            return
+        try:
+            write_agent_trace(
+                data_dir=self.settings.data_dir,
+                session_id=session_id,
+                events=events,
+                final_payload=final_payload,
+                execution_steps=execution_steps,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("failed to write agent trace: %s", exc)
 
     def _set_conversation_answer(
         self,
@@ -2567,6 +2611,7 @@ class ResearchAssistantAgentV4(
             "search_corpus": f"从本地论文库检索与 {target_text} 相关的论文和证据块。",
             "compose": "基于当前记忆或证据进入最终整理；研究问题会先完成内部求解和校验。",
             "todo_write": "更新可见任务列表，让多步检索/验证过程可以被前端追踪。",
+            "remember": "把可复用的学习或用户偏好持久化，供后续轮次读取。",
             "Task": "派发一个独立子任务，通过同一套工具循环收集结果。",
             "understand_user_intent": f"先确认任务类型：{contract.relation}，目标是 {target_text}。",
             "reflect_previous_answer": "先反思上一轮回答，排除已经被用户否定的解释。",
@@ -3559,6 +3604,7 @@ class ResearchAssistantAgentV4(
                 "options": session.pending_clarification_options,
             },
             "working_memory": session.working_memory,
+            "persistent_learnings": self._persistent_learnings_context(),
             "turns": [turn_payload(turn, answer_limit=answer_limit) for turn in session.turns],
         }
         serialized = json.dumps(payload, ensure_ascii=False)
@@ -3572,6 +3618,13 @@ class ResearchAssistantAgentV4(
         payload["turns"] = compact_turns
         payload["context_compression_note"] = "Older answers were shortened because the raw conversation context was near the prompt budget."
         return payload
+
+    def _persistent_learnings_context(self) -> str:
+        try:
+            return load_learnings(data_dir=self.settings.data_dir, max_chars=4000)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("failed to load persistent learnings: %s", exc)
+            return ""
 
     def _session_llm_history_messages(
         self,
