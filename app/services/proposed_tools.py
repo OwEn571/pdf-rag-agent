@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
@@ -10,6 +11,41 @@ from typing import Any
 
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{2,63}$")
+_ALLOWED_IMPORT_ROOTS = {
+    "collections",
+    "dataclasses",
+    "datetime",
+    "decimal",
+    "functools",
+    "itertools",
+    "json",
+    "math",
+    "re",
+    "statistics",
+    "string",
+    "typing",
+}
+_BLOCKED_CALL_NAMES = {
+    "__import__",
+    "compile",
+    "eval",
+    "exec",
+    "globals",
+    "input",
+    "locals",
+    "open",
+    "vars",
+}
+_BLOCKED_CALL_ROOTS = {
+    "httpx",
+    "os",
+    "pathlib",
+    "requests",
+    "shutil",
+    "socket",
+    "subprocess",
+    "urllib",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +56,7 @@ class ToolProposal:
     python_code: str
     rationale: str
     path: Path
+    safety: dict[str, Any]
     status: str = "pending_review"
 
     def payload(self) -> dict[str, Any]:
@@ -32,6 +69,8 @@ class ToolProposal:
             "status": self.status,
             "code_chars": len(self.python_code),
             "admin_approval_required": True,
+            "sandbox_required": True,
+            "safety": self.safety,
         }
 
 
@@ -56,6 +95,7 @@ def propose_tool(
         raise ValueError("rationale is required")
     if not clean_code:
         raise ValueError("python_code is required")
+    safety = _validate_python_code(clean_code)
     normalized_schema = _normalize_input_schema(input_schema)
     proposal_dir = Path(data_dir) / "tools_proposed"
     proposal_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +109,7 @@ def propose_tool(
         python_code=clean_code,
         rationale=clean_rationale,
         path=path,
+        safety=safety,
     )
     path.write_text(
         json.dumps(
@@ -97,3 +138,53 @@ def _normalize_input_schema(schema: Any) -> dict[str, Any]:
         normalized["required"] = []
     normalized.setdefault("additionalProperties", False)
     return normalized
+
+
+def _validate_python_code(code: str) -> dict[str, Any]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        raise ValueError(f"python_code syntax error: {exc.msg}") from exc
+    issues: list[str] = []
+    run_defs = [node for node in tree.body if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == "run"]
+    if not any(isinstance(node, ast.AsyncFunctionDef) for node in run_defs):
+        issues.append("python_code must define async def run(...)")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                _validate_import_root(alias.name, issues=issues)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                issues.append("relative imports are not allowed")
+                continue
+            _validate_import_root(node.module or "", issues=issues)
+        elif isinstance(node, ast.Call):
+            call_name = _call_name(node.func)
+            root = call_name.split(".", 1)[0]
+            if call_name in _BLOCKED_CALL_NAMES or root in _BLOCKED_CALL_ROOTS:
+                issues.append(f"blocked call: {call_name}")
+        elif isinstance(node, ast.Attribute) and str(node.attr).startswith("__"):
+            issues.append(f"dunder attribute access is not allowed: {node.attr}")
+    if issues:
+        raise ValueError("unsafe python_code: " + "; ".join(dict.fromkeys(issues)))
+    return {
+        "static_check": "pass",
+        "allowed_import_roots": sorted(_ALLOWED_IMPORT_ROOTS),
+        "blocked_call_names": sorted(_BLOCKED_CALL_NAMES),
+        "blocked_call_roots": sorted(_BLOCKED_CALL_ROOTS),
+    }
+
+
+def _validate_import_root(name: str, *, issues: list[str]) -> None:
+    root = str(name or "").split(".", 1)[0]
+    if not root or root not in _ALLOWED_IMPORT_ROOTS:
+        issues.append(f"import not allowed: {name or '<empty>'}")
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _call_name(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    return ""

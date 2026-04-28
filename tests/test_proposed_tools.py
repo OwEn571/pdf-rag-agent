@@ -25,6 +25,8 @@ def test_propose_tool_writes_pending_review_record_without_executing_code(tmp_pa
     assert payload["name"] == "extract_metric"
     assert payload["status"] == "pending_review"
     assert payload["admin_approval_required"] is True
+    assert payload["sandbox_required"] is True
+    assert payload["safety"]["static_check"] == "pass"
     assert "must not execute" in payload["python_code"]
     assert payload["input_schema"]["additionalProperties"] is False
 
@@ -43,3 +45,35 @@ def test_propose_tool_rejects_unsafe_names(tmp_path) -> None:
         assert "tool name" in str(exc)
     else:
         raise AssertionError("expected invalid tool name to be rejected")
+
+
+def test_propose_tool_rejects_disallowed_imports(tmp_path) -> None:
+    try:
+        propose_tool(
+            data_dir=tmp_path,
+            name="shell_tool",
+            description="bad",
+            input_schema={"type": "object"},
+            python_code="import os\n\nasync def run(args, ctx, session):\n    return os.listdir('.')",
+            rationale="bad",
+        )
+    except ValueError as exc:
+        assert "import not allowed: os" in str(exc)
+    else:
+        raise AssertionError("expected unsafe import to be rejected")
+
+
+def test_propose_tool_requires_async_run_entrypoint(tmp_path) -> None:
+    try:
+        propose_tool(
+            data_dir=tmp_path,
+            name="sync_tool",
+            description="bad",
+            input_schema={"type": "object"},
+            python_code="def run(args, ctx, session):\n    return None",
+            rationale="bad",
+        )
+    except ValueError as exc:
+        assert "async def run" in str(exc)
+    else:
+        raise AssertionError("expected missing async run to be rejected")
