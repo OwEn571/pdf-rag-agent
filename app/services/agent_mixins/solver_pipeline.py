@@ -10,6 +10,7 @@ from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
+from app.services.schema_claim_helpers import claims_from_schema_payload
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
@@ -132,53 +133,7 @@ class SolverPipelineMixin:
             ),
             fallback={},
         )
-        if not isinstance(payload, dict):
-            return []
-        raw_claims = payload.get("claims", [])
-        if not isinstance(raw_claims, list):
-            return []
-        evidence_ids = {item.doc_id for item in evidence}
-        paper_ids = {item.paper_id for item in papers} | {item.paper_id for item in evidence}
-        claims: list[Claim] = []
-        for item in raw_claims[:12]:
-            if not isinstance(item, dict):
-                continue
-            raw_evidence_ids = item.get("evidence_ids", [])
-            if isinstance(raw_evidence_ids, str):
-                raw_evidence_ids = [raw_evidence_ids]
-            selected_evidence_ids = [
-                str(doc_id).strip()
-                for doc_id in raw_evidence_ids
-                if str(doc_id).strip() in evidence_ids
-            ]
-            if not selected_evidence_ids:
-                continue
-            raw_paper_ids = item.get("paper_ids", [])
-            if isinstance(raw_paper_ids, str):
-                raw_paper_ids = [raw_paper_ids]
-            selected_paper_ids = [
-                str(paper_id).strip()
-                for paper_id in raw_paper_ids
-                if str(paper_id).strip() in paper_ids
-            ] or list(dict.fromkeys(block.paper_id for block in evidence if block.doc_id in selected_evidence_ids))
-            structured_data = item.get("structured_data", {})
-            if not isinstance(structured_data, dict):
-                structured_data = {}
-            structured_data = dict(structured_data)
-            structured_data["source"] = "schema_claim_solver"
-            claims.append(
-                Claim(
-                    claim_type=str(item.get("claim_type", "") or "general_answer"),
-                    entity=str(item.get("entity", "") or (contract.targets[0] if contract.targets else "")),
-                    value=str(item.get("value", "") or ""),
-                    structured_data=structured_data,
-                    evidence_ids=selected_evidence_ids,
-                    paper_ids=list(dict.fromkeys(selected_paper_ids)),
-                    confidence=self._coerce_confidence(item.get("confidence", 0.72)),
-                    required=bool(item.get("required", True)),
-                )
-            )
-        return claims
+        return claims_from_schema_payload(payload, contract=contract, papers=papers, evidence=evidence)
 
     def _solve_claims_with_deterministic_fallback(
         self,
