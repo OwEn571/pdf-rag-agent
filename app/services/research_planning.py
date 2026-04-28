@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.domain.models import QueryContract, ResearchPlan
-from app.services.agent_mixins.solver_pipeline import SolverPipelineMixin
+from app.services.solver_goal_helpers import fallback_goals_from_query, looks_like_metric_goal
 
 
 def build_research_plan(*, contract: QueryContract, settings: Any) -> ResearchPlan:
@@ -160,13 +160,13 @@ def research_plan_goals(contract: QueryContract) -> set[str]:
     if "structured_intent" not in notes and legacy_goals:
         goals.update(legacy_goals)
     if not goals or goals <= {"answer", "general_answer"}:
-        goals.update(SolverPipelineMixin._fallback_goals_from_query(contract.clean_query, targets=contract.targets))
+        goals.update(fallback_goals_from_query(contract.clean_query, targets=contract.targets))
     if not goals or goals <= {"answer", "general_answer"}:
         goals.update(legacy_goals)
     for modality in contract.required_modalities:
         if modality == "figure":
             goals.add("figure_conclusion")
-        elif modality in {"table", "caption"} and SolverPipelineMixin._looks_like_metric_goal(
+        elif modality in {"table", "caption"} and looks_like_metric_goal(
             contract.clean_query,
             goals,
         ):
