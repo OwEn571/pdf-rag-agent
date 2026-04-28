@@ -16,6 +16,7 @@ from app.services.tool_registry_helpers import (
     store_session_todos,
     summary_source_from_state,
     tool_input_from_state,
+    verify_claim_tool_payload,
 )
 from app.services.url_fetcher import FetchUrlResult
 
@@ -139,3 +140,29 @@ def test_tool_registry_helpers_small_coercions() -> None:
     assert coerce_int("5", default=1, minimum=1, maximum=10) == 5
     assert coerce_int("bad", default=7, minimum=1, maximum=10) == 7
     assert coerce_int(99, default=1, minimum=1, maximum=10) == 10
+
+
+def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() -> None:
+    state = {
+        "evidence": [
+            EvidenceBlock(
+                doc_id="ev-1",
+                paper_id="P1",
+                title="Paper",
+                file_path="/tmp/paper.pdf",
+                page=1,
+                block_type="page_text",
+                snippet="DPO optimizes preference likelihood without a reward model.",
+            )
+        ]
+    }
+
+    payload, summary = verify_claim_tool_payload(
+        planned_input={"claim": "DPO optimizes preference likelihood", "min_overlap": 2},
+        state=state,
+    )
+
+    assert payload["status"] == "pass"
+    assert payload["supporting_evidence_ids"] == ["ev-1"]
+    assert payload["min_overlap"] == 2
+    assert summary.startswith("pass:")

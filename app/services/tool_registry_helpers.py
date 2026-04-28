@@ -5,7 +5,7 @@ from typing import Any
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.contract_context import contract_answer_slots, note_value
-from app.services.evidence_tools import evidence_from_payload
+from app.services.evidence_tools import evidence_from_payload, verify_claim_against_evidence
 from app.services.url_fetcher import FetchUrlResult
 
 
@@ -156,3 +156,21 @@ def coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def verify_claim_tool_payload(*, planned_input: dict[str, Any], state: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    claim = str(planned_input.get("claim", "") or "").strip()
+    evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
+    min_overlap = coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
+    check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
+    payload = {
+        "claim": claim,
+        "status": check.status,
+        "confidence": check.confidence,
+        "supporting_evidence_ids": check.supporting_evidence_ids,
+        "matched_terms": check.matched_terms,
+        "missing_terms": check.missing_terms,
+        "min_overlap": min_overlap,
+        "reason": check.reason,
+    }
+    return payload, f"{check.status}:{check.confidence:.2f}"

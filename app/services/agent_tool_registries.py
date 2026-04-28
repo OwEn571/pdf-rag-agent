@@ -10,7 +10,6 @@ from app.services.evidence_tools import (
     evidence_from_payload,
     summarize_evidence,
     summarize_text,
-    verify_claim_against_evidence,
 )
 from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
@@ -30,6 +29,7 @@ from app.services.tool_registry_helpers import (
     store_session_todos,
     summary_source_from_state,
     tool_input_from_state,
+    verify_claim_tool_payload,
 )
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
@@ -259,29 +259,14 @@ def build_conversation_tool_registry(
 
     def verify_claim() -> None:
         planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
-        claim = str(planned_input.get("claim", "") or "").strip()
-        evidence = evidence_from_payload(planned_input.get("evidence", []))
-        if not evidence:
-            evidence = evidence_blocks_from_state(state)
-        min_overlap = coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
-        check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
-        payload = {
-            "claim": claim,
-            "status": check.status,
-            "confidence": check.confidence,
-            "supporting_evidence_ids": check.supporting_evidence_ids,
-            "matched_terms": check.matched_terms,
-            "missing_terms": check.missing_terms,
-            "min_overlap": min_overlap,
-            "reason": check.reason,
-        }
+        payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
         state.setdefault("claim_checks", []).append(payload)
         state.setdefault("tool_verifications", []).append(payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="verify_claim",
-            summary=f"{check.status}:{check.confidence:.2f}",
+            summary=summary,
             payload=payload,
         )
 
@@ -904,27 +889,14 @@ def build_research_tool_registry(
 
     def verify_claim() -> None:
         planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
-        claim = str(planned_input.get("claim", "") or "").strip()
-        evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
-        min_overlap = coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
-        check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
-        payload = {
-            "claim": claim,
-            "status": check.status,
-            "confidence": check.confidence,
-            "supporting_evidence_ids": check.supporting_evidence_ids,
-            "matched_terms": check.matched_terms,
-            "missing_terms": check.missing_terms,
-            "min_overlap": min_overlap,
-            "reason": check.reason,
-        }
+        payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
         state.setdefault("claim_checks", []).append(payload)
         state.setdefault("tool_verifications", []).append(payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="verify_claim",
-            summary=f"{check.status}:{check.confidence:.2f}",
+            summary=summary,
             payload=payload,
         )
 
