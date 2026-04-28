@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
@@ -11,6 +12,7 @@ from app.services.evidence_tools import (
     summarize_text,
     verify_claim_against_evidence,
 )
+from app.services.learnings import remember_learning
 from app.services.url_fetcher import FetchUrlResult
 
 
@@ -69,6 +71,16 @@ def store_session_todos(session: SessionContext, items: list[dict[str, str]]) ->
     memory = dict(session.working_memory or {})
     memory["todos"] = items
     session.working_memory = memory
+
+
+def todo_write_tool_payload(
+    *,
+    planned_input: dict[str, Any],
+    session: SessionContext,
+) -> tuple[list[dict[str, str]], dict[str, Any], str]:
+    items = normalize_todo_items(planned_input.get("items", []))
+    store_session_todos(session, items)
+    return items, {"items": items}, f"todos={len(items)}"
 
 
 def format_task_results_answer(task_results: list[dict[str, Any]]) -> str:
@@ -161,6 +173,20 @@ def coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def remember_tool_payload(
+    *,
+    data_dir: Path,
+    planned_input: dict[str, Any],
+    state: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    key = str(planned_input.get("key", "") or "general").strip()
+    content = str(planned_input.get("content", "") or "").strip()
+    path = remember_learning(data_dir=data_dir, key=key, content=content)
+    state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
+    payload = {"key": key, "path": str(path), "content_chars": len(content)}
+    return payload, f"key={key}"
 
 
 def summarize_tool_payload(

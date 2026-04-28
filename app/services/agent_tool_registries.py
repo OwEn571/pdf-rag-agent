@@ -9,7 +9,6 @@ from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import (
     evidence_from_payload,
 )
-from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
@@ -20,10 +19,10 @@ from app.services.tool_registry_helpers import (
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
-    normalize_todo_items,
+    remember_tool_payload,
     research_intent_summary,
-    store_session_todos,
     summarize_tool_payload,
+    todo_write_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
 )
@@ -186,29 +185,25 @@ def build_conversation_tool_registry(
 
     def todo_write() -> None:
         planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
-        items = normalize_todo_items(planned_input.get("items", []))
-        store_session_todos(session, items)
+        items, payload, summary = todo_write_tool_payload(planned_input=planned_input, session=session)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="todo_write",
-            summary=f"todos={len(items)}",
-            payload={"items": items},
+            summary=summary,
+            payload=payload,
         )
 
     def remember() -> None:
         planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
-        key = str(planned_input.get("key", "") or "general").strip()
-        content = str(planned_input.get("content", "") or "").strip()
-        path = remember_learning(data_dir=agent.settings.data_dir, key=key, content=content)
-        state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
+        payload, summary = remember_tool_payload(data_dir=agent.settings.data_dir, planned_input=planned_input, state=state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="remember",
-            summary=f"key={key}",
-            payload={"key": key, "path": str(path), "content_chars": len(content)},
+            summary=summary,
+            payload=payload,
         )
 
     def propose_tool() -> None:
@@ -577,29 +572,25 @@ def build_research_tool_registry(
 
     def todo_write() -> None:
         planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
-        items = normalize_todo_items(planned_input.get("items", []))
-        store_session_todos(session, items)
+        items, payload, summary = todo_write_tool_payload(planned_input=planned_input, session=session)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="todo_write",
-            summary=f"todos={len(items)}",
-            payload={"items": items},
+            summary=summary,
+            payload=payload,
         )
 
     def remember() -> None:
         planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
-        key = str(planned_input.get("key", "") or "general").strip()
-        content = str(planned_input.get("content", "") or "").strip()
-        path = remember_learning(data_dir=agent.settings.data_dir, key=key, content=content)
-        state.setdefault("learnings", []).append({"key": key, "path": str(path), "content": content})
+        payload, summary = remember_tool_payload(data_dir=agent.settings.data_dir, planned_input=planned_input, state=state)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="remember",
-            summary=f"key={key}",
-            payload={"key": key, "path": str(path), "content_chars": len(content)},
+            summary=summary,
+            payload=payload,
         )
 
     def propose_tool() -> None:

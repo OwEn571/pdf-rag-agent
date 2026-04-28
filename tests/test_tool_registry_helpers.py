@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.tool_registry_helpers import (
     coerce_int,
@@ -12,10 +14,12 @@ from app.services.tool_registry_helpers import (
     format_summaries_answer,
     format_task_results_answer,
     normalize_todo_items,
+    remember_tool_payload,
     research_intent_summary,
     store_session_todos,
     summary_source_from_state,
     summarize_tool_payload,
+    todo_write_tool_payload,
     tool_input_from_state,
     verify_claim_tool_payload,
 )
@@ -40,6 +44,10 @@ def test_tool_registry_helpers_normalize_and_store_todos() -> None:
     store_session_todos(session, items)
     assert session.working_memory["keep"] == "yes"
     assert session.working_memory["todos"] == items
+    tool_items, payload, summary = todo_write_tool_payload(planned_input={"items": items}, session=session)
+    assert tool_items == items
+    assert payload == {"items": items}
+    assert summary == "todos=2"
 
 
 def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
@@ -141,6 +149,22 @@ def test_tool_registry_helpers_small_coercions() -> None:
     assert coerce_int("5", default=1, minimum=1, maximum=10) == 5
     assert coerce_int("bad", default=7, minimum=1, maximum=10) == 7
     assert coerce_int(99, default=1, minimum=1, maximum=10) == 10
+
+
+def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_path: Path) -> None:
+    state: dict[str, object] = {}
+
+    payload, summary = remember_tool_payload(
+        data_dir=tmp_path,
+        planned_input={"key": " DPO ", "content": " remember this "},
+        state=state,
+    )
+
+    assert summary == "key=DPO"
+    assert payload["key"] == "DPO"
+    assert payload["content_chars"] == len("remember this")
+    assert state["learnings"] == [{"key": "DPO", "path": payload["path"], "content": "remember this"}]
+    assert "remember this" in Path(str(payload["path"])).read_text(encoding="utf-8")
 
 
 def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() -> None:
