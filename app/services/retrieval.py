@@ -483,7 +483,11 @@ class DualIndexRetriever:
                 text = str(doc.page_content or "")
                 title = str(meta.get("title", ""))
                 snippet = self._focused_snippet(text=text, targets=target_terms, query=query)
-                if not formula_requested and self._looks_formula_heavy(snippet):
+                if (
+                    not formula_requested
+                    and self.settings.retrieval_filter_formula_heavy_non_formula
+                    and self._looks_formula_heavy(snippet)
+                ):
                     continue
                 entity_score = self._entity_score(text=text, title=title, tokens=tokens, target_terms=target_terms)
                 if entity_score <= 0:

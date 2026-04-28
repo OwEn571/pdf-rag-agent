@@ -99,6 +99,7 @@ class Settings(BaseSettings):
         }
     )
     retrieval_target_formula_token_weights: dict[str, dict[str, float]] = Field(default_factory=dict)
+    retrieval_filter_formula_heavy_non_formula: bool = True
     solver_metric_token_weights: dict[str, float] = Field(
         default_factory=lambda: {
             "pba": 4.0,

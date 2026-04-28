@@ -145,6 +145,33 @@ def test_retriever_reranks_existing_evidence_by_focus_terms(tmp_path: Path) -> N
     assert reranked[0].metadata["rerank_score"] > reranked[1].metadata["rerank_score"]
 
 
+def test_formula_heavy_filter_can_be_disabled_for_entity_evidence(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    block_docs = [
+        Document(
+            page_content="PPO ∑𝜋𝜃 (𝑜𝑡 |𝑞, 𝑜<𝑡) 𝜋𝜃𝑜𝑙𝑑 (𝑜𝑡 |𝑞, 𝑜<𝑡) , 1 − 𝜀, 1 + 𝜀  𝐴𝑡  . (15)",
+            metadata={
+                "doc_id": "formula-heavy",
+                "paper_id": "PPO",
+                "title": "PPO Paper",
+                "block_type": "page_text",
+                "page": 1,
+            },
+        )
+    ]
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    contract = QueryContract(clean_query="PPO 是什么方法", targets=["PPO"], requested_fields=["definition"])
+
+    default_retriever = DualIndexRetriever(settings)
+    default_hits = default_retriever.search_entity_evidence(query=contract.clean_query, contract=contract, limit=5)
+    disabled_settings = settings.model_copy(update={"retrieval_filter_formula_heavy_non_formula": False})
+    disabled_retriever = DualIndexRetriever(disabled_settings)
+    disabled_hits = disabled_retriever.search_entity_evidence(query=contract.clean_query, contract=contract, limit=5)
+
+    assert [item.doc_id for item in default_hits] == []
+    assert [item.doc_id for item in disabled_hits] == ["formula-heavy"]
+
+
 def test_retriever_reads_pdf_page_blocks_and_greps_corpus(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     paper_docs = [

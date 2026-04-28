@@ -71,3 +71,4 @@
 - 2026-04-28 按 review §9 起步检索层工具化：新增 `query_rewrite` 原子工具和本地 deterministic rewrite fallback，支持 `multi_query / hyde / step_back` 模式；research registry 会记录 `query_rewrites / rewritten_queries`，atomic search/grep 可复用首个改写查询。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 185 个测试。
 - 2026-04-28 继续推进 review §9：`rerank` schema 扩展为 `query, candidates[], top_k, focus[]`，research registry 会优先重排显式 candidates，没有传入时仍兼容当前 state evidence，向“screen/expand evidence 都变成纯 rerank 工具输入”的方向收口。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 186 个测试。
 - 2026-04-28 继续推进 review §9：`search_corpus` 增加可选 `strategy:auto|legacy|bm25|vector|hybrid`，显式传入原子策略时会委托对应 `*_search` 工具路径，默认仍保留旧 paper+evidence 兼容流程，便于逐步迁出粗粒度检索。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 187 个测试。
+- 2026-04-28 继续推进 review §9：新增 `retrieval_filter_formula_heavy_non_formula` 配置项，默认保持非公式类实体检索中过滤 formula-heavy snippet 的旧行为，但可关闭该 heuristic，避免检索层硬规则不可控。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 188 个测试。
