@@ -25,6 +25,14 @@ def tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def planned_tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
+    planned = tool_input_from_state(state, name)
+    if planned:
+        return planned
+    current = state.get("current_tool_input", {})
+    return dict(current) if isinstance(current, dict) else {}
+
+
 def conversation_intent_summary(contract: QueryContract) -> dict[str, Any]:
     notes = [str(item) for item in contract.notes]
     intent_kind = note_value(notes=notes, prefix="intent_kind=") or contract.interaction_mode

@@ -17,6 +17,7 @@ from app.services.tool_registry_helpers import (
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
+    planned_tool_input_from_state,
     propose_tool_payload,
     remember_tool_payload,
     research_intent_summary,
@@ -159,7 +160,7 @@ def build_conversation_tool_registry(
         read_conversation_memory()
 
     def todo_write() -> None:
-        planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "todo_write")
         items, payload, summary = todo_write_tool_payload(planned_input=planned_input, session=session)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
@@ -171,7 +172,7 @@ def build_conversation_tool_registry(
         )
 
     def remember() -> None:
-        planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "remember")
         payload, summary = remember_tool_payload(data_dir=agent.settings.data_dir, planned_input=planned_input, state=state)
         agent._record_agent_observation(
             emit=emit,
@@ -182,7 +183,7 @@ def build_conversation_tool_registry(
         )
 
     def propose_tool() -> None:
-        planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "propose_tool")
         payload = propose_tool_payload(agent, planned_input)
         state.setdefault("tool_proposals", []).append(payload)
         emit("tool_proposal", payload)
@@ -197,7 +198,7 @@ def build_conversation_tool_registry(
         )
 
     def summarize() -> None:
-        planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "summarize")
         payload = summarize_tool_payload(
             planned_input=planned_input,
             state=state,
@@ -216,7 +217,7 @@ def build_conversation_tool_registry(
         )
 
     def verify_claim() -> None:
-        planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "verify_claim")
         payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
         state.setdefault("claim_checks", []).append(payload)
         state.setdefault("tool_verifications", []).append(payload)
@@ -229,7 +230,7 @@ def build_conversation_tool_registry(
         )
 
     def run_task() -> None:
-        planned_input = tool_input("Task") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "Task")
         prompt = " ".join(str(planned_input.get("prompt", "") or planned_input.get("description", "") or query).split())
         if not prompt:
             return
@@ -377,7 +378,7 @@ def build_conversation_tool_registry(
         )
 
     def fetch_url() -> None:
-        planned_input = tool_input("fetch_url") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "fetch_url")
         url = str(planned_input.get("url", "") or "").strip()
         max_chars = planned_input.get("max_chars", 4000)
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})
@@ -499,9 +500,6 @@ def build_research_tool_registry(
     emit: EmitFn,
     execution_steps: list[dict[str, Any]],
 ) -> dict[str, RegisteredAgentTool]:
-    def tool_input(name: str) -> dict[str, Any]:
-        return tool_input_from_state(state, name)
-
     def understand_user_intent() -> None:
         contract: QueryContract = state["contract"]
         summary, payload = research_intent_summary(contract)
@@ -546,7 +544,7 @@ def build_research_tool_registry(
         )
 
     def todo_write() -> None:
-        planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "todo_write")
         items, payload, summary = todo_write_tool_payload(planned_input=planned_input, session=session)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
@@ -558,7 +556,7 @@ def build_research_tool_registry(
         )
 
     def remember() -> None:
-        planned_input = tool_input("remember") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "remember")
         payload, summary = remember_tool_payload(data_dir=agent.settings.data_dir, planned_input=planned_input, state=state)
         agent._record_agent_observation(
             emit=emit,
@@ -569,7 +567,7 @@ def build_research_tool_registry(
         )
 
     def propose_tool() -> None:
-        planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "propose_tool")
         payload = propose_tool_payload(agent, planned_input)
         state.setdefault("tool_proposals", []).append(payload)
         emit("tool_proposal", payload)
@@ -590,7 +588,7 @@ def build_research_tool_registry(
         )
 
     def search_corpus() -> None:
-        planned_input = tool_input("search_corpus") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "search_corpus")
         strategy = str(planned_input.get("strategy", "") or "auto").strip()
         if strategy in {"bm25", "vector", "hybrid"}:
             run_atomic_search(f"{strategy}_search")
@@ -618,7 +616,7 @@ def build_research_tool_registry(
         )
 
     def run_atomic_search(name: str) -> None:
-        planned_input = tool_input(name) or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, name)
         rewritten_queries = list(state.get("rewritten_queries", []) or [])
         query = str(planned_input.get("query", "") or (rewritten_queries[0] if rewritten_queries else state["contract"].clean_query)).strip()
         scope = str(planned_input.get("scope", "") or "auto").strip()
@@ -681,7 +679,7 @@ def build_research_tool_registry(
         run_atomic_search("hybrid_search")
 
     def rerank() -> None:
-        planned_input = tool_input("rerank") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "rerank")
         query = str(planned_input.get("query", "") or state["contract"].clean_query).strip()
         raw_focus = planned_input.get("focus", state["contract"].targets)
         focus = [
@@ -746,7 +744,7 @@ def build_research_tool_registry(
         )
 
     def read_pdf_page() -> None:
-        planned_input = tool_input("read_pdf_page") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "read_pdf_page")
         paper_id = str(planned_input.get("paper_id", "") or "").strip()
         if not paper_id:
             screened = list(state.get("screened_papers", []) or [])
@@ -767,7 +765,7 @@ def build_research_tool_registry(
         )
 
     def grep_corpus() -> None:
-        planned_input = tool_input("grep_corpus") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "grep_corpus")
         rewritten_queries = list(state.get("rewritten_queries", []) or [])
         pattern = str(planned_input.get("regex", "") or planned_input.get("pattern", "") or (rewritten_queries[0] if rewritten_queries else "")).strip()
         scope = str(planned_input.get("scope", "") or "auto").strip()
@@ -791,7 +789,7 @@ def build_research_tool_registry(
         )
 
     def query_rewrite() -> None:
-        planned_input = tool_input("query_rewrite") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "query_rewrite")
         contract: QueryContract = state["contract"]
         query = str(planned_input.get("query", "") or contract.clean_query).strip()
         raw_targets = planned_input.get("targets", contract.targets)
@@ -819,7 +817,7 @@ def build_research_tool_registry(
         )
 
     def summarize() -> None:
-        planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "summarize")
         contract: QueryContract = state["contract"]
         payload = summarize_tool_payload(
             planned_input=planned_input,
@@ -837,7 +835,7 @@ def build_research_tool_registry(
         )
 
     def verify_claim() -> None:
-        planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "verify_claim")
         payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
         state.setdefault("claim_checks", []).append(payload)
         state.setdefault("tool_verifications", []).append(payload)
@@ -859,7 +857,7 @@ def build_research_tool_registry(
         )
 
     def fetch_url() -> None:
-        planned_input = tool_input("fetch_url") or dict(state.get("current_tool_input", {}) or {})
+        planned_input = planned_tool_input_from_state(state, "fetch_url")
         url = str(planned_input.get("url", "") or "").strip()
         max_chars = planned_input.get("max_chars", 4000)
         agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})

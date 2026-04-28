@@ -15,6 +15,7 @@ from app.services.tool_registry_helpers import (
     format_summaries_answer,
     format_task_results_answer,
     normalize_todo_items,
+    planned_tool_input_from_state,
     propose_tool_payload,
     remember_tool_payload,
     research_intent_summary,
@@ -66,6 +67,13 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
 
     assert tool_input_from_state(state, "fetch_url") == {"url": "https://example.com"}
     assert tool_input_from_state(state, "bad") == {}
+    assert planned_tool_input_from_state(
+        {"tool_inputs": {"summarize": {"target_words": 80}}, "current_tool_input": {"target_words": 20}},
+        "summarize",
+    ) == {"target_words": 80}
+    assert planned_tool_input_from_state({"current_tool_input": {"target_words": 20}}, "summarize") == {
+        "target_words": 20
+    }
     assert conversation_intent_summary(contract) == {
         "kind": "memory_op",
         "answer_slots": ["previous_rationale"],
