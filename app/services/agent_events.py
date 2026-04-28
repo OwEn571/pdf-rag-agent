@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.agent_metrics import record_agent_event
+
 
 def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
     payload = dict(data)
@@ -27,6 +29,7 @@ def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
         payload.setdefault("status", "doing")
     elif event == "error":
         payload.setdefault("message", str(payload.get("message", "") or "agent error"))
+    record_agent_event(event, payload)
     return payload
 
 

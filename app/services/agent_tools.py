@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from app.services.agent_metrics import begin_tool_execution, end_tool_execution, record_tool_execution
 
 
 def _empty_input_schema() -> dict[str, Any]:
@@ -62,8 +65,20 @@ class AgentToolExecutor:
             if requirement not in self.executed:
                 self._run(action=requirement, stack=(*stack, action))
         if tool.name not in self.executed:
-            tool.handler()
-            self.executed.add(tool.name)
+            started = time.perf_counter()
+            ok = False
+            token = begin_tool_execution()
+            try:
+                tool.handler()
+                ok = True
+                self.executed.add(tool.name)
+            finally:
+                end_tool_execution(token)
+                record_tool_execution(
+                    name=tool.name,
+                    ok=ok,
+                    elapsed_seconds=time.perf_counter() - started,
+                )
         return tool.terminal
 
 

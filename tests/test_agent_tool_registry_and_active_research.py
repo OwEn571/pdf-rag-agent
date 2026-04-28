@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.domain.models import ActiveResearch, EvidenceBlock, ResearchPlan, SessionContext, VerificationReport
 from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
+from app.domain.models import ActiveResearch, EvidenceBlock, ResearchPlan, SessionContext, VerificationReport
 from app.domain.models import QueryContract
+from app.services import agent_tools
 from app.services.agent import ResearchAssistantAgentV4
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
@@ -287,6 +288,41 @@ def test_registered_research_tool_executor_runs_dependencies_once() -> None:
     assert should_stop is False
     assert calls == ["search_evidence", "solve_claims"]
     assert executor.executed == {"search_papers", "search_evidence", "solve_claims"}
+
+
+def test_agent_tool_executor_records_success_latency(monkeypatch) -> None:
+    metrics: list[dict[str, object]] = []
+    monkeypatch.setattr(agent_tools, "record_tool_execution", lambda **kwargs: metrics.append(kwargs))
+    executor = AgentToolExecutor({"compose": RegisteredAgentTool("compose", lambda: None, terminal=True)})
+
+    should_stop = executor.run("compose")
+
+    assert should_stop is True
+    assert metrics[0]["name"] == "compose"
+    assert metrics[0]["ok"] is True
+    assert isinstance(metrics[0]["elapsed_seconds"], float)
+    assert metrics[0]["elapsed_seconds"] >= 0
+
+
+def test_agent_tool_executor_records_failed_call(monkeypatch) -> None:
+    metrics: list[dict[str, object]] = []
+    monkeypatch.setattr(agent_tools, "record_tool_execution", lambda **kwargs: metrics.append(kwargs))
+
+    def fail() -> None:
+        raise RuntimeError("boom")
+
+    executor = AgentToolExecutor({"compose": RegisteredAgentTool("compose", fail, terminal=True)})
+
+    try:
+        executor.run("compose")
+    except RuntimeError as exc:
+        assert "boom" in str(exc)
+    else:
+        raise AssertionError("expected tool failure")
+
+    assert executor.executed == set()
+    assert metrics[0]["name"] == "compose"
+    assert metrics[0]["ok"] is False
 
 
 def test_tool_registry_builders_are_outside_agent_class() -> None:
