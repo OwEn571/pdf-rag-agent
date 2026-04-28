@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from app.domain.models import EvidenceBlock, SessionContext
+from app.domain.models import EvidenceBlock, QueryContract, SessionContext
 from app.services.tool_registry_helpers import (
     coerce_int,
+    conversation_intent_summary,
     evidence_blocks_from_state,
     focus_values,
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
     normalize_todo_items,
+    research_intent_summary,
     store_session_todos,
     summary_source_from_state,
+    tool_input_from_state,
 )
 
 
@@ -32,6 +35,31 @@ def test_tool_registry_helpers_normalize_and_store_todos() -> None:
     store_session_todos(session, items)
     assert session.working_memory["keep"] == "yes"
     assert session.working_memory["todos"] == items
+
+
+def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
+    state = {"tool_inputs": {"fetch_url": {"url": "https://example.com"}, "bad": "nope"}}
+    contract = QueryContract(
+        clean_query="上一轮第一篇是什么？",
+        interaction_mode="conversation",
+        relation="memory_followup",
+        requested_fields=["previous_rationale"],
+        required_modalities=["page_text"],
+        targets=["DPO"],
+        notes=["intent_kind=memory_op", "answer_slot=previous_rationale"],
+    )
+
+    assert tool_input_from_state(state, "fetch_url") == {"url": "https://example.com"}
+    assert tool_input_from_state(state, "bad") == {}
+    assert conversation_intent_summary(contract) == {
+        "kind": "memory_op",
+        "answer_slots": ["previous_rationale"],
+        "requested_fields": ["previous_rationale"],
+        "targets": ["DPO"],
+    }
+    summary, payload = research_intent_summary(contract)
+    assert summary == "previous_rationale"
+    assert payload["required_modalities"] == ["page_text"]
 
 
 def test_tool_registry_helpers_format_compose_sources() -> None:

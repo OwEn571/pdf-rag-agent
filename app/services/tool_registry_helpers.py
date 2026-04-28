@@ -2,8 +2,41 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.models import EvidenceBlock, SessionContext
+from app.domain.models import EvidenceBlock, QueryContract, SessionContext
+from app.services.contract_context import contract_answer_slots, note_value
 from app.services.evidence_tools import evidence_from_payload
+
+
+def tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
+    tool_inputs = state.get("tool_inputs", {})
+    if not isinstance(tool_inputs, dict):
+        return {}
+    payload = tool_inputs.get(name, {})
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def conversation_intent_summary(contract: QueryContract) -> dict[str, Any]:
+    notes = [str(item) for item in contract.notes]
+    intent_kind = note_value(notes=notes, prefix="intent_kind=") or contract.interaction_mode
+    return {
+        "kind": intent_kind,
+        "answer_slots": contract_answer_slots(contract),
+        "requested_fields": contract.requested_fields,
+        "targets": contract.targets,
+    }
+
+
+def research_intent_summary(contract: QueryContract) -> tuple[str, dict[str, Any]]:
+    answer_slots = contract_answer_slots(contract)
+    summary = "/".join(answer_slots or contract.requested_fields or [contract.interaction_mode])
+    payload = {
+        "answer_slots": answer_slots,
+        "requested_fields": contract.requested_fields,
+        "required_modalities": contract.required_modalities,
+        "targets": contract.targets,
+        "continuation_mode": contract.continuation_mode,
+    }
+    return summary, payload
 
 
 def normalize_todo_items(value: Any) -> list[dict[str, str]]:

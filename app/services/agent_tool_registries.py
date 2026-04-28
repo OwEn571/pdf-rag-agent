@@ -18,14 +18,17 @@ from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     coerce_int,
+    conversation_intent_summary,
     evidence_blocks_from_state,
     focus_values,
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
     normalize_todo_items,
+    research_intent_summary,
     store_session_todos,
     summary_source_from_state,
+    tool_input_from_state,
 )
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
@@ -68,35 +71,10 @@ def build_conversation_tool_registry(
     execution_steps: list[dict[str, Any]],
 ) -> dict[str, RegisteredAgentTool]:
     def tool_input(name: str) -> dict[str, Any]:
-        tool_inputs = state.get("tool_inputs", {})
-        if not isinstance(tool_inputs, dict):
-            return {}
-        payload = tool_inputs.get(name, {})
-        return dict(payload) if isinstance(payload, dict) else {}
+        return tool_input_from_state(state, name)
 
     def intent_summary() -> dict[str, Any]:
-        notes = [str(item) for item in contract.notes]
-        answer_slots = [str(item).strip() for item in list(getattr(contract, "answer_slots", []) or []) if str(item).strip()]
-        if not answer_slots:
-            answer_slots = [
-                note.split("=", 1)[1]
-                for note in notes
-                if note.startswith("answer_slot=") and "=" in note
-            ]
-        intent_kind = next(
-            (
-                note.split("=", 1)[1]
-                for note in notes
-                if note.startswith("intent_kind=") and "=" in note
-            ),
-            contract.interaction_mode,
-        )
-        return {
-            "kind": intent_kind,
-            "answer_slots": answer_slots,
-            "requested_fields": contract.requested_fields,
-            "targets": contract.targets,
-        }
+        return conversation_intent_summary(contract)
 
     def understand_user_intent() -> None:
         agent._record_agent_observation(
@@ -585,34 +563,17 @@ def build_research_tool_registry(
     execution_steps: list[dict[str, Any]],
 ) -> dict[str, RegisteredAgentTool]:
     def tool_input(name: str) -> dict[str, Any]:
-        tool_inputs = state.get("tool_inputs", {})
-        if not isinstance(tool_inputs, dict):
-            return {}
-        payload = tool_inputs.get(name, {})
-        return dict(payload) if isinstance(payload, dict) else {}
+        return tool_input_from_state(state, name)
 
     def understand_user_intent() -> None:
         contract: QueryContract = state["contract"]
-        notes = [str(item) for item in contract.notes]
-        answer_slots = [str(item).strip() for item in list(getattr(contract, "answer_slots", []) or []) if str(item).strip()]
-        if not answer_slots:
-            answer_slots = [
-                note.split("=", 1)[1]
-                for note in notes
-                if note.startswith("answer_slot=") and "=" in note
-            ]
+        summary, payload = research_intent_summary(contract)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="understand_user_intent",
-            summary="/".join(answer_slots or contract.requested_fields or [contract.interaction_mode]),
-            payload={
-                "answer_slots": answer_slots,
-                "requested_fields": contract.requested_fields,
-                "required_modalities": contract.required_modalities,
-                "targets": contract.targets,
-                "continuation_mode": contract.continuation_mode,
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def reflect_previous_answer() -> None:
