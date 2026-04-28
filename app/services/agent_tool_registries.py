@@ -9,6 +9,7 @@ from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import evidence_from_payload, summarize_evidence, summarize_text, verify_claim_against_evidence
 from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
+from app.services.query_rewrite import rewrite_query
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -854,7 +855,8 @@ def build_research_tool_registry(
 
     def run_atomic_search(name: str) -> None:
         planned_input = tool_input(name) or dict(state.get("current_tool_input", {}) or {})
-        query = str(planned_input.get("query", "") or state["contract"].clean_query).strip()
+        rewritten_queries = list(state.get("rewritten_queries", []) or [])
+        query = str(planned_input.get("query", "") or (rewritten_queries[0] if rewritten_queries else state["contract"].clean_query)).strip()
         scope = str(planned_input.get("scope", "") or "auto").strip()
         top_k = planned_input.get("top_k", planned_input.get("limit", agent.settings.evidence_limit_default))
         raw_paper_ids = planned_input.get("paper_ids", [])
@@ -995,7 +997,8 @@ def build_research_tool_registry(
 
     def grep_corpus() -> None:
         planned_input = tool_input("grep_corpus") or dict(state.get("current_tool_input", {}) or {})
-        pattern = str(planned_input.get("regex", "") or planned_input.get("pattern", "") or "").strip()
+        rewritten_queries = list(state.get("rewritten_queries", []) or [])
+        pattern = str(planned_input.get("regex", "") or planned_input.get("pattern", "") or (rewritten_queries[0] if rewritten_queries else "")).strip()
         scope = str(planned_input.get("scope", "") or "auto").strip()
         raw_paper_ids = planned_input.get("paper_ids", [])
         paper_ids = [
@@ -1014,6 +1017,34 @@ def build_research_tool_registry(
             "grep_corpus",
             evidence,
             {"regex": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits},
+        )
+
+    def query_rewrite() -> None:
+        planned_input = tool_input("query_rewrite") or dict(state.get("current_tool_input", {}) or {})
+        contract: QueryContract = state["contract"]
+        query = str(planned_input.get("query", "") or contract.clean_query).strip()
+        raw_targets = planned_input.get("targets", contract.targets)
+        targets = [
+            str(item).strip()
+            for item in (raw_targets if isinstance(raw_targets, list) else [])
+            if str(item).strip()
+        ]
+        max_queries = _coerce_int(planned_input.get("max_queries", 3), default=3, minimum=1, maximum=8)
+        result = rewrite_query(
+            query=query,
+            targets=targets,
+            mode=str(planned_input.get("mode", "") or "multi_query"),
+            max_queries=max_queries,
+        )
+        payload = result.payload()
+        state.setdefault("query_rewrites", []).append(payload)
+        state["rewritten_queries"] = list(payload.get("queries", []) or [])
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="query_rewrite",
+            summary=f"queries={len(state['rewritten_queries'])}",
+            payload=payload,
         )
 
     def summarize() -> None:
@@ -1185,6 +1216,7 @@ def build_research_tool_registry(
         "rerank": RegisteredAgentTool("rerank", rerank),
         "read_pdf_page": RegisteredAgentTool("read_pdf_page", read_pdf_page),
         "grep_corpus": RegisteredAgentTool("grep_corpus", grep_corpus),
+        "query_rewrite": RegisteredAgentTool("query_rewrite", query_rewrite),
         "summarize": RegisteredAgentTool("summarize", summarize),
         "verify_claim": RegisteredAgentTool("verify_claim", verify_claim),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),

@@ -141,6 +141,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
         "rerank",
         "read_pdf_page",
         "grep_corpus",
+        "query_rewrite",
         "summarize",
         "verify_claim",
         "web_search",
@@ -166,6 +167,9 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert read_page_schema["required"] == ["paper_id", "page_from"]
     grep_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "grep_corpus")
     assert grep_schema["required"] == ["regex"]
+    query_rewrite_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "query_rewrite")
+    assert query_rewrite_schema["required"] == ["query"]
+    assert query_rewrite_schema["properties"]["mode"]["enum"] == ["multi_query", "hyde", "step_back"]
     summarize_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "summarize")
     assert summarize_schema["properties"]["target_words"]["maximum"] == 1000
     verify_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "verify_claim")
@@ -287,6 +291,7 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "rerank",
         "read_pdf_page",
         "grep_corpus",
+        "query_rewrite",
         "summarize",
         "verify_claim",
         "web_search",
@@ -401,6 +406,37 @@ def test_summarize_and_verify_claim_tools_run_inside_research_loop() -> None:
     assert state["claim_checks"][0]["status"] == "pass"
     assert state["claim_checks"][0]["supporting_evidence_ids"] == ["inline::1"]
     assert {"action": "verify_claim", "arguments": state["tool_inputs"]["verify_claim"]} in probe.step_payloads
+
+
+def test_query_rewrite_tool_runs_inside_research_loop() -> None:
+    probe = _RegistryProbeAgent()
+    runtime = AgentRuntime(agent=probe)
+    session = SessionContext(session_id="demo")
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    state = runtime.run_research_agent_loop(
+        contract=QueryContract(clean_query="DPO 核心公式", relation="formula_lookup", targets=["DPO"]),
+        session=session,
+        agent_plan={
+            "actions": ["query_rewrite", "compose"],
+            "tool_call_args": [
+                {
+                    "name": "query_rewrite",
+                    "args": {"query": "核心公式", "targets": ["DPO"], "mode": "step_back", "max_queries": 3},
+                }
+            ],
+        },
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=0,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=steps,
+    )
+
+    assert state["query_rewrites"][0]["mode"] == "step_back"
+    assert state["rewritten_queries"][0] == "核心公式"
+    assert any(event == "observation" and payload["tool"] == "query_rewrite" for event, payload in events)
 
 
 def test_todo_write_tool_updates_session_memory_and_emits_event() -> None:

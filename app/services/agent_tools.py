@@ -241,6 +241,23 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         research_executable=True,
     ),
     AgentToolSpec(
+        name="query_rewrite",
+        when="Use to produce alternate local-corpus retrieval queries before BM25, vector, hybrid search, or grep.",
+        returns="A compact list of rewritten retrieval queries with the original query, targets, and rewrite mode.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "targets": {"type": "array", "items": {"type": "string"}},
+                "mode": {"type": "string", "enum": ["multi_query", "hyde", "step_back"], "default": "multi_query"},
+                "max_queries": {"type": "integer", "minimum": 1, "maximum": 8, "default": 3},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+    ),
+    AgentToolSpec(
         name="summarize",
         when="Use to compress text or collected evidence into a focused summary before further reasoning or final composition.",
         returns="A concise focused summary and the number of source characters summarized.",
