@@ -14,7 +14,26 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
-from app.services.agent_loop import run_conversation_turn, run_research_turn
+from app.services.agent_loop import finish_agent_turn, run_conversation_turn, run_research_turn
+
+
+def test_finish_agent_turn_writes_trace_and_returns_events(tmp_path) -> None:
+    context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
+    context.emit("session", {"session_id": "demo"})
+    context.execution_steps.append({"node": "agent_loop", "summary": "done"})
+    payload = {"answer": "hello"}
+
+    final_payload, events = finish_agent_turn(
+        settings=SimpleNamespace(agent_trace_enabled=True, data_dir=tmp_path),
+        run_context=context,
+        final_payload=payload,
+    )
+
+    assert final_payload is payload
+    assert events == context.events
+    traces = list((tmp_path / "traces" / "demo").glob("*.jsonl"))
+    assert len(traces) == 1
+    assert '"answer_preview": "hello"' in traces[0].read_text(encoding="utf-8")
 
 
 def test_run_conversation_turn_commits_answer_and_response_payload() -> None:

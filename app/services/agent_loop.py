@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.domain.models import (
@@ -10,6 +11,26 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
+from app.services.agent_emit import write_turn_trace_safe
+
+
+def finish_agent_turn(
+    *,
+    settings: Any,
+    run_context: AgentRunContext,
+    final_payload: dict[str, Any],
+    logger: logging.Logger | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    write_turn_trace_safe(
+        enabled=bool(getattr(settings, "agent_trace_enabled", True)),
+        data_dir=settings.data_dir,
+        session_id=run_context.session_id,
+        events=run_context.events,
+        final_payload=final_payload,
+        execution_steps=run_context.execution_steps,
+        logger=logger,
+    )
+    return final_payload, run_context.events
 
 
 def run_conversation_turn(

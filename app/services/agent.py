@@ -31,8 +31,7 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
-from app.services.agent_emit import write_turn_trace_safe
-from app.services.agent_loop import run_conversation_turn, run_research_turn
+from app.services.agent_loop import finish_agent_turn, run_conversation_turn, run_research_turn
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
@@ -272,13 +271,12 @@ class ResearchAssistantAgentV4(
             execution_steps=execution_steps,
         )
         if compound_result is not None:
-            self._write_turn_trace(
-                session_id=resolved_session_id,
-                events=run_context.events,
+            return finish_agent_turn(
+                settings=self.settings,
+                run_context=run_context,
                 final_payload=compound_result,
-                execution_steps=execution_steps,
+                logger=logger,
             )
-            return compound_result, run_context.events
 
         contract = self._extract_query_contract(
             query=query,
@@ -304,13 +302,12 @@ class ResearchAssistantAgentV4(
                 agent_plan=agent_plan,
                 max_web_results=max_web_results,
             )
-            self._write_turn_trace(
-                session_id=resolved_session_id,
-                events=run_context.events,
+            return finish_agent_turn(
+                settings=self.settings,
+                run_context=run_context,
                 final_payload=payload,
-                execution_steps=execution_steps,
+                logger=logger,
             )
-            return payload, run_context.events
 
         payload = run_research_turn(
             agent=self,
@@ -323,29 +320,10 @@ class ResearchAssistantAgentV4(
             max_web_results=max_web_results,
             stream_answer=event_callback is not None,
         )
-        self._write_turn_trace(
-            session_id=resolved_session_id,
-            events=run_context.events,
+        return finish_agent_turn(
+            settings=self.settings,
+            run_context=run_context,
             final_payload=payload,
-            execution_steps=execution_steps,
-        )
-        return payload, run_context.events
-
-    def _write_turn_trace(
-        self,
-        *,
-        session_id: str,
-        events: list[dict[str, Any]],
-        final_payload: dict[str, Any],
-        execution_steps: list[dict[str, Any]],
-    ) -> None:
-        write_turn_trace_safe(
-            enabled=bool(getattr(self.settings, "agent_trace_enabled", True)),
-            data_dir=self.settings.data_dir,
-            session_id=session_id,
-            events=events,
-            final_payload=final_payload,
-            execution_steps=execution_steps,
             logger=logger,
         )
 
