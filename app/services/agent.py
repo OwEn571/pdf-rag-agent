@@ -38,6 +38,10 @@ from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
+from app.services.clarification_intents import (
+    looks_like_clarification_choice_text,
+    pending_clarification_selection_index,
+)
 from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
@@ -3712,7 +3716,7 @@ class ResearchAssistantAgentV4(
         clean_query: str,
         options: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        index = self._pending_clarification_selection_index(clean_query)
+        index = pending_clarification_selection_index(clean_query)
         if index is not None and 0 <= index < len(options):
             return options[index]
         normalized_query = self._normalize_lookup_text(clean_query)
@@ -3726,48 +3730,22 @@ class ResearchAssistantAgentV4(
                 return option
             if label and normalized_query == label:
                 return option
-            if meaning and len(meaning) >= 10 and meaning in normalized_query and self._looks_like_clarification_choice_text(normalized_query):
+            if (
+                meaning
+                and len(meaning) >= 10
+                and meaning in normalized_query
+                and looks_like_clarification_choice_text(normalized_query)
+            ):
                 return option
-            if label and len(label) >= 10 and label in normalized_query and self._looks_like_clarification_choice_text(normalized_query):
+            if (
+                label
+                and len(label) >= 10
+                and label in normalized_query
+                and looks_like_clarification_choice_text(normalized_query)
+            ):
                 return option
             if title and len(normalized_query) >= 6 and normalized_query in title:
                 return option
-        return None
-
-    @staticmethod
-    def _looks_like_clarification_choice_text(normalized_query: str) -> bool:
-        return any(
-            marker in normalized_query
-            for marker in [
-                "我说",
-                "选",
-                "选择",
-                "就是",
-                "应该是",
-                "指的是",
-                "the one",
-                "choose",
-                "select",
-            ]
-        )
-
-    @staticmethod
-    def _pending_clarification_selection_index(query: str) -> int | None:
-        compact = " ".join(str(query or "").strip().lower().split())
-        if not compact:
-            return None
-        digit_match = re.search(r"(?<!\d)([1-9])(?!\d)", compact)
-        if digit_match:
-            return int(digit_match.group(1)) - 1
-        patterns = [
-            (0, ["第一个", "第一项", "第1个", "第 1 个", "第1项", "第 1 项", "first", "the first"]),
-            (1, ["第二个", "第二项", "第2个", "第 2 个", "第2项", "第 2 项", "second", "the second"]),
-            (2, ["第三个", "第三项", "第3个", "第 3 个", "第3项", "第 3 项", "third", "the third"]),
-            (3, ["第四个", "第四项", "第4个", "第 4 个", "第4项", "第 4 项", "fourth", "the fourth"]),
-        ]
-        for index, markers in patterns:
-            if any(marker in compact for marker in markers):
-                return index
         return None
 
     def _disambiguation_options_from_evidence(
