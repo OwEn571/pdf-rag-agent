@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 from app.domain.models import ActiveResearch, EvidenceBlock, QueryContract, SessionContext, SessionTurn
 from app.services.tool_registry_helpers import (
+    atomic_search_observation_payload,
+    atomic_search_tool_request,
     coerce_int,
     conversation_intent_summary,
     evidence_blocks_from_state,
@@ -24,6 +26,8 @@ from app.services.tool_registry_helpers import (
     read_memory_tool_payload,
     read_pdf_page_tool_request,
     remember_tool_payload,
+    rerank_observation_payload,
+    rerank_tool_request,
     research_intent_summary,
     store_session_todos,
     summary_source_from_state,
@@ -225,6 +229,56 @@ def test_tool_registry_helpers_build_research_retrieval_requests() -> None:
         "max_hits": 5,
     }
     assert rewrite_request == {"query": "DPO loss", "targets": ["DPO"], "mode": "step_back", "max_queries": 8}
+
+
+def test_tool_registry_helpers_build_atomic_search_and_rerank_requests() -> None:
+    contract = QueryContract(clean_query="DPO objective", targets=["DPO"])
+    existing_evidence = EvidenceBlock(
+        doc_id="local-1",
+        paper_id="paper-1",
+        title="DPO",
+        file_path="",
+        page=1,
+        block_type="page_text",
+        snippet="DPO objective",
+        metadata={"search_source": "bm25_search"},
+    )
+    state = {"contract": contract, "rewritten_queries": ["rewritten objective"], "evidence": [existing_evidence]}
+
+    atomic_request = atomic_search_tool_request(
+        name="hybrid_search",
+        planned_input={"paper_ids": [" paper-1 ", ""], "top_k": 3, "alpha": 0.2},
+        state=state,
+        default_limit=12,
+    )
+    atomic_summary, atomic_payload = atomic_search_observation_payload(
+        request=atomic_request,
+        evidence=[existing_evidence],
+        paper_count=1,
+    )
+    rerank_request, rerank_context = rerank_tool_request(
+        planned_input={"top_k": "1", "focus": [" DPO "]},
+        state=state,
+        default_top_k=12,
+    )
+    rerank_summary, rerank_payload = rerank_observation_payload(
+        request=rerank_request,
+        payload_context=rerank_context,
+        evidence=[existing_evidence],
+    )
+
+    assert atomic_request["query"] == "rewritten objective"
+    assert atomic_request["paper_ids"] == ["paper-1"]
+    assert atomic_request["limit"] == 3
+    assert atomic_request["alpha"] == 0.2
+    assert atomic_summary == "evidence=1"
+    assert atomic_payload["sources"] == ["bm25_search"]
+    assert rerank_request["query"] == "DPO objective"
+    assert rerank_request["top_k"] == 1
+    assert rerank_request["focus"] == ["DPO"]
+    assert rerank_context == {"used_explicit_candidates": False, "input_candidate_count": 1}
+    assert rerank_summary == "evidence=1"
+    assert rerank_payload["top_doc_ids"] == ["local-1"]
 
 
 def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_path: Path) -> None:

@@ -234,6 +234,86 @@ def query_rewrite_tool_request(*, planned_input: dict[str, Any], contract: Query
     }
 
 
+def atomic_search_tool_request(
+    *,
+    name: str,
+    planned_input: dict[str, Any],
+    state: dict[str, Any],
+    default_limit: int,
+) -> dict[str, Any]:
+    rewritten_queries = list(state.get("rewritten_queries", []) or [])
+    contract: QueryContract = state["contract"]
+    query = str(planned_input.get("query", "") or (rewritten_queries[0] if rewritten_queries else contract.clean_query)).strip()
+    request: dict[str, Any] = {
+        "query": query,
+        "contract": contract,
+        "scope": str(planned_input.get("scope", "") or "auto").strip(),
+        "paper_ids": string_list_values(planned_input.get("paper_ids", [])),
+        "limit": planned_input.get("top_k", planned_input.get("limit", default_limit)),
+    }
+    if name == "hybrid_search":
+        request["alpha"] = planned_input.get("alpha", 0.5)
+    return request
+
+
+def atomic_search_observation_payload(
+    *,
+    request: dict[str, Any],
+    evidence: list[EvidenceBlock],
+    paper_count: int,
+) -> tuple[str, dict[str, Any]]:
+    return (
+        f"evidence={len(evidence)}",
+        {
+            "query": request.get("query", ""),
+            "scope": request.get("scope", ""),
+            "evidence_count": len(evidence),
+            "paper_count": paper_count,
+            "sources": list(dict.fromkeys(str(item.metadata.get("search_source", "")) for item in evidence if item.metadata)),
+        },
+    )
+
+
+def rerank_tool_request(
+    *,
+    planned_input: dict[str, Any],
+    state: dict[str, Any],
+    default_top_k: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    contract: QueryContract = state["contract"]
+    query = str(planned_input.get("query", "") or contract.clean_query).strip()
+    focus = string_list_values(planned_input.get("focus", contract.targets))
+    top_k = coerce_int(planned_input.get("top_k", default_top_k), default=default_top_k, minimum=1, maximum=50)
+    candidate_evidence = evidence_from_payload(planned_input.get("candidates", []))
+    source_evidence = candidate_evidence or [
+        item for item in list(state.get("evidence", []) or []) if isinstance(item, EvidenceBlock)
+    ]
+    request = {"query": query, "evidence": source_evidence, "top_k": top_k, "focus": focus}
+    payload_context = {
+        "used_explicit_candidates": bool(candidate_evidence),
+        "input_candidate_count": len(source_evidence),
+    }
+    return request, payload_context
+
+
+def rerank_observation_payload(
+    *,
+    request: dict[str, Any],
+    payload_context: dict[str, Any],
+    evidence: list[EvidenceBlock],
+) -> tuple[str, dict[str, Any]]:
+    return (
+        f"evidence={len(evidence)}",
+        {
+            "query": request.get("query", ""),
+            "focus": list(request.get("focus", []) or []),
+            **payload_context,
+            "evidence_count": len(evidence),
+            "top_doc_ids": [item.doc_id for item in evidence[:5]],
+        },
+    )
+
+
 def evidence_blocks_from_state(state: dict[str, Any]) -> list[EvidenceBlock]:
     evidence: list[EvidenceBlock] = []
     for key in ("evidence", "web_evidence"):

@@ -5,12 +5,10 @@ from typing import Any, Callable
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
-from app.services.evidence_tools import (
-    evidence_from_payload,
-)
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
-    coerce_int,
+    atomic_search_observation_payload,
+    atomic_search_tool_request,
     conversation_intent_summary,
     fetch_url_evidence,
     fetch_url_tool_payload,
@@ -25,6 +23,8 @@ from app.services.tool_registry_helpers import (
     read_memory_tool_payload,
     read_pdf_page_tool_request,
     remember_tool_payload,
+    rerank_observation_payload,
+    rerank_tool_request,
     research_intent_summary,
     summarize_tool_payload,
     todo_write_tool_payload,
@@ -612,26 +612,13 @@ def build_research_tool_registry(
 
     def run_atomic_search(name: str) -> None:
         planned_input = planned_tool_input_from_state(state, name)
-        rewritten_queries = list(state.get("rewritten_queries", []) or [])
-        query = str(planned_input.get("query", "") or (rewritten_queries[0] if rewritten_queries else state["contract"].clean_query)).strip()
-        scope = str(planned_input.get("scope", "") or "auto").strip()
-        top_k = planned_input.get("top_k", planned_input.get("limit", agent.settings.evidence_limit_default))
-        raw_paper_ids = planned_input.get("paper_ids", [])
-        paper_ids = [
-            str(item).strip()
-            for item in (raw_paper_ids if isinstance(raw_paper_ids, list) else [])
-            if str(item).strip()
-        ]
-        kwargs: dict[str, Any] = {
-            "query": query,
-            "contract": state["contract"],
-            "scope": scope,
-            "paper_ids": paper_ids,
-            "limit": top_k,
-        }
-        if name == "hybrid_search":
-            kwargs["alpha"] = planned_input.get("alpha", 0.5)
-        evidence = getattr(agent.retriever, name)(**kwargs)
+        request = atomic_search_tool_request(
+            name=name,
+            planned_input=planned_input,
+            state=state,
+            default_limit=agent.settings.evidence_limit_default,
+        )
+        evidence = getattr(agent.retriever, name)(**request)
         state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
         papers = [
             paper
@@ -650,18 +637,13 @@ def build_research_tool_registry(
                 *[paper for paper in papers if paper.paper_id not in existing_candidates],
             ]
         emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
+        summary, payload = atomic_search_observation_payload(request=request, evidence=evidence, paper_count=len(papers))
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool=name,
-            summary=f"evidence={len(evidence)}",
-            payload={
-                "query": query,
-                "scope": scope,
-                "evidence_count": len(evidence),
-                "paper_count": len(papers),
-                "sources": list(dict.fromkeys(str(item.metadata.get("search_source", "")) for item in evidence if item.metadata)),
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def bm25_search() -> None:
@@ -675,40 +657,22 @@ def build_research_tool_registry(
 
     def rerank() -> None:
         planned_input = planned_tool_input_from_state(state, "rerank")
-        query = str(planned_input.get("query", "") or state["contract"].clean_query).strip()
-        raw_focus = planned_input.get("focus", state["contract"].targets)
-        focus = [
-            str(item).strip()
-            for item in (raw_focus if isinstance(raw_focus, list) else [])
-            if str(item).strip()
-        ]
         default_top_k = getattr(agent.settings, "evidence_limit_default", 12)
-        top_k = coerce_int(planned_input.get("top_k", default_top_k), default=default_top_k, minimum=1, maximum=50)
-        candidate_evidence = evidence_from_payload(planned_input.get("candidates", []))
-        source_evidence = candidate_evidence or [
-            item for item in list(state.get("evidence", []) or []) if isinstance(item, EvidenceBlock)
-        ]
-        evidence = agent.retriever.rerank_evidence(
-            query=query,
-            evidence=source_evidence,
-            top_k=top_k,
-            focus=focus,
+        request, payload_context = rerank_tool_request(
+            planned_input=planned_input,
+            state=state,
+            default_top_k=default_top_k,
         )
+        evidence = agent.retriever.rerank_evidence(**request)
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
+        summary, payload = rerank_observation_payload(request=request, payload_context=payload_context, evidence=evidence)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="rerank",
-            summary=f"evidence={len(evidence)}",
-            payload={
-                "query": query,
-                "focus": focus,
-                "used_explicit_candidates": bool(candidate_evidence),
-                "input_candidate_count": len(source_evidence),
-                "evidence_count": len(evidence),
-                "top_doc_ids": [item.doc_id for item in evidence[:5]],
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def add_evidence_result(name: str, evidence: list[EvidenceBlock], payload: dict[str, Any]) -> None:
