@@ -389,6 +389,19 @@ def evidence_event_payload(evidence: list[EvidenceBlock]) -> dict[str, Any]:
     return {"count": len(evidence), "items": [item.model_dump() for item in evidence]}
 
 
+def store_fetch_url_evidence_result(
+    *,
+    agent: Any,
+    state: dict[str, Any],
+    evidence: EvidenceBlock | None,
+) -> dict[str, Any] | None:
+    if evidence is None:
+        return None
+    state["web_evidence"] = [*list(state.get("web_evidence", []) or []), evidence]
+    state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), [evidence])
+    return evidence_event_payload([evidence])
+
+
 def evidence_result_observation_payload(
     *,
     payload: dict[str, Any],
@@ -501,3 +514,8 @@ def verify_claim_tool_payload(*, planned_input: dict[str, Any], state: dict[str,
         "reason": check.reason,
     }
     return payload, f"{check.status}:{check.confidence:.2f}"
+
+
+def store_claim_check_payload(*, state: dict[str, Any], payload: dict[str, Any]) -> None:
+    state.setdefault("claim_checks", []).append(payload)
+    state.setdefault("tool_verifications", []).append(payload)

@@ -31,6 +31,8 @@ from app.services.tool_registry_helpers import (
     research_intent_summary,
     search_corpus_observation_payload,
     search_corpus_strategy,
+    store_claim_check_payload,
+    store_fetch_url_evidence_result,
     store_research_evidence_result,
     summarize_tool_payload,
     task_result_observation_payload,
@@ -231,8 +233,7 @@ def build_conversation_tool_registry(
     def verify_claim() -> None:
         planned_input = planned_tool_input_from_state(state, "verify_claim")
         payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
-        state.setdefault("claim_checks", []).append(payload)
-        state.setdefault("tool_verifications", []).append(payload)
+        store_claim_check_payload(state=state, payload=payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
@@ -717,8 +718,7 @@ def build_research_tool_registry(
     def verify_claim() -> None:
         planned_input = planned_tool_input_from_state(state, "verify_claim")
         payload, summary = verify_claim_tool_payload(planned_input=planned_input, state=state)
-        state.setdefault("claim_checks", []).append(payload)
-        state.setdefault("tool_verifications", []).append(payload)
+        store_claim_check_payload(state=state, payload=payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
@@ -743,11 +743,9 @@ def build_research_tool_registry(
         result = fetch_url_text(client=agent.clients.http_client, **request)
         payload, summary, observation_payload = fetch_url_tool_payload(result)
         state.setdefault("fetched_urls", []).append(payload)
-        evidence = fetch_url_evidence(result)
-        if evidence is not None:
-            state["web_evidence"] = [*list(state.get("web_evidence", []) or []), evidence]
-            state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), [evidence])
-            emit("web_search", {"count": 1, "items": [evidence.model_dump()]})
+        event_payload = store_fetch_url_evidence_result(agent=agent, state=state, evidence=fetch_url_evidence(result))
+        if event_payload is not None:
+            emit("web_search", event_payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,

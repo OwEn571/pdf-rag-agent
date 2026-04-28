@@ -34,6 +34,8 @@ from app.services.tool_registry_helpers import (
     research_intent_summary,
     search_corpus_observation_payload,
     search_corpus_strategy,
+    store_claim_check_payload,
+    store_fetch_url_evidence_result,
     store_research_evidence_result,
     store_session_todos,
     summary_source_from_state,
@@ -377,6 +379,34 @@ def test_tool_registry_helpers_store_research_evidence_result_and_payloads() -> 
     assert observation_payload == {"paper_id": "paper-1", "evidence_count": 1, "paper_count": 1}
 
 
+def test_tool_registry_helpers_store_fetch_url_evidence_result() -> None:
+    evidence = EvidenceBlock(
+        doc_id="web-1",
+        paper_id="web-1",
+        title="Web",
+        file_path="https://example.com",
+        page=0,
+        block_type="web",
+        snippet="Fetched text",
+    )
+
+    class _Agent:
+        def _merge_evidence(self, existing: list[EvidenceBlock], new: list[EvidenceBlock]) -> list[EvidenceBlock]:
+            return [*existing, *new]
+
+    state: dict[str, object] = {}
+
+    event_payload = store_fetch_url_evidence_result(agent=_Agent(), state=state, evidence=evidence)
+    skipped_payload = store_fetch_url_evidence_result(agent=_Agent(), state=state, evidence=None)
+
+    assert event_payload is not None
+    assert event_payload["count"] == 1
+    assert event_payload["items"][0]["doc_id"] == "web-1"
+    assert state["web_evidence"] == [evidence]
+    assert state["evidence"] == [evidence]
+    assert skipped_payload is None
+
+
 def test_tool_registry_helpers_build_remember_payload_and_persist_learning(tmp_path: Path) -> None:
     state: dict[str, object] = {}
 
@@ -439,6 +469,9 @@ def test_tool_registry_helpers_build_verify_claim_payload_from_state_evidence() 
     assert payload["supporting_evidence_ids"] == ["ev-1"]
     assert payload["min_overlap"] == 2
     assert summary.startswith("pass:")
+    store_claim_check_payload(state=state, payload=payload)
+    assert state["claim_checks"] == [payload]
+    assert state["tool_verifications"] == [payload]
 
 
 def test_tool_registry_helpers_build_summarize_payload_from_text_and_source_fallback() -> None:
