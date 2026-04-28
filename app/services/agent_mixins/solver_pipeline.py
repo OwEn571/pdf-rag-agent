@@ -870,37 +870,11 @@ class SolverPipelineMixin:
             ),
             fallback={},
         )
-        if not isinstance(payload, dict):
-            return {}
-        allowed_evidence_ids = {item.doc_id for item in evidence}
-        for formula_payload in self._formula_payload_candidates(payload):
-            formula_text = self._normalize_extracted_formula_text(
-                str(formula_payload.get("formula_text") or formula_payload.get("formula_latex") or "").strip()
-            )
-            if not formula_text:
-                continue
-            raw_evidence_ids = formula_payload.get("evidence_ids", [])
-            if isinstance(raw_evidence_ids, str):
-                raw_evidence_ids = [raw_evidence_ids]
-            evidence_ids = [str(item).strip() for item in raw_evidence_ids if str(item).strip() in allowed_evidence_ids]
-            if not evidence_ids:
-                continue
-            variables = self._normalize_formula_variables(formula_payload.get("variables"))
-            terms = self._formula_terms_from_variables(variables)
-            formula_format = str(formula_payload.get("formula_format") or "").strip().lower()
-            if formula_format not in {"latex", "text"}:
-                formula_format = "latex" if self._looks_like_latex_formula(formula_text) else "text"
-            return {
-                "formula_text": formula_text,
-                "formula_latex": formula_text if formula_format == "latex" else "",
-                "evidence_ids": evidence_ids,
-                "terms": list(dict.fromkeys(terms)),
-                "variables": variables,
-                "formula_format": formula_format,
-                "source": "llm_formula_extractor",
-                "confidence": formula_payload.get("confidence", 0.78),
-            }
-        return {}
+        return formula_helpers.llm_formula_payload_from_response(
+            payload,
+            allowed_evidence_ids={item.doc_id for item in evidence},
+            term_extractor=self._formula_terms,
+        )
 
     @staticmethod
     def _formula_payload_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -915,11 +889,7 @@ class SolverPipelineMixin:
         return formula_helpers.normalize_formula_variable_symbol(symbol)
 
     def _formula_terms_from_variables(self, variables: list[dict[str, str]]) -> list[str]:
-        text = "\n".join(
-            " ".join([str(item.get("symbol", "")), str(item.get("description", ""))])
-            for item in variables
-        )
-        return self._formula_terms(text)
+        return formula_helpers.formula_terms_from_variables(variables, term_extractor=self._formula_terms)
 
     @staticmethod
     def _normalize_formula_text(text: str) -> str:

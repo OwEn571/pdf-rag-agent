@@ -4,6 +4,7 @@ from app.services.formula_text_helpers import (
     best_formula_window,
     formula_block_score,
     formula_query_wants_gradient,
+    llm_formula_payload_from_response,
     normalize_extracted_formula_text,
     normalize_formula_variables,
 )
@@ -53,3 +54,26 @@ def test_formula_block_score_penalizes_gradient_when_query_wants_objective() -> 
 
     assert objective_score > gradient_score
     assert formula_query_wants_gradient("PBA 梯度怎么更新？")
+
+
+def test_llm_formula_payload_from_response_filters_evidence_and_normalizes_terms() -> None:
+    payload = llm_formula_payload_from_response(
+        {
+            "formulas": [
+                {"formula_text": "missing", "evidence_ids": ["missing"]},
+                {
+                    "formula_latex": r"L_DPO = -log σ(β log πθ)",
+                    "evidence_ids": "ev-1",
+                    "variables": [{"symbol": "πθ", "description": "policy"}],
+                    "confidence": "high",
+                },
+            ]
+        },
+        allowed_evidence_ids={"ev-1"},
+        term_extractor=lambda text: ["policy"] if "policy" in text else [],
+    )
+
+    assert payload["formula_format"] == "latex"
+    assert payload["evidence_ids"] == ["ev-1"]
+    assert payload["terms"] == ["policy"]
+    assert payload["source"] == "llm_formula_extractor"
