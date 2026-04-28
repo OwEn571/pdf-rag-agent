@@ -12,6 +12,11 @@ from app.services.library_intents import (
     is_library_status_query,
     is_scoped_library_recommendation_query,
 )
+from app.services.research_intents import (
+    looks_like_metric_value_query,
+    looks_like_origin_lookup_query,
+    looks_like_summary_results_query,
+)
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
 ConversationMessagesFn = Callable[[SessionContext], list[dict[str, str]]]
@@ -539,9 +544,7 @@ class IntentRecognizer:
         continuation_mode = str(payload.get("continuation_mode", "") or "").strip()
         topic_state: TopicState = "continue" if continuation_mode == "followup" else "switch" if continuation_mode == "context_switch" else "new"
         refers_previous_turn = topic_state == "continue"
-        lowered_goal = " ".join(query_for_goal.lower().split())
-        compact_goal = IntentRecognizer._compact_text(query_for_goal)
-        origin_like_goal = IntentRecognizer._looks_like_origin_lookup_query(lowered=lowered_goal, compact=compact_goal)
+        origin_like_goal = looks_like_origin_lookup_query(query_for_goal)
         has_explicit_origin_target = bool(targets) or bool(IntentRecognizer._local_query_targets(query_for_goal))
         if origin_like_goal and relation in {
             "memory_followup",
@@ -718,7 +721,7 @@ class IntentRecognizer:
                 confidence=0.96,
                 notes=["local_protected_capability"],
             )
-        if self._looks_like_origin_lookup_query(lowered=lowered, compact=normalized):
+        if looks_like_origin_lookup_query(query):
             targets = self._local_query_targets(query)
             if targets:
                 return Intent(
@@ -747,7 +750,7 @@ class IntentRecognizer:
             )
         explicit_targets = self._local_query_targets(query)
         if explicit_targets:
-            if self._looks_like_metric_value_query(lowered=lowered, compact=normalized):
+            if looks_like_metric_value_query(query):
                 return Intent(
                     intent_kind="research",
                     topic_state="new",
@@ -760,7 +763,7 @@ class IntentRecognizer:
                     confidence=0.86,
                     notes=["local_protected_explicit_target_metric"],
                 )
-            if self._looks_like_summary_results_query(lowered=lowered, compact=normalized):
+            if looks_like_summary_results_query(query):
                 return Intent(
                     intent_kind="research",
                     topic_state="new",
@@ -910,66 +913,6 @@ class IntentRecognizer:
         return deduped
 
     @staticmethod
-    def _looks_like_origin_lookup_query(*, lowered: str, compact: str) -> bool:
-        markers = [
-            "最先",
-            "最早",
-            "最初",
-            "首次",
-            "第一个提出",
-            "第一篇提出",
-            "第一篇论文",
-            "第一个引入",
-            "第一篇引入",
-            "最初的论文",
-            "最初论文",
-            "哪篇论文提出",
-            "哪篇提出",
-            "谁提出",
-            "提出的第一篇",
-            "first proposed",
-            "first introduced",
-            "origin",
-        ]
-        return any(marker in lowered or marker in compact for marker in markers)
-
-    @staticmethod
-    def _looks_like_metric_value_query(*, lowered: str, compact: str) -> bool:
-        markers = [
-            "具体效果",
-            "效果如何",
-            "表现如何",
-            "结果分别",
-            "准确率",
-            "得分",
-            "数值",
-            "多少",
-            "score",
-            "accuracy",
-            "metric",
-            "win rate",
-        ]
-        return any(marker in lowered or marker in compact for marker in markers)
-
-    @staticmethod
-    def _looks_like_summary_results_query(*, lowered: str, compact: str) -> bool:
-        markers = [
-            "主要结论",
-            "核心结论",
-            "一句话结论",
-            "什么结论",
-            "数据支持",
-            "用什么数据支持",
-            "实验结果",
-            "贡献",
-            "summary",
-            "result",
-            "results",
-            "contribution",
-        ]
-        return any(marker in lowered or marker in compact for marker in markers)
-
-    @staticmethod
     def _local_query_targets(query: str) -> list[str]:
         targets: list[str] = []
         for pattern in [r"[\"“](.+?)[\"”]", r"[‘'](.+?)[’']"]:
@@ -1098,7 +1041,7 @@ class IntentRecognizer:
     def _research_slots(*, clean_query: str, lowered: str, compact: str, session: SessionContext) -> list[AnswerSlot]:
         if any(marker in lowered or marker in compact for marker in ["后续", "followup", "follow-up", "扩展工作", "继承工作"]):
             return ["followup_research"]
-        if IntentRecognizer._looks_like_origin_lookup_query(lowered=lowered, compact=compact):
+        if looks_like_origin_lookup_query(clean_query):
             return ["origin"]
         if any(marker in lowered or marker in compact for marker in ["公式", "损失函数", "objective", "loss", "gradient", "梯度"]):
             return ["formula"]
