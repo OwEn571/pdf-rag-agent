@@ -10,6 +10,7 @@ from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
+from app.services.paper_claim_helpers import default_text_claim, paper_recommendation_claim, paper_summary_claim
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.schema_claim_helpers import claims_from_schema_payload
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
@@ -397,21 +398,12 @@ class SolverPipelineMixin:
             if not summary_text and not evidence_ids:
                 continue
             claims.append(
-                Claim(
-                    claim_type="paper_summary",
+                paper_summary_claim(
                     entity=contract.targets[0] if contract.targets else paper.title,
-                    value=summary_text or paper.title,
-                    structured_data={
-                        "metric_lines": [
-                            line for line in metric_bits if paper.title.lower() in line.lower()
-                        ]
-                        or metric_bits[:4],
-                        "paper_title": paper.title,
-                        "paper_year": paper.year,
-                    },
-                    evidence_ids=evidence_ids or paper.doc_ids[:1],
-                    paper_ids=[paper.paper_id],
-                    confidence=0.82,
+                    paper=paper,
+                    summary_text=summary_text,
+                    metric_lines=metric_bits,
+                    evidence_ids=evidence_ids,
                 )
             )
         return claims
@@ -424,33 +416,12 @@ class SolverPipelineMixin:
         evidence: list[EvidenceBlock],
         session: SessionContext,
     ) -> list[Claim]:
-        recommended = papers[:5]
-        if not recommended:
-            return []
-        recommendations = []
-        evidence_ids: list[str] = []
-        for item in recommended:
-            reason = self._paper_recommendation_reason(item)
-            recommendations.append(
-                {
-                    "title": item.title,
-                    "year": item.year,
-                    "paper_id": item.paper_id,
-                    "reason": reason,
-                }
-            )
-            evidence_ids.extend(item.doc_ids[:1])
-        return [
-            Claim(
-                claim_type="paper_recommendation",
-                entity=contract.targets[0] if contract.targets else contract.clean_query,
-                value="; ".join(f"{row['title']} ({row['year']})" for row in recommendations),
-                structured_data={"recommended_papers": recommendations},
-                evidence_ids=list(dict.fromkeys(evidence_ids)),
-                paper_ids=[item.paper_id for item in recommended],
-                confidence=0.84,
-            )
-        ]
+        claim = paper_recommendation_claim(
+            entity=contract.targets[0] if contract.targets else contract.clean_query,
+            papers=papers,
+            reason_for_paper=self._paper_recommendation_reason,
+        )
+        return [claim] if claim is not None else []
 
     def _solve_metric_context_text(
         self,
@@ -504,14 +475,11 @@ class SolverPipelineMixin:
             if not summary and not evidence_ids:
                 continue
             claims.append(
-                Claim(
-                    claim_type="text_answer",
+                default_text_claim(
                     entity=contract.targets[0] if contract.targets else paper.title,
-                    value=summary or paper.title,
-                    structured_data={"paper_title": paper.title, "paper_year": paper.year},
-                    evidence_ids=evidence_ids or paper.doc_ids[:1],
-                    paper_ids=[paper.paper_id],
-                    confidence=0.72,
+                    paper=paper,
+                    summary=summary,
+                    evidence_ids=evidence_ids,
                 )
             )
         return claims
