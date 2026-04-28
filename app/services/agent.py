@@ -88,6 +88,7 @@ CANONICAL_TOOL_NAMES = {
     "compose",
     "todo_write",
     "remember",
+    "propose_tool",
     "Task",
     "ask_human",
 }
@@ -2624,6 +2625,7 @@ class ResearchAssistantAgentV4(
             "compose": "基于当前记忆或证据进入最终整理；研究问题会先完成内部求解和校验。",
             "todo_write": "更新可见任务列表，让多步检索/验证过程可以被前端追踪。",
             "remember": "把可复用的学习或用户偏好持久化，供后续轮次读取。",
+            "propose_tool": "记录一个待人工审核的新工具提案，不执行其中的代码。",
             "Task": "派发一个独立子任务，通过同一套工具循环收集结果。",
             "understand_user_intent": f"先确认任务类型：{contract.relation}，目标是 {target_text}。",
             "reflect_previous_answer": "先反思上一轮回答，排除已经被用户否定的解释。",

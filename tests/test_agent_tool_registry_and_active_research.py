@@ -149,6 +149,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
         "compose",
         "todo_write",
         "remember",
+        "propose_tool",
         "Task",
         "ask_human",
     }
@@ -174,6 +175,9 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert todo_schema["required"] == ["items"]
     remember_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "remember")
     assert remember_schema["required"] == ["key", "content"]
+    propose_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "propose_tool")
+    assert propose_schema["required"] == ["name", "description", "input_schema", "python_code", "rationale"]
+    assert next(item for item in agent_tool_manifest() if item["name"] == "propose_tool")["dangerous"] is True
     task_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "Task")
     assert task_schema["required"] == ["description", "prompt"]
     fetch_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "fetch_url")
@@ -261,6 +265,7 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "read_memory",
         "todo_write",
         "remember",
+        "propose_tool",
         "summarize",
         "verify_claim",
         "Task",
@@ -274,6 +279,7 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "read_memory",
         "todo_write",
         "remember",
+        "propose_tool",
         "search_corpus",
         "bm25_search",
         "vector_search",

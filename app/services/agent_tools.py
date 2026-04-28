@@ -20,6 +20,8 @@ class AgentToolSpec:
     input_schema: dict[str, Any] = field(default_factory=_empty_input_schema)
     research_executable: bool = False
     conversation_executable: bool = False
+    dangerous: bool = False
+    streaming: bool = False
 
     def manifest_payload(self) -> dict[str, Any]:
         return {
@@ -28,6 +30,8 @@ class AgentToolSpec:
             "returns": self.returns,
             "description": " ".join(part for part in [self.when, self.returns] if part),
             "input_schema": self.input_schema,
+            "dangerous": self.dangerous,
+            "streaming": self.streaming,
         }
 
 
@@ -464,6 +468,29 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         },
         research_executable=True,
         conversation_executable=True,
+    ),
+    AgentToolSpec(
+        name="propose_tool",
+        when=(
+            "Use only when a task needs a reusable tool that is not available. "
+            "This records a pending proposal for human review and never executes the submitted code."
+        ),
+        returns="A pending-review tool proposal path, status, rationale, and schema preview.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "input_schema": {"type": "object"},
+                "python_code": {"type": "string"},
+                "rationale": {"type": "string"},
+            },
+            "required": ["name", "description", "input_schema", "python_code", "rationale"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+        conversation_executable=True,
+        dangerous=True,
     ),
     AgentToolSpec(
         name="Task",

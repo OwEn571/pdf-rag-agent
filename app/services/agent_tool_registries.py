@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 from typing import Any, Callable
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import evidence_from_payload, summarize_evidence, summarize_text, verify_claim_against_evidence
 from app.services.learnings import remember_learning
+from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -86,6 +88,30 @@ def _summary_source_from_state(state: dict[str, Any]) -> str:
     fetched_text = "\n".join(str(item.get("text", "") or "") for item in list(state.get("fetched_urls", []) or []))
     task_text = "\n".join(str(item.get("answer", "") or "") for item in list(state.get("task_results", []) or []))
     return "\n".join(part for part in [fetched_text, task_text] if part.strip())
+
+
+def _propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str, Any]:
+    settings = getattr(agent, "settings", None)
+    data_dir = Path(getattr(settings, "data_dir", "data"))
+    try:
+        proposal = record_tool_proposal(
+            data_dir=data_dir,
+            name=str(planned_input.get("name", "") or ""),
+            description=str(planned_input.get("description", "") or ""),
+            input_schema=dict(planned_input.get("input_schema", {}) or {}),
+            python_code=str(planned_input.get("python_code", "") or ""),
+            rationale=str(planned_input.get("rationale", "") or ""),
+        )
+    except (TypeError, ValueError) as exc:
+        return {
+            "status": "rejected",
+            "error": str(exc),
+            "admin_approval_required": True,
+        }
+    return {
+        **proposal.payload(),
+        "admin_approval_required": True,
+    }
 
 
 def _task_plan_with_allow_list(plan: dict[str, Any], tools_allowed: list[str]) -> dict[str, Any]:
@@ -287,6 +313,21 @@ def build_conversation_tool_registry(
             tool="remember",
             summary=f"key={key}",
             payload={"key": key, "path": str(path), "content_chars": len(content)},
+        )
+
+    def propose_tool() -> None:
+        planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
+        payload = _propose_tool_payload(agent, planned_input)
+        state.setdefault("tool_proposals", []).append(payload)
+        emit("tool_proposal", payload)
+        if payload.get("status") == "pending_review" and not state.get("answer"):
+            agent._set_conversation_answer(state=state, answer="已记录工具提案，等待人工审核后才能启用。", emit=emit)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="propose_tool",
+            summary=str(payload.get("status", "")),
+            payload=payload,
         )
 
     def summarize() -> None:
@@ -654,6 +695,7 @@ def build_conversation_tool_registry(
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
         "remember": RegisteredAgentTool("remember", remember),
+        "propose_tool": RegisteredAgentTool("propose_tool", propose_tool),
         "summarize": RegisteredAgentTool("summarize", summarize),
         "verify_claim": RegisteredAgentTool("verify_claim", verify_claim),
         "Task": RegisteredAgentTool("Task", run_task),
@@ -764,6 +806,19 @@ def build_research_tool_registry(
             tool="remember",
             summary=f"key={key}",
             payload={"key": key, "path": str(path), "content_chars": len(content)},
+        )
+
+    def propose_tool() -> None:
+        planned_input = tool_input("propose_tool") or dict(state.get("current_tool_input", {}) or {})
+        payload = _propose_tool_payload(agent, planned_input)
+        state.setdefault("tool_proposals", []).append(payload)
+        emit("tool_proposal", payload)
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="propose_tool",
+            summary=str(payload.get("status", "")),
+            payload=payload,
         )
 
     def search_papers() -> None:
@@ -1123,6 +1178,7 @@ def build_research_tool_registry(
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
         "remember": RegisteredAgentTool("remember", remember),
+        "propose_tool": RegisteredAgentTool("propose_tool", propose_tool),
         "bm25_search": RegisteredAgentTool("bm25_search", bm25_search),
         "vector_search": RegisteredAgentTool("vector_search", vector_search),
         "hybrid_search": RegisteredAgentTool("hybrid_search", hybrid_search),
