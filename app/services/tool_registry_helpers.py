@@ -57,6 +57,24 @@ def research_intent_summary(contract: QueryContract) -> tuple[str, dict[str, Any
     return summary, payload
 
 
+def record_tool_observation(
+    *,
+    agent: Any,
+    emit: Any,
+    execution_steps: list[dict[str, Any]],
+    tool: str,
+    summary: str,
+    payload: Any,
+) -> None:
+    agent._record_agent_observation(
+        emit=emit,
+        execution_steps=execution_steps,
+        tool=tool,
+        summary=summary,
+        payload=payload,
+    )
+
+
 def library_metadata_tool_request(*, planned_input: dict[str, Any], fallback_query: str) -> dict[str, Any]:
     metadata_query = str(planned_input.get("query", "") or fallback_query).strip()
     return {**planned_input, "query": metadata_query}

@@ -33,6 +33,7 @@ from app.services.tool_registry_helpers import (
     propose_tool_payload,
     query_rewrite_tool_payload,
     query_rewrite_tool_request,
+    record_tool_observation,
     read_memory_tool_payload,
     read_pdf_page_tool_request,
     reflect_previous_answer_payload,
@@ -118,6 +119,39 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
     summary, payload = research_intent_summary(contract)
     assert summary == "previous_rationale"
     assert payload["required_modalities"] == ["page_text"]
+
+
+def test_tool_registry_helpers_record_tool_observation() -> None:
+    calls: list[dict[str, object]] = []
+
+    class _Agent:
+        def _record_agent_observation(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    def emit(_: str, __: dict[str, object]) -> None:
+        return None
+
+    steps: list[dict[str, object]] = []
+    payload = {"ok": True}
+
+    record_tool_observation(
+        agent=_Agent(),
+        emit=emit,
+        execution_steps=steps,
+        tool="read_memory",
+        summary="turns=1",
+        payload=payload,
+    )
+
+    assert calls == [
+        {
+            "emit": emit,
+            "execution_steps": steps,
+            "tool": "read_memory",
+            "summary": "turns=1",
+            "payload": payload,
+        }
+    ]
 
 
 def test_tool_registry_helpers_build_library_metadata_payloads() -> None:
