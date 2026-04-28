@@ -32,6 +32,7 @@ from app.domain.models import (
 )
 from app.services.agent_context import AgentRunContext
 from app.services.agent_loop import finish_agent_turn, run_compound_turn_if_needed, run_standard_turn
+from app.services.agent_task import run_task_subagent
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
@@ -1216,26 +1217,14 @@ class ResearchAssistantAgentV4(
             if sub_contract.interaction_mode == "conversation":
                 heading = self._compound_section_heading(contract=sub_contract, index=index)
                 publish("\n\n" + heading + "\n\n")
-                sub_plan = self._plan_agent_actions(contract=sub_contract, session=session, use_web_search=False)
-                emit("agent_plan", {"subtask": sub_contract.clean_query, **sub_plan})
-                tool_state = self.runtime.execute_conversation_tools(
+                subtask_result = self._execute_compound_conversation_subtask(
                     contract=sub_contract,
-                    query=sub_contract.clean_query,
                     session=session,
-                    agent_plan=sub_plan,
-                    max_web_results=3,
                     emit=emit,
                     execution_steps=execution_steps,
                 )
-                answer_parts.append(self._demote_markdown_headings(str(tool_state.get("answer", "")).strip()))
-                subtask_results.append(
-                    {
-                        "contract": sub_contract,
-                        "answer": str(tool_state.get("answer", "")),
-                        "citations": list(tool_state.get("citations", []) or []),
-                        "claims": [],
-                    }
-                )
+                answer_parts.append(self._demote_markdown_headings(str(subtask_result.get("answer", "")).strip()))
+                subtask_results.append(subtask_result)
                 continue
             publish("\n\n" + self._compound_research_progress_markdown(contract=sub_contract, index=index) + "\n\n")
             subtask_result = self._execute_compound_research_subtask(
@@ -1675,6 +1664,21 @@ class ResearchAssistantAgentV4(
             )
         return merged
 
+    def _execute_compound_conversation_subtask(
+        self,
+        *,
+        contract: QueryContract,
+        session: SessionContext,
+        emit: Callable[[str, dict[str, Any]], None],
+        execution_steps: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return self._execute_compound_task_subagent(
+            contract=contract,
+            session=session,
+            emit=emit,
+            execution_steps=execution_steps,
+        )
+
     def _execute_compound_research_subtask(
         self,
         *,
@@ -1683,35 +1687,82 @@ class ResearchAssistantAgentV4(
         emit: Callable[[str, dict[str, Any]], None],
         execution_steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        agent_plan = self._plan_agent_actions(contract=contract, session=session, use_web_search=False)
-        emit("agent_plan", {"subtask": contract.clean_query, **agent_plan})
-        state = self.runtime.run_research_agent_loop(
+        return self._execute_compound_task_subagent(
             contract=contract,
             session=session,
-            agent_plan=agent_plan,
-            web_enabled=False,
-            explicit_web_search=False,
-            max_web_results=3,
             emit=emit,
             execution_steps=execution_steps,
         )
-        sub_contract: QueryContract = state["contract"]
-        verification: VerificationReport = state["verification"]
-        answer, citations = self._compose_answer(
-            contract=sub_contract,
-            claims=state["claims"],
-            evidence=state["evidence"],
-            papers=state["screened_papers"],
-            verification=verification,
+
+    def _execute_compound_task_subagent(
+        self,
+        *,
+        contract: QueryContract,
+        session: SessionContext,
+        emit: Callable[[str, dict[str, Any]], None],
+        execution_steps: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        task_result = run_task_subagent(
+            agent=self,
+            prompt=contract.clean_query,
+            description=self._compound_task_label(contract),
+            tools_allowed=[],
+            max_steps=8,
             session=session,
-            stream_callback=None,
+            max_web_results=3,
+            emit=emit,
+            execution_steps=execution_steps,
+            contract=contract,
         )
+        result = self._compound_task_result_from_task_payload(task_result, fallback_contract=contract)
+        result_contract = result.get("contract")
+        relation = result_contract.relation if isinstance(result_contract, QueryContract) else contract.relation
+        self._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="Task",
+            summary=f"compound_subtask:{relation}",
+            payload={
+                "prompt": contract.clean_query,
+                "relation": relation,
+                "verification": task_result.get("verification", {}),
+                "answer_chars": len(str(result.get("answer", "") or "")),
+            },
+        )
+        return result
+
+    @staticmethod
+    def _compound_task_result_from_task_payload(
+        task_result: dict[str, Any],
+        *,
+        fallback_contract: QueryContract,
+    ) -> dict[str, Any]:
+        contract = task_result.get("contract_obj")
+        if not isinstance(contract, QueryContract):
+            raw_contract = task_result.get("contract")
+            if isinstance(raw_contract, dict):
+                try:
+                    contract = QueryContract.model_validate(raw_contract)
+                except Exception:  # noqa: BLE001
+                    contract = fallback_contract
+            else:
+                contract = fallback_contract
+        verification = task_result.get("verification_obj")
+        if not isinstance(verification, VerificationReport):
+            raw_verification = task_result.get("verification")
+            if isinstance(raw_verification, dict):
+                try:
+                    verification = VerificationReport.model_validate(raw_verification)
+                except Exception:  # noqa: BLE001
+                    verification = VerificationReport(status="pass", recommended_action="task_subagent")
+            else:
+                verification = VerificationReport(status="pass", recommended_action="task_subagent")
         return {
-            "contract": sub_contract,
-            "answer": answer,
-            "citations": citations,
-            "claims": state["claims"],
-            "evidence": state["evidence"],
+            "contract": contract,
+            "answer": str(task_result.get("answer", "") or ""),
+            "citations": list(task_result.get("citations", []) or []),
+            "claims": list(task_result.get("claims", []) or []),
+            "evidence": list(task_result.get("evidence", []) or []),
             "verification": verification,
         }
 

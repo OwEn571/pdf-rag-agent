@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.domain.models import SessionContext
+from app.domain.models import QueryContract, SessionContext
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -31,8 +31,9 @@ def run_task_subagent(
     max_web_results: int,
     emit: EmitFn,
     execution_steps: list[dict[str, Any]],
+    contract: QueryContract | None = None,
 ) -> dict[str, Any]:
-    sub_contract = agent._extract_query_contract(
+    sub_contract = contract or agent._extract_query_contract(
         query=prompt,
         session=session,
         mode="auto",
@@ -69,7 +70,11 @@ def run_task_subagent(
             "answer": answer,
             "citations": citations,
             "verification": verification_payload,
+            "verification_obj": None,
             "contract": sub_contract.model_dump(),
+            "contract_obj": sub_contract,
+            "claims": [],
+            "evidence": [],
         }
 
     sub_state = agent.runtime.run_research_agent_loop(
@@ -96,5 +101,10 @@ def run_task_subagent(
         "answer": answer,
         "citations": citations,
         "verification": verification.model_dump() if hasattr(verification, "model_dump") else {},
+        "verification_obj": verification,
         "contract": sub_state["contract"].model_dump(),
+        "contract_obj": sub_state["contract"],
+        "claims": list(sub_state.get("claims", []) or []),
+        "evidence": list(sub_state.get("evidence", []) or []),
+        "papers": list(sub_state.get("screened_papers", []) or []),
     }
