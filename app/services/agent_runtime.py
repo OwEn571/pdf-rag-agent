@@ -14,6 +14,7 @@ from app.services.agent_tools import (
     research_execution_tool_names,
     research_tool_sequence,
 )
+from app.services.confidence import confidence_from_contract, should_ask_human
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -291,8 +292,8 @@ class AgentRuntime:
         payload = tool_inputs.get(action, {})
         return dict(payload) if isinstance(payload, dict) else {}
 
-    @staticmethod
     def _next_conversation_action(
+        self,
         *,
         contract: QueryContract,
         state: dict[str, Any],
@@ -306,7 +307,7 @@ class AgentRuntime:
             or contract.continuation_mode == "followup"
         )
         is_citation_turn = "citation_count_ranking" in fields or "citation_count_requires_web" in notes
-        if AgentRuntime._contract_needs_human_clarification(contract) and "ask_human" not in executed:
+        if self._contract_needs_human_clarification(contract) and "ask_human" not in executed:
             return "ask_human"
         if (is_memory_turn or is_citation_turn) and "read_memory" not in executed:
             return "read_memory"
@@ -318,15 +319,15 @@ class AgentRuntime:
             return "compose"
         return None
 
-    @staticmethod
     def _next_research_action(
+        self,
         *,
         contract: QueryContract,
         state: dict[str, Any],
         executed: set[str],
         web_enabled: bool,
     ) -> str | None:
-        if AgentRuntime._contract_needs_human_clarification(contract) and "ask_human" not in executed:
+        if self._contract_needs_human_clarification(contract) and "ask_human" not in executed:
             return "ask_human"
         if (
             contract.continuation_mode == "followup"
@@ -345,9 +346,8 @@ class AgentRuntime:
             return "compose"
         return None
 
-    @staticmethod
-    def _contract_needs_human_clarification(contract: QueryContract) -> bool:
-        notes = {str(item) for item in contract.notes}
-        if "low_intent_confidence" in notes or "intent_needs_clarification" in notes:
-            return True
-        return any(note.startswith("ambiguous_slot=") for note in notes)
+    def _contract_needs_human_clarification(self, contract: QueryContract) -> bool:
+        return should_ask_human(
+            confidence_from_contract(contract),
+            getattr(self.agent, "agent_settings", None),
+        )

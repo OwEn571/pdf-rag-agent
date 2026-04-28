@@ -126,6 +126,7 @@ class ResearchAssistantAgentV4(
                 answer_limit=900,
             ),
             is_negative_correction_query=self._is_negative_correction_query,
+            confidence_floor=self.agent_settings.confidence_floor,
         )
         self.intent_router = IntentRecognizer(
             clients=self.clients,

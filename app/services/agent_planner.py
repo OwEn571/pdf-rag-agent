@@ -10,6 +10,7 @@ from app.services.agent_tools import (
     normalize_plan_actions,
     research_tool_sequence,
 )
+from app.services.confidence import confidence_from_contract, should_ask_human
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
 ConversationMessagesFn = Callable[[SessionContext], list[dict[str, str]]]
@@ -24,11 +25,13 @@ class AgentPlanner:
         conversation_context: ConversationContextFn,
         is_negative_correction_query: NegativeCorrectionFn,
         conversation_messages: ConversationMessagesFn | None = None,
+        confidence_floor: float = 0.6,
     ) -> None:
         self.clients = clients
         self.conversation_context = conversation_context
         self.conversation_messages = conversation_messages or (lambda session: [])
         self.is_negative_correction_query = is_negative_correction_query
+        self.confidence_floor = confidence_floor
 
     def plan_actions(
         self,
@@ -281,12 +284,8 @@ class AgentPlanner:
             "stop_conditions": ["answer_is_grounded", "ambiguity_requires_human_choice"],
         }
 
-    @staticmethod
-    def _contract_needs_human_clarification(contract: QueryContract) -> bool:
-        notes = {str(item) for item in contract.notes}
-        if "low_intent_confidence" in notes or "intent_needs_clarification" in notes:
-            return True
-        return any(note.startswith("ambiguous_slot=") for note in notes)
+    def _contract_needs_human_clarification(self, contract: QueryContract) -> bool:
+        return should_ask_human(confidence_from_contract(contract), self)
 
     @staticmethod
     def normalize_plan_payload(
