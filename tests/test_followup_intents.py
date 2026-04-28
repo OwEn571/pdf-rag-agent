@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.followup_intents import (
+    formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
     is_memory_synthesis_query,
@@ -39,4 +40,25 @@ def test_contextual_metric_query_requires_metric_signal_and_targets() -> None:
         "这篇论文主要说了什么",
         targets=["PBA"],
         is_short_acronym=lambda target: len(target) <= 4 and target.isupper(),
+    )
+
+
+def test_formula_query_allows_active_paper_context_from_cues_and_names() -> None:
+    def normalize(text: str) -> str:
+        return "".join(str(text or "").lower().split())
+
+    assert formula_query_allows_active_paper_context(
+        "那PBA的公式是什么",
+        active_names=[],
+        normalize_entity_key=normalize,
+    )
+    assert formula_query_allows_active_paper_context(
+        "AlignX 里的 PBA 公式是什么",
+        active_names=["AlignX"],
+        normalize_entity_key=normalize,
+    )
+    assert not formula_query_allows_active_paper_context(
+        "PBA 的公式是什么",
+        active_names=["PersonaDual"],
+        normalize_entity_key=normalize,
     )

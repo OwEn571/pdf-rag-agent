@@ -16,6 +16,7 @@ from app.services.research_intents import (
     looks_like_metric_value_query,
     looks_like_origin_lookup_query,
     looks_like_summary_results_query,
+    normalized_query_needs_external_search,
 )
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
@@ -1035,7 +1036,7 @@ class IntentRecognizer:
 
     @staticmethod
     def _needs_web(lowered: str, compact: str) -> bool:
-        return any(marker in lowered or marker in compact for marker in ["最新", "新闻", "当前", "现在", "引用数", "citation", "latest", "recent"])
+        return normalized_query_needs_external_search(lowered, compact, include_router_extras=True)
 
     @staticmethod
     def _research_slots(*, clean_query: str, lowered: str, compact: str, session: SessionContext) -> list[AnswerSlot]:

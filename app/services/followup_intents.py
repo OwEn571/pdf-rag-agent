@@ -139,6 +139,39 @@ def looks_like_contextual_metric_query(
     return len(targets) >= 2 or bool(acronym_targets)
 
 
+def formula_query_allows_active_paper_context(
+    query: str,
+    *,
+    active_names: list[str],
+    normalize_entity_key: Callable[[str], str],
+) -> bool:
+    text, lowered, compact = _normalized_query_text(query)
+    context_markers = [
+        "那",
+        "这篇",
+        "这篇论文",
+        "该论文",
+        "文中",
+        "其中",
+        "里面",
+        "这里",
+        "上面",
+        "刚才",
+        "它",
+        "this paper",
+        "in this paper",
+        "there",
+    ]
+    if any(marker in lowered or marker in compact or marker in text for marker in context_markers):
+        return True
+    query_key = normalize_entity_key(text)
+    for name in active_names:
+        name_key = normalize_entity_key(name)
+        if len(name_key) >= 4 and name_key in query_key:
+            return True
+    return False
+
+
 def looks_like_formula_location_correction(query: str) -> bool:
     text = " ".join(str(query or "").strip().split())
     lowered = text.lower()

@@ -40,6 +40,7 @@ from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
 from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.followup_intents import (
+    formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
     is_memory_synthesis_query,
@@ -58,6 +59,7 @@ from app.services.library_intents import (
     is_library_status_query,
     is_scoped_library_recommendation_query,
 )
+from app.services.research_intents import query_needs_external_search
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
     AnswerComposerMixin,
@@ -3401,34 +3403,12 @@ class ResearchAssistantAgentV4(
         session: SessionContext,
         paper: CandidatePaper,
     ) -> bool:
-        query = str(contract.clean_query or "")
-        lowered = query.lower()
-        compact = re.sub(r"\s+", "", query)
-        context_markers = [
-            "那",
-            "这篇",
-            "这篇论文",
-            "该论文",
-            "文中",
-            "其中",
-            "里面",
-            "这里",
-            "上面",
-            "刚才",
-            "它",
-            "this paper",
-            "in this paper",
-            "there",
-        ]
-        if any(marker in lowered or marker in compact or marker in query for marker in context_markers):
-            return True
         active_names = [*session.effective_active_research().targets, *self._paper_hint_names(paper)]
-        query_key = self._normalize_entity_key(query)
-        for name in active_names:
-            name_key = self._normalize_entity_key(name)
-            if len(name_key) >= 4 and name_key in query_key:
-                return True
-        return False
+        return formula_query_allows_active_paper_context(
+            contract.clean_query,
+            active_names=active_names,
+            normalize_entity_key=self._normalize_entity_key,
+        )
 
     def _paper_context_supports_formula_target(self, *, paper: CandidatePaper, target: str) -> bool:
         target = str(target or "").strip()
@@ -5212,39 +5192,7 @@ class ResearchAssistantAgentV4(
         return bool(re.fullmatch(r"[A-Z][A-Z0-9\-]{1,7}", str(text or "").strip()))
 
     def _should_use_web_search(self, *, use_web_search: bool, contract: QueryContract) -> bool:
-        return bool(use_web_search or self._query_needs_external_search(contract.clean_query))
-
-    @staticmethod
-    def _query_needs_external_search(query: str) -> bool:
-        lowered = str(query or "").lower()
-        markers = [
-            "最新",
-            "最近",
-            "今天",
-            "昨天",
-            "新闻",
-            "刚发布",
-            "新论文",
-            "近期论文",
-            "arxiv",
-            "latest",
-            "recent",
-            "today",
-            "yesterday",
-            "news",
-            "new paper",
-            "new papers",
-            "newly released",
-            "current",
-            "引用数",
-            "引用量",
-            "被引",
-            "citation count",
-            "citations",
-            "cited by",
-            "most cited",
-        ]
-        return any(marker in lowered for marker in markers)
+        return bool(use_web_search or query_needs_external_search(contract.clean_query))
 
     def _collect_web_evidence(
         self,

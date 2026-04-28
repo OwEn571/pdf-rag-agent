@@ -67,3 +67,51 @@ def looks_like_summary_results_query(query: str) -> bool:
         "contribution",
     ]
     return any(marker in lowered or marker in compact for marker in markers)
+
+
+EXTERNAL_SEARCH_MARKERS = [
+    "最新",
+    "最近",
+    "今天",
+    "昨天",
+    "新闻",
+    "刚发布",
+    "新论文",
+    "近期论文",
+    "arxiv",
+    "latest",
+    "recent",
+    "today",
+    "yesterday",
+    "news",
+    "new paper",
+    "new papers",
+    "newly released",
+    "current",
+    "引用数",
+    "引用量",
+    "被引",
+    "citation count",
+    "citations",
+    "cited by",
+    "most cited",
+]
+
+ROUTER_WEB_EXTRA_MARKERS = ["当前", "现在", "citation"]
+
+
+def normalized_query_needs_external_search(
+    lowered: str,
+    compact: str,
+    *,
+    include_router_extras: bool = False,
+) -> bool:
+    markers = EXTERNAL_SEARCH_MARKERS
+    if include_router_extras:
+        markers = [*markers, *ROUTER_WEB_EXTRA_MARKERS]
+    return any(marker in lowered or marker in compact for marker in markers)
+
+
+def query_needs_external_search(query: str) -> bool:
+    lowered, compact = _normalized_query_text(query)
+    return normalized_query_needs_external_search(lowered, compact)
