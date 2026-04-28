@@ -53,6 +53,7 @@ from app.services.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 CLARIFICATION_OPTION_SCHEMA_VERSION = "clarification_option.v1"
+ALLOWED_SUBPROCESS_COMMANDS = {"pdftoppm"}
 
 CANONICAL_TOOL_ALIASES = {
     "understand_user_intent": "read_memory",
@@ -94,6 +95,15 @@ CANONICAL_TOOL_NAMES = {
     "Task",
     "ask_human",
 }
+
+
+def _subprocess_command_allowed(command: list[str]) -> bool:
+    if not command:
+        return False
+    executable = str(command[0] or "").strip()
+    if not executable:
+        return False
+    return executable == Path(executable).name and executable in ALLOWED_SUBPROCESS_COMMANDS
 
 
 class ResearchAssistantAgentV4(
@@ -7382,6 +7392,9 @@ class ResearchAssistantAgentV4(
                     str(source),
                     str(output_prefix),
                 ]
+                if not _subprocess_command_allowed(command):
+                    logger.warning("blocked non-whitelisted subprocess command: %s", command[0] if command else "")
+                    return ""
                 subprocess.run(
                     command,
                     check=True,

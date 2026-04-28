@@ -72,3 +72,4 @@
 - 2026-04-28 继续推进 review §9：`rerank` schema 扩展为 `query, candidates[], top_k, focus[]`，research registry 会优先重排显式 candidates，没有传入时仍兼容当前 state evidence，向“screen/expand evidence 都变成纯 rerank 工具输入”的方向收口。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 186 个测试。
 - 2026-04-28 继续推进 review §9：`search_corpus` 增加可选 `strategy:auto|legacy|bm25|vector|hybrid`，显式传入原子策略时会委托对应 `*_search` 工具路径，默认仍保留旧 paper+evidence 兼容流程，便于逐步迁出粗粒度检索。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 187 个测试。
 - 2026-04-28 继续推进 review §9：新增 `retrieval_filter_formula_heavy_non_formula` 配置项，默认保持非公式类实体检索中过滤 formula-heavy snippet 的旧行为，但可关闭该 heuristic，避免检索层硬规则不可控。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 188 个测试。
+- 2026-04-28 按 review §11 收口 subprocess 安全：确认 `agent.py` 中 `subprocess` 用于 PDF page 渲染，保留但增加 `ALLOWED_SUBPROCESS_COMMANDS={"pdftoppm"}` 白名单，只允许 bare `pdftoppm` 命令，阻断路径形式或其他命令。使用 `zotero-paper-rag` conda 环境全量 `pytest` 通过 189 个测试。

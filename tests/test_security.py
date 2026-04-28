@@ -6,6 +6,7 @@ from starlette.requests import Request
 
 from app.core.config import Settings
 from app.core.security import require_pdf_access
+from app.services.agent import _subprocess_command_allowed
 
 
 def _request(*, host: str = "127.0.0.1", query_string: bytes = b"", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
@@ -72,3 +73,10 @@ def test_pdf_access_requires_configured_key_even_for_local_requests() -> None:
         authorization=None,
         x_api_key=None,
     )
+
+
+def test_agent_subprocess_allowlist_only_allows_bare_pdftoppm() -> None:
+    assert _subprocess_command_allowed(["pdftoppm", "-png"]) is True
+    assert _subprocess_command_allowed(["/usr/bin/pdftoppm", "-png"]) is False
+    assert _subprocess_command_allowed(["python", "-c", "print(1)"]) is False
+    assert _subprocess_command_allowed([]) is False
