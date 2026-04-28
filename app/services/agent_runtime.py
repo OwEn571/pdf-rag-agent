@@ -14,11 +14,14 @@ from app.services.agent_tools import (
     research_execution_tool_names,
     research_tool_sequence,
 )
+from app.services.agent_runtime_helpers import (
+    configured_max_steps,
+    next_conversation_action,
+    next_research_action,
+)
 from app.services.confidence import (
-    confidence_from_contract,
     confidence_from_verification_report,
     confidence_payload,
-    should_ask_human,
 )
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
@@ -80,10 +83,11 @@ class AgentRuntime:
             planned_actions=actions,
             allowed_tools=conversation_execution_tool_names(),
             emit=emit,
-            fallback_next=lambda executed: self._next_conversation_action(
+            fallback_next=lambda executed: next_conversation_action(
                 contract=contract,
                 state=state,
                 executed=executed,
+                agent_settings=getattr(self.agent, "agent_settings", None),
             ),
             stop_condition=lambda executed: bool(state.get("answer")),
         )
@@ -156,11 +160,12 @@ class AgentRuntime:
             planned_actions=actions,
             allowed_tools=research_execution_tool_names(),
             emit=emit,
-            fallback_next=lambda executed: self._next_research_action(
+            fallback_next=lambda executed: next_research_action(
                 contract=state["contract"],
                 state=state,
                 executed=executed,
                 web_enabled=web_enabled,
+                agent_settings=getattr(self.agent, "agent_settings", None),
             ),
             stop_condition=lambda executed: isinstance(state.get("verification"), VerificationReport)
             and state["verification"].status in {"pass", "clarify"},
@@ -206,8 +211,11 @@ class AgentRuntime:
     ) -> None:
         queue = [action for action in planned_actions if action in allowed_tools]
         executed_order: list[str] = []
-        configured_max_steps = self._configured_max_steps(fallback=max_steps)
-        for index in range(1, configured_max_steps + 1):
+        max_step_count = configured_max_steps(
+            getattr(self.agent, "agent_settings", None),
+            fallback=max_steps,
+        )
+        for index in range(1, max_step_count + 1):
             action = self._dequeue_action(queue=queue, executed=executor.executed)
             if action is None:
                 action = self._planner_next_action(
@@ -263,73 +271,4 @@ class AgentRuntime:
             state=state,
             executed_actions=executed_actions,
             allowed_tools=allowed_tools,
-        )
-
-    def _configured_max_steps(self, *, fallback: int) -> int:
-        agent_settings = getattr(self.agent, "agent_settings", None)
-        value = getattr(agent_settings, "max_agent_steps", fallback)
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            parsed = fallback
-        return max(1, parsed)
-
-    def _next_conversation_action(
-        self,
-        *,
-        contract: QueryContract,
-        state: dict[str, Any],
-        executed: set[str],
-    ) -> str | None:
-        notes = {str(item) for item in contract.notes}
-        fields = {str(item) for item in contract.requested_fields}
-        is_memory_turn = (
-            "intent_kind=memory_op" in notes
-            or bool(fields & {"comparison", "synthesis", "previous_tool_basis"})
-            or contract.continuation_mode == "followup"
-        )
-        is_citation_turn = "citation_count_ranking" in fields or "citation_count_requires_web" in notes
-        if self._contract_needs_human_clarification(contract) and "ask_human" not in executed:
-            return "ask_human"
-        if (is_memory_turn or is_citation_turn) and "read_memory" not in executed:
-            return "read_memory"
-        if is_citation_turn and "web_search" not in executed:
-            return "web_search"
-        if contract.relation == "library_status" and "query_library_metadata" not in executed:
-            return "query_library_metadata"
-        if not state.get("answer") and "compose" not in executed:
-            return "compose"
-        return None
-
-    def _next_research_action(
-        self,
-        *,
-        contract: QueryContract,
-        state: dict[str, Any],
-        executed: set[str],
-        web_enabled: bool,
-    ) -> str | None:
-        if self._contract_needs_human_clarification(contract) and "ask_human" not in executed:
-            return "ask_human"
-        if (
-            contract.continuation_mode == "followup"
-            or "memory_resolved_research" in contract.notes
-            or "resolved_from_conversation_memory" in contract.notes
-            or "exclude_previous_focus" in contract.notes
-        ) and "read_memory" not in executed:
-            return "read_memory"
-        has_evidence = bool(state.get("evidence"))
-        has_papers = bool(state.get("screened_papers"))
-        if (not has_evidence or not has_papers) and "search_corpus" not in executed:
-            return "search_corpus"
-        if web_enabled and "web_search" not in executed:
-            return "web_search"
-        if "compose" not in executed:
-            return "compose"
-        return None
-
-    def _contract_needs_human_clarification(self, contract: QueryContract) -> bool:
-        return should_ask_human(
-            confidence_from_contract(contract),
-            getattr(self.agent, "agent_settings", None),
         )
