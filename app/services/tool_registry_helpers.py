@@ -57,6 +57,25 @@ def research_intent_summary(contract: QueryContract) -> tuple[str, dict[str, Any
     return summary, payload
 
 
+def library_metadata_tool_request(*, planned_input: dict[str, Any], fallback_query: str) -> dict[str, Any]:
+    metadata_query = str(planned_input.get("query", "") or fallback_query).strip()
+    return {**planned_input, "query": metadata_query}
+
+
+def library_metadata_observation_payload(*, result: dict[str, Any], answer: str) -> tuple[str, dict[str, Any]]:
+    return (
+        f"rows={result.get('row_count', 0)}",
+        {
+            "sql": result.get("sql", ""),
+            "columns": result.get("columns", []),
+            "row_count": result.get("row_count", 0),
+            "truncated": result.get("truncated", False),
+            "error": result.get("error", ""),
+            "has_answer": bool(answer),
+        },
+    )
+
+
 def read_memory_tool_payload(
     *,
     agent: Any,

@@ -19,6 +19,8 @@ from app.services.tool_registry_helpers import (
     format_summaries_answer,
     format_task_results_answer,
     grep_corpus_tool_request,
+    library_metadata_observation_payload,
+    library_metadata_tool_request,
     planned_tool_input_from_state,
     propose_tool_payload,
     query_rewrite_tool_payload,
@@ -38,7 +40,6 @@ from app.services.tool_registry_helpers import (
     task_result_observation_payload,
     task_tool_request,
     todo_write_tool_payload,
-    tool_input_from_state,
     verify_claim_tool_payload,
 )
 from app.services.url_fetcher import fetch_url as fetch_url_text
@@ -57,9 +58,6 @@ def build_conversation_tool_registry(
     emit: EmitFn,
     execution_steps: list[dict[str, Any]],
 ) -> dict[str, RegisteredAgentTool]:
-    def tool_input(name: str) -> dict[str, Any]:
-        return tool_input_from_state(state, name)
-
     def intent_summary() -> dict[str, Any]:
         return conversation_intent_summary(contract)
 
@@ -100,14 +98,14 @@ def build_conversation_tool_registry(
 
     def query_library_metadata() -> None:
         state["library_metadata_attempted"] = True
-        planned_input = tool_input("query_library_metadata")
-        metadata_query = str(planned_input.get("query", "") or query).strip()
+        planned_input = planned_tool_input_from_state(state, "query_library_metadata")
+        request = library_metadata_tool_request(planned_input=planned_input, fallback_query=query)
         agent._emit_agent_tool_call(
             emit=emit,
             tool="query_library_metadata",
-            arguments={**planned_input, "query": metadata_query},
+            arguments=request,
         )
-        result = agent._compose_library_metadata_query_response(query=metadata_query)
+        result = agent._compose_library_metadata_query_response(query=str(request.get("query", "") or ""))
         state["library_metadata_result"] = result
         answer = str(result.get("answer", "") or "").strip()
         if answer:
@@ -121,19 +119,13 @@ def build_conversation_tool_registry(
                 artifact=artifact,
             )
             agent._set_conversation_answer(state=state, answer=answer, emit=emit)
+        summary, payload = library_metadata_observation_payload(result=result, answer=answer)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="query_library_metadata",
-            summary=f"rows={result.get('row_count', 0)}",
-            payload={
-                "sql": result.get("sql", ""),
-                "columns": result.get("columns", []),
-                "row_count": result.get("row_count", 0),
-                "truncated": result.get("truncated", False),
-                "error": result.get("error", ""),
-                "has_answer": bool(answer),
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def get_library_recommendation() -> None:

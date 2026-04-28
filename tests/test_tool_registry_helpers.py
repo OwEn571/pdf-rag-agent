@@ -21,6 +21,8 @@ from app.services.tool_registry_helpers import (
     format_summaries_answer,
     format_task_results_answer,
     grep_corpus_tool_request,
+    library_metadata_observation_payload,
+    library_metadata_tool_request,
     normalize_todo_items,
     planned_tool_input_from_state,
     propose_tool_payload,
@@ -103,6 +105,36 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
     summary, payload = research_intent_summary(contract)
     assert summary == "previous_rationale"
     assert payload["required_modalities"] == ["page_text"]
+
+
+def test_tool_registry_helpers_build_library_metadata_payloads() -> None:
+    request = library_metadata_tool_request(
+        planned_input={"query": " AlignX ", "limit": 5},
+        fallback_query="fallback",
+    )
+    fallback_request = library_metadata_tool_request(planned_input={}, fallback_query=" fallback ")
+    summary, payload = library_metadata_observation_payload(
+        result={
+            "sql": "select * from papers",
+            "columns": ["title"],
+            "row_count": 2,
+            "truncated": False,
+            "error": "",
+        },
+        answer="answer",
+    )
+
+    assert request == {"query": "AlignX", "limit": 5}
+    assert fallback_request == {"query": "fallback"}
+    assert summary == "rows=2"
+    assert payload == {
+        "sql": "select * from papers",
+        "columns": ["title"],
+        "row_count": 2,
+        "truncated": False,
+        "error": "",
+        "has_answer": True,
+    }
 
 
 def test_tool_registry_helpers_build_read_memory_payload() -> None:
