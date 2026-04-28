@@ -1,0 +1,16 @@
+[Unit]
+Description=PDF RAG Agent V4
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/owen/pdf-rag-agent-v4
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/miniconda3/envs/zotero-paper-rag/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

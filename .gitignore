@@ -1,0 +1,27 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.template
+
+# Python caches and local test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data and generated indexes
+data/
+
+# Local agent/editor artifacts
+.codex-backups/
+
+# Accidental pip output artifact
+=8.2.0

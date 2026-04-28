@@ -1,0 +1,184 @@
+name: zotero-paper-rag-v4-test-md
+description: 从 docs/test.md 固化出的 V4 首版验收集
+cases:
+  - id: transformer_origin
+    kind: single_turn
+    turns:
+      - query: "Transformer架构最先由哪篇论文提出？"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - attention is all you need
+          must_not_contain:
+            - an image is worth 16x16 words
+            - blip-2
+            - vision transformer
+          min_citations: 1
+          allow_insufficient: false
+
+  - id: dpo_formula
+    kind: single_turn
+    turns:
+      - query: "DPO的公式是什么？"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - dpo
+            - direct preference optimization
+          match_groups:
+            - ["πref", "pi_ref", "reference policy", "参考策略"]
+            - ["πθ", "pi_theta", "policy", "策略"]
+            - ["β", "beta"]
+            - ["log σ", "log sigma", "sigmoid"]
+            - ["yw", "y_w", "preferred", "偏好"]
+            - ["yl", "y_l", "rejected", "劣选"]
+          min_group_matches: 4
+          min_citations: 1
+          allow_insufficient: false
+
+  - id: popi_core_results
+    kind: single_turn
+    turns:
+      - query: "POPI的核心结论是什么，实验结果如何？"
+        expect:
+          interaction_mode: research
+          must_contain_all:
+            - popi
+          match_groups:
+            - ["preference inference", "偏好推断"]
+            - ["conditioned generation", "条件生成", "generator"]
+            - ["modular", "模块化"]
+            - ["win rate", "胜率"]
+            - ["acc", "accuracy", "准确"]
+            - ["elix", "review", "roleplay"]
+          min_group_matches: 4
+          min_citations: 2
+          allow_insufficient: false
+
+  - id: conversation
+    kind: multi_turn
+    turns:
+      - query: "你好"
+        expect:
+          interaction_mode: conversation
+          must_not_contain:
+            - 当前语料下
+            - 证据不足
+          max_citations: 0
+      - query: "你有什么功能"
+        expect:
+          interaction_mode: conversation
+          match_groups:
+            - ["论文总结", "总结"]
+            - ["对比"]
+            - ["概念", "术语", "定义"]
+            - ["后续工作", "追踪"]
+            - ["表格", "指标"]
+          min_group_matches: 3
+          must_not_contain:
+            - 当前语料下
+            - 证据不足
+          max_citations: 0
+
+  - id: alignx_followup
+    kind: single_turn
+    turns:
+      - query: "AlignX数据集有后续工作吗？"
+        expect:
+          interaction_mode: research
+          must_contain_all:
+            - alignx
+          match_groups:
+            - ["popi"]
+            - ["text as a universal interface", "transferable personalization"]
+            - ["personadual"]
+            - ["后续", "follow-up", "使用", "采用", "benchmark", "数据集"]
+          min_group_matches: 2
+          min_citations: 2
+          allow_insufficient: false
+
+  - id: alignx_entity
+    kind: single_turn
+    turns:
+      - query: "AlignX是数据集？"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - 数据集
+            - benchmark
+            - dataset
+          must_not_contain:
+            - 不是数据集
+            - alignx是方法
+          min_citations: 1
+          allow_insufficient: false
+
+  - id: topology_followup
+    kind: multi_turn
+    turns:
+      - query: "论文中有没有研究agent拓扑结构的"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - scaling large language model-based multi-agent collaboration
+          match_groups:
+            - ["topology", "拓扑"]
+            - ["multi-agent", "多agent", "agent"]
+          min_group_matches: 2
+          min_citations: 1
+          allow_insufficient: false
+      - query: "这些不同的拓扑结构哪种最好呢？如果我要组织LangGraph节点，完成我现在的多论文检索回复，你觉得哪种节点比较好？"
+        expect:
+          interaction_mode: research
+          match_groups:
+            - ["dag"]
+            - ["irregular", "random", "不规则", "随机"]
+            - ["chain", "链状"]
+            - ["tree", "树状"]
+            - ["mesh", "网状"]
+            - ["langgraph", "节点"]
+          min_group_matches: 3
+          min_citations: 1
+          allow_insufficient: false
+
+  - id: deepseek_figure1
+    kind: single_turn
+    turns:
+      - query: "Deepseek R1 的 figure1 展示了什么问题？"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - deepseek-r1
+            - deepseek r1
+          match_groups:
+            - ["figure 1", "图1"]
+            - ["benchmark performance", "benchmark", "性能"]
+            - ["aime"]
+            - ["codeforces"]
+            - ["gpqa"]
+            - ["math-500", "math"]
+            - ["mmlu"]
+            - ["swe-bench", "swe"]
+          min_group_matches: 5
+          min_citations: 1
+          allow_insufficient: false
+
+  - id: alignx_pba
+    kind: single_turn
+    turns:
+      - query: "AlignX的PBA表现如何？"
+        expect:
+          interaction_mode: research
+          must_contain_any:
+            - pba
+            - alignxpertpba
+            - preference-bridged alignment
+          match_groups:
+            - ["win rate", "胜率"]
+            - ["accuracy", "acc", "准确"]
+            - ["p-soups", "psoups"]
+            - ["alignx"]
+            - ["llama", "baseline", "基线"]
+          min_group_matches: 3
+          min_citations: 1
+          allow_insufficient: false

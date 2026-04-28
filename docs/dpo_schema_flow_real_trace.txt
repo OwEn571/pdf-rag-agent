@@ -1,0 +1,720 @@
+DPO 公式查询在 PDF-RAG-Agent V4 数据模型中的真实流转
+说明：本文本由两次真实 API 调用结果整理而来，所有字段值来自实际响应。
+接口：POST /api/v1/v4/chat
+
+================================================================================
+第一轮：用户原始问题进入 AgentChatRequest
+================================================================================
+请求 payload:
+{
+  "query": "帮我看看 DPO 这篇论文的核心公式",
+  "mode": "auto",
+  "use_web_search": false,
+  "max_web_results": 3
+}
+
+语义：用户只说 “DPO 这篇论文”，系统需要先判断 DPO 指向哪篇论文。
+
+================================================================================
+第一轮响应：系统识别出 formula_lookup，但需要澄清 DPO 指代
+================================================================================
+
+[session_id]
+"461a4fff2cc3"
+
+[interaction_mode]
+"research"
+
+[query_contract]
+{
+  "clean_query": "帮我看看 DPO 这篇论文的核心公式",
+  "interaction_mode": "research",
+  "relation": "formula_lookup",
+  "targets": [
+    "DPO"
+  ],
+  "answer_slots": [
+    "formula"
+  ],
+  "requested_fields": [
+    "formula",
+    "variable_explanation",
+    "source"
+  ],
+  "required_modalities": [
+    "page_text",
+    "table"
+  ],
+  "answer_shape": "bullets",
+  "precision_requirement": "exact",
+  "continuation_mode": "followup",
+  "allow_web_search": false,
+  "notes": [
+    "structured_intent",
+    "intent_kind=research",
+    "intent_confidence=0.90",
+    "topic_state=continue",
+    "active_topic=DPO论文的核心公式",
+    "answer_slot=formula",
+    "target_alias=Direct Preference Optimization",
+    "ambiguity_option={\"schema_version\": \"clarification_option.v1\", \"option_id\": \"acronym-meaning-dpo-2554ef67e5cb\", \"kind\": \"acronym_meaning\", \"target\": \"DPO\", \"label\": \"Direct Preference Optimization\", \"description\": \"Direct Preference Optimization Tulu 3: Pushing Frontiers in Open Language Model Post-Training ...ku. The training algorithms for our models include supervised finetuning (SFT), Direct Preference Optimization (DPO), and a novel method we call Reinforcement L...\", \"paper_id\": \"BTSHS5TZ\", \"title\": \"Tulu 3: Pushing Frontiers in Open Language Model Post-Training\", \"year\": \"2025\", \"meaning\": \"Direct Preference Optimization\", \"snippet\": \"...ku. The training algorithms for our models include supervised finetuning (SFT), Direct Preference Optimization (DPO), and a novel method we call Reinforcement Learning with Verifiable Rewards (RLVR). With Tulu 3, we i\", \"source\": \"evidence_disambiguation\", \"source_relation\": \"formula_lookup\", \"source_requested_fields\": [\"formula\", \"variable_explanation\", \"source\"], \"source_answer_slots\": [\"formula\"]}",
+    "ambiguity_option={\"schema_version\": \"clarification_option.v1\", \"option_id\": \"acronym-meaning-dpo-45f395b3b95b\", \"kind\": \"acronym_meaning\", \"target\": \"DPO\", \"label\": \"proposed direct preference optimization\", \"description\": \"proposed direct preference optimization ComPO: Community Preferences for Language Model Personalization ...einforcement learn- ing (RLHF), in recent work, Rafailov et al. (2024) proposed direct preference optimization (DPO), which implicitly optimizes the s...\", \"paper_id\": \"5UV7H9LM\", \"title\": \"ComPO: Community Preferences for Language Model Personalization\", \"year\": \"2024\", \"meaning\": \"proposed direct preference optimization\", \"snippet\": \"...einforcement learn- ing (RLHF), in recent work, Rafailov et al. (2024) proposed direct preference optimization (DPO), which implicitly optimizes the same objective as RLHF but offers higher stability. Hence, we adopt \", \"source\": \"evidence_disambiguation\", \"source_relation\": \"formula_lookup\", \"source_requested_fields\": [\"formula\", \"variable_explanation\", \"source\"], \"source_answer_slots\": [\"formula\"]}",
+    "ambiguity_option={\"schema_version\": \"clarification_option.v1\", \"option_id\": \"acronym-meaning-dpo-5fa7418d0d23\", \"kind\": \"acronym_meaning\", \"target\": \"DPO\", \"label\": \"Our main contribution is Direct Preference Optimization\", \"description\": \"Our main contribution is Direct Preference Optimization Direct Preference Optimization: Your Language Model is Secretly a Reward Model ...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy usi...\", \"paper_id\": \"S6H9FE28\", \"title\": \"Direct Preference Optimization: Your Language Model is Secretly a Reward Model\", \"year\": \"2024\", \"meaning\": \"Our main contribution is Direct Preference Optimization\", \"snippet\": \"...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy using a simple binary cross entropy objective, producing the optimal policy to an implicit reward fun\", \"source\": \"evidence_disambiguation\", \"source_relation\": \"formula_lookup\", \"source_requested_fields\": [\"formula\", \"variable_explanation\", \"source\"], \"source_answer_slots\": [\"formula\"]}",
+    "ambiguity_option={\"schema_version\": \"clarification_option.v1\", \"option_id\": \"acronym-meaning-dpo-73ff1a9a27ea\", \"kind\": \"acronym_meaning\", \"target\": \"DPO\", \"label\": \"Following the idea of Direct Preference Optimization\", \"description\": \"Following the idea of Direct Preference Optimization LoRe: Personalizing LLMs via Low-Rank Reward Modeling ...ing those of Rϕ and Qθ. Personalized Response Generation: Following the idea of Direct Preference Optimization (DPO) (Rafailov et al., 2024), which...\", \"paper_id\": \"LT83XXD8\", \"title\": \"LoRe: Personalizing LLMs via Low-Rank Reward Modeling\", \"year\": \"2025\", \"meaning\": \"Following the idea of Direct Preference Optimization\", \"snippet\": \"...ing those of Rϕ and Qθ. Personalized Response Generation: Following the idea of Direct Preference Optimization (DPO) (Rafailov et al., 2024), which learns a response generation policy (a language model) without explic\", \"source\": \"evidence_disambiguation\", \"source_relation\": \"formula_lookup\", \"source_requested_fields\": [\"formula\", \"variable_explanation\", \"source\"], \"source_answer_slots\": [\"formula\"]}"
+  ]
+}
+
+[research_plan_summary]
+{
+  "paper_recall_mode": "anchor_first",
+  "paper_limit": 6,
+  "evidence_limit": 24,
+  "solver_sequence": [
+    "formula_solver",
+    "table_solver"
+  ],
+  "required_claims": [
+    "formula",
+    "variable_explanation"
+  ],
+  "retry_budget": 1
+}
+
+[runtime_summary]
+{
+  "intent": {
+    "kind": "research",
+    "confidence": 0.9,
+    "goal": "帮我看看 DPO 这篇论文的核心公式",
+    "mode": "research",
+    "relation": "formula_lookup",
+    "targets": [
+      "DPO"
+    ],
+    "answer_slots": [
+      "formula"
+    ],
+    "ambiguous_slots": [],
+    "needs_local_corpus": true,
+    "needs_web": false,
+    "refers_previous_turn": true,
+    "topic_state": "continue",
+    "active_topic": "DPO论文的核心公式"
+  },
+  "tool_loop": {
+    "mode": "react_loop",
+    "planned_tools": [
+      "search_corpus"
+    ],
+    "observed_tools": [
+      "search_corpus",
+      "read_memory",
+      "ask_human",
+      "compose"
+    ],
+    "raw_planned_tools": [
+      "search_corpus"
+    ],
+    "raw_observed_tools": [
+      "build_research_plan",
+      "search_corpus",
+      "read_memory",
+      "ask_human",
+      "compose",
+      "verify_grounding"
+    ],
+    "legacy_tools": [
+      "build_research_plan",
+      "verify_grounding"
+    ]
+  },
+  "grounding": {
+    "verification_status": "clarify",
+    "claim_count": 0,
+    "citation_count": 0,
+    "claim_sources": {},
+    "research_solver_sequence": [
+      "formula_solver",
+      "table_solver"
+    ]
+  },
+  "contract_context": {
+    "topic_state": "continue",
+    "target_aliases": [
+      "Direct Preference Optimization"
+    ],
+    "selected_paper_id": "",
+    "selected_title": "",
+    "binding_sources": [],
+    "needs_clarification": false,
+    "clarification_reasons": []
+  },
+  "active_research_context": {
+    "relation": "formula_lookup",
+    "targets": [
+      "DPO"
+    ],
+    "titles": [],
+    "active_titles": [],
+    "requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "answer_shape": "bullets",
+    "precision_requirement": "exact",
+    "clean_query": "帮我看看 DPO 这篇论文的核心公式",
+    "last_topic_signature": "formula_lookup dpo formula variable_explanation source page_text table bullets exact 帮我看看 dpo 这篇论文的核心公式",
+    "has_content": true
+  }
+}
+
+[execution_steps]
+[
+  {
+    "node": "query_contract_extractor",
+    "summary": "formula_lookup"
+  },
+  {
+    "node": "agent_planner",
+    "summary": "search_corpus"
+  },
+  {
+    "node": "agent_tool:build_research_plan",
+    "summary": "formula_solver,table_solver"
+  },
+  {
+    "node": "agent_loop",
+    "summary": "search_corpus"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "candidates=6, selected=1"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "evidence=24"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "papers=1, evidence=24"
+  },
+  {
+    "node": "agent_tool:read_memory",
+    "summary": "turns=0"
+  },
+  {
+    "node": "agent_tool:ask_human",
+    "summary": "options=4"
+  },
+  {
+    "node": "agent_tool:compose",
+    "summary": "claims=0"
+  },
+  {
+    "node": "agent_tool:compose",
+    "summary": "clarify"
+  },
+  {
+    "node": "agent_reflection",
+    "summary": "clarify"
+  },
+  {
+    "node": "agent_tool:verify_grounding",
+    "summary": "clarify"
+  }
+]
+
+[verification_report]
+{
+  "status": "clarify",
+  "missing_fields": [
+    "disambiguation"
+  ],
+  "unsupported_claims": [],
+  "contradictory_claims": [],
+  "recommended_action": "clarify_ambiguous_entity"
+}
+
+[needs_human]
+true
+
+[clarification_question]
+"`DPO` 在本地论文库里有多个可能含义，我不应该继续猜。你想问哪一个？\n1. Direct Preference Optimization，见《Tulu 3: Pushing Frontiers in Open Language Model Post-Training》（2025）\n2. proposed direct preference optimization，见《ComPO: Community Preferences for Language Model Personalization》（2024）\n3. Our main contribution is Direct Preference Optimization，见《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》（2024）\n4. Following the idea of Direct Preference Optimization，见《LoRe: Personalizing LLMs via Low-Rank Reward Modeling》（2025）"
+
+[clarification_options]
+[
+  {
+    "schema_version": "clarification_option.v1",
+    "option_id": "acronym-meaning-dpo-2554ef67e5cb",
+    "kind": "acronym_meaning",
+    "target": "DPO",
+    "label": "Direct Preference Optimization",
+    "description": "Direct Preference Optimization Tulu 3: Pushing Frontiers in Open Language Model Post-Training ...ku. The training algorithms for our models include supervised finetuning (SFT), Direct Preference Optimization (DPO), and a novel method we call Reinforcement L...",
+    "paper_id": "BTSHS5TZ",
+    "title": "Tulu 3: Pushing Frontiers in Open Language Model Post-Training",
+    "year": "2025",
+    "meaning": "Direct Preference Optimization",
+    "snippet": "...ku. The training algorithms for our models include supervised finetuning (SFT), Direct Preference Optimization (DPO), and a novel method we call Reinforcement Learning with Verifiable Rewards (RLVR). With Tulu 3, we i",
+    "source": "evidence_disambiguation",
+    "source_relation": "formula_lookup",
+    "source_requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "source_answer_slots": [
+      "formula"
+    ],
+    "index": 0,
+    "source_required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "paper_ids": [],
+    "titles": [],
+    "evidence_ids": []
+  },
+  {
+    "schema_version": "clarification_option.v1",
+    "option_id": "acronym-meaning-dpo-45f395b3b95b",
+    "kind": "acronym_meaning",
+    "target": "DPO",
+    "label": "proposed direct preference optimization",
+    "description": "proposed direct preference optimization ComPO: Community Preferences for Language Model Personalization ...einforcement learn- ing (RLHF), in recent work, Rafailov et al. (2024) proposed direct preference optimization (DPO), which implicitly optimizes the s...",
+    "paper_id": "5UV7H9LM",
+    "title": "ComPO: Community Preferences for Language Model Personalization",
+    "year": "2024",
+    "meaning": "proposed direct preference optimization",
+    "snippet": "...einforcement learn- ing (RLHF), in recent work, Rafailov et al. (2024) proposed direct preference optimization (DPO), which implicitly optimizes the same objective as RLHF but offers higher stability. Hence, we adopt ",
+    "source": "evidence_disambiguation",
+    "source_relation": "formula_lookup",
+    "source_requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "source_answer_slots": [
+      "formula"
+    ],
+    "index": 1,
+    "source_required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "paper_ids": [],
+    "titles": [],
+    "evidence_ids": []
+  },
+  {
+    "schema_version": "clarification_option.v1",
+    "option_id": "acronym-meaning-dpo-5fa7418d0d23",
+    "kind": "acronym_meaning",
+    "target": "DPO",
+    "label": "Our main contribution is Direct Preference Optimization",
+    "description": "Our main contribution is Direct Preference Optimization Direct Preference Optimization: Your Language Model is Secretly a Reward Model ...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy usi...",
+    "paper_id": "S6H9FE28",
+    "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+    "year": "2024",
+    "meaning": "Our main contribution is Direct Preference Optimization",
+    "snippet": "...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy using a simple binary cross entropy objective, producing the optimal policy to an implicit reward fun",
+    "source": "evidence_disambiguation",
+    "source_relation": "formula_lookup",
+    "source_requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "source_answer_slots": [
+      "formula"
+    ],
+    "index": 2,
+    "source_required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "paper_ids": [],
+    "titles": [],
+    "evidence_ids": []
+  },
+  {
+    "schema_version": "clarification_option.v1",
+    "option_id": "acronym-meaning-dpo-73ff1a9a27ea",
+    "kind": "acronym_meaning",
+    "target": "DPO",
+    "label": "Following the idea of Direct Preference Optimization",
+    "description": "Following the idea of Direct Preference Optimization LoRe: Personalizing LLMs via Low-Rank Reward Modeling ...ing those of Rϕ and Qθ. Personalized Response Generation: Following the idea of Direct Preference Optimization (DPO) (Rafailov et al., 2024), which...",
+    "paper_id": "LT83XXD8",
+    "title": "LoRe: Personalizing LLMs via Low-Rank Reward Modeling",
+    "year": "2025",
+    "meaning": "Following the idea of Direct Preference Optimization",
+    "snippet": "...ing those of Rϕ and Qθ. Personalized Response Generation: Following the idea of Direct Preference Optimization (DPO) (Rafailov et al., 2024), which learns a response generation policy (a language model) without explic",
+    "source": "evidence_disambiguation",
+    "source_relation": "formula_lookup",
+    "source_requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "source_answer_slots": [
+      "formula"
+    ],
+    "index": 3,
+    "source_required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "paper_ids": [],
+    "titles": [],
+    "evidence_ids": []
+  }
+]
+
+[answer]
+"`DPO` 在本地论文库里有多个可能含义，我不应该继续猜。你想问哪一个？\n1. Direct Preference Optimization，见《Tulu 3: Pushing Frontiers in Open Language Model Post-Training》（2025）\n2. proposed direct preference optimization，见《ComPO: Community Preferences for Language Model Personalization》（2024）\n3. Our main contribution is Direct Preference Optimization，见《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》（2024）\n4. Following the idea of Direct Preference Optimization，见《LoRe: Personalizing LLMs via Low-Rank Reward Modeling》（2025）"
+
+[citations]
+[]
+
+================================================================================
+第一轮结论：进入 ask_human 澄清
+================================================================================
+系统没有直接回答公式，因为本地论文库中 DPO 对应多个可能对象。
+真实 verification_report.status = "clarify"
+真实 verification_report.missing_fields = ["disambiguation"]
+真实 needs_human = true
+真实澄清问题如下：
+`DPO` 在本地论文库里有多个可能含义，我不应该继续猜。你想问哪一个？
+1. Direct Preference Optimization，见《Tulu 3: Pushing Frontiers in Open Language Model Post-Training》（2025）
+2. proposed direct preference optimization，见《ComPO: Community Preferences for Language Model Personalization》（2024）
+3. Our main contribution is Direct Preference Optimization，见《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》（2024）
+4. Following the idea of Direct Preference Optimization，见《LoRe: Personalizing LLMs via Low-Rank Reward Modeling》（2025）
+
+================================================================================
+第二轮：用户选择第 3 个澄清选项
+================================================================================
+被选择的 clarification option 完整真实值:
+{
+  "schema_version": "clarification_option.v1",
+  "option_id": "acronym-meaning-dpo-5fa7418d0d23",
+  "kind": "acronym_meaning",
+  "target": "DPO",
+  "label": "Our main contribution is Direct Preference Optimization",
+  "description": "Our main contribution is Direct Preference Optimization Direct Preference Optimization: Your Language Model is Secretly a Reward Model ...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy usi...",
+  "paper_id": "S6H9FE28",
+  "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+  "year": "2024",
+  "meaning": "Our main contribution is Direct Preference Optimization",
+  "snippet": "...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy using a simple binary cross entropy objective, producing the optimal policy to an implicit reward fun",
+  "source": "evidence_disambiguation",
+  "source_relation": "formula_lookup",
+  "source_requested_fields": [
+    "formula",
+    "variable_explanation",
+    "source"
+  ],
+  "source_answer_slots": [
+    "formula"
+  ],
+  "index": 2,
+  "source_required_modalities": [
+    "page_text",
+    "table"
+  ],
+  "paper_ids": [],
+  "titles": [],
+  "evidence_ids": []
+}
+
+前端会把这个选择包装成 clarification_choice，真实选择 payload 如下:
+{
+  "index": 2,
+  "option_id": "acronym-meaning-dpo-5fa7418d0d23",
+  "kind": "acronym_meaning",
+  "target": "DPO",
+  "paper_id": "S6H9FE28",
+  "label": "Our main contribution is Direct Preference Optimization",
+  "meaning": "Our main contribution is Direct Preference Optimization",
+  "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+}
+
+第二轮请求 payload:
+{
+  "query": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+  "session_id": "461a4fff2cc3",
+  "mode": "auto",
+  "use_web_search": false,
+  "max_web_results": 3,
+  "clarification_choice": {
+    "index": 2,
+    "option_id": "acronym-meaning-dpo-5fa7418d0d23",
+    "kind": "acronym_meaning",
+    "target": "DPO",
+    "paper_id": "S6H9FE28",
+    "label": "Our main contribution is Direct Preference Optimization",
+    "meaning": "Our main contribution is Direct Preference Optimization",
+    "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+  }
+}
+
+================================================================================
+第二轮响应：澄清选择被写入 QueryContract，继续执行研究链路
+================================================================================
+
+[session_id]
+"461a4fff2cc3"
+
+[interaction_mode]
+"research"
+
+[query_contract]
+{
+  "clean_query": "DPO 的公式是什么？用户选择的含义是 Our main contribution is Direct Preference Optimization，来源论文是《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》",
+  "interaction_mode": "research",
+  "relation": "formula_lookup",
+  "targets": [
+    "DPO"
+  ],
+  "answer_slots": [],
+  "requested_fields": [
+    "formula",
+    "variable_explanation",
+    "source"
+  ],
+  "required_modalities": [
+    "page_text",
+    "table"
+  ],
+  "answer_shape": "bullets",
+  "precision_requirement": "exact",
+  "continuation_mode": "followup",
+  "allow_web_search": false,
+  "notes": [
+    "resolved_human_choice",
+    "selected_ambiguity_option={\"schema_version\": \"clarification_option.v1\", \"option_id\": \"acronym-meaning-dpo-5fa7418d0d23\", \"kind\": \"acronym_meaning\", \"target\": \"DPO\", \"label\": \"Our main contribution is Direct Preference Optimization\", \"description\": \"Our main contribution is Direct Preference Optimization Direct Preference Optimization: Your Language Model is Secretly a Reward Model ...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy usi...\", \"paper_id\": \"S6H9FE28\", \"title\": \"Direct Preference Optimization: Your Language Model is Secretly a Reward Model\", \"year\": \"2024\", \"meaning\": \"Our main contribution is Direct Preference Optimization\", \"snippet\": \"...the policy directly. Given a dataset of human preferences over model responses, DPO can therefore optimize a policy using a simple binary cross entropy objective, producing the optimal policy to an implicit reward fun\", \"source\": \"evidence_disambiguation\", \"source_relation\": \"formula_lookup\", \"source_requested_fields\": [\"formula\", \"variable_explanation\", \"source\"], \"source_answer_slots\": [\"formula\"], \"index\": 2, \"source_required_modalities\": [\"page_text\", \"table\"], \"paper_ids\": [], \"titles\": [], \"evidence_ids\": []}",
+    "selected_paper_id=S6H9FE28"
+  ]
+}
+
+[research_plan_summary]
+{
+  "paper_recall_mode": "anchor_first",
+  "paper_limit": 6,
+  "evidence_limit": 24,
+  "solver_sequence": [
+    "formula_solver",
+    "table_solver"
+  ],
+  "required_claims": [
+    "formula",
+    "variable_explanation"
+  ],
+  "retry_budget": 1
+}
+
+[runtime_summary]
+{
+  "intent": {
+    "kind": "research",
+    "confidence": null,
+    "goal": "DPO 的公式是什么？用户选择的含义是 Our main contribution is Direct Preference Optimization，来源论文是《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》",
+    "mode": "research",
+    "relation": "formula_lookup",
+    "targets": [
+      "DPO"
+    ],
+    "answer_slots": [],
+    "ambiguous_slots": [],
+    "needs_local_corpus": true,
+    "needs_web": false,
+    "refers_previous_turn": true,
+    "topic_state": "continue",
+    "active_topic": ""
+  },
+  "tool_loop": {
+    "mode": "react_loop",
+    "planned_tools": [
+      "search_corpus"
+    ],
+    "observed_tools": [
+      "search_corpus",
+      "read_memory",
+      "compose"
+    ],
+    "raw_planned_tools": [
+      "search_corpus"
+    ],
+    "raw_observed_tools": [
+      "build_research_plan",
+      "search_corpus",
+      "read_memory",
+      "compose",
+      "verify_grounding"
+    ],
+    "legacy_tools": [
+      "build_research_plan",
+      "verify_grounding"
+    ]
+  },
+  "grounding": {
+    "verification_status": "pass",
+    "claim_count": 1,
+    "citation_count": 1,
+    "claim_sources": {
+      "llm_formula_extractor": 1
+    },
+    "research_solver_sequence": [
+      "formula_solver",
+      "table_solver"
+    ]
+  },
+  "contract_context": {
+    "topic_state": "continue",
+    "target_aliases": [],
+    "selected_paper_id": "S6H9FE28",
+    "selected_title": "",
+    "binding_sources": [],
+    "needs_clarification": false,
+    "clarification_reasons": []
+  },
+  "active_research_context": {
+    "relation": "formula_lookup",
+    "targets": [
+      "DPO"
+    ],
+    "titles": [
+      "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+    ],
+    "active_titles": [
+      "Direct Preference Optimization: Your Language Model is Secretly a Reward Model"
+    ],
+    "requested_fields": [
+      "formula",
+      "variable_explanation",
+      "source"
+    ],
+    "required_modalities": [
+      "page_text",
+      "table"
+    ],
+    "answer_shape": "bullets",
+    "precision_requirement": "exact",
+    "clean_query": "DPO 的公式是什么？用户选择的含义是 Our main contribution is Direct Preference Optimization，来源论文是《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》",
+    "last_topic_signature": "formula_lookup dpo direct preference optimization: your language model is secretly a reward model formula variable_explanation source page_text table bullets exact dpo 的公式是什么？用户选择的含义是 our main contribution is direct preference optimization，来源论文是《direct preference optimization: your language model is secretly a reward model》",
+    "has_content": true
+  }
+}
+
+[execution_steps]
+[
+  {
+    "node": "query_contract_extractor",
+    "summary": "formula_lookup"
+  },
+  {
+    "node": "agent_planner",
+    "summary": "search_corpus"
+  },
+  {
+    "node": "agent_tool:build_research_plan",
+    "summary": "formula_solver,table_solver"
+  },
+  {
+    "node": "agent_loop",
+    "summary": "search_corpus"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "candidates=1, selected=1"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "evidence=24"
+  },
+  {
+    "node": "agent_tool:search_corpus",
+    "summary": "papers=1, evidence=24"
+  },
+  {
+    "node": "agent_tool:read_memory",
+    "summary": "turns=1"
+  },
+  {
+    "node": "agent_tool:compose",
+    "summary": "claims=1"
+  },
+  {
+    "node": "agent_tool:compose",
+    "summary": "pass"
+  },
+  {
+    "node": "agent_tool:compose",
+    "summary": "pass"
+  },
+  {
+    "node": "agent_reflection",
+    "summary": "pass"
+  },
+  {
+    "node": "agent_tool:verify_grounding",
+    "summary": "pass"
+  }
+]
+
+[verification_report]
+{
+  "status": "pass",
+  "missing_fields": [],
+  "unsupported_claims": [],
+  "contradictory_claims": [],
+  "recommended_action": ""
+}
+
+[needs_human]
+false
+
+[clarification_question]
+""
+
+[clarification_options]
+[]
+
+[answer]
+"## 核心公式\n\n$$\n\\log \\sigma \\left( \\beta \\log \\frac{\\pi_{\\theta}(y_w | x)}{\\pi_{\\mathrm{ref}}(y_w | x)} - \\beta \\log \\frac{\\pi_{\\theta}(y_l | x)}{\\pi_{\\mathrm{ref}}(y_l | x)} \\right)\n$$\n\n## 变量\n\n- $\\pi_{\\theta}(y_w | x)$：语言模型策略对偏好的完成项的条件概率\n- $\\pi_{\\theta}(y_l | x)$：语言模型策略对不偏好的完成项的条件概率\n- $\\pi_{\\mathrm{ref}}(y_w | x)$：参考模型对偏好的完成项的条件概率\n- $\\pi_{\\mathrm{ref}}(y_l | x)$：参考模型对不偏好的完成项的条件概率\n- $\\beta$：控制 KL 惩罚强度的温度参数"
+
+[citations]
+[
+  {
+    "doc_id": "c68728bd965134ab1f423db701f2720f389379c5",
+    "paper_id": "S6H9FE28",
+    "title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+    "authors": "Rafael Rafailov, Archit Sharma, Eric Mitchell, Stefano Ermon, Christopher D. Manning, Chelsea Finn",
+    "year": "2024",
+    "tags": [],
+    "file_path": "/home/ubuntu/owen/Zotero/storage/S6H9FE28/Rafailov 等 - 2024 - Direct Preference Optimization Your Language Model is Secretly a Reward Model.pdf",
+    "page": 4,
+    "block_type": "page_text",
+    "caption": "",
+    "snippet": "\u0014\nlog σ\n\u0012\nβ log πθ(yw | x)\nπref(yw | x) − β log πθ(yl | x)\nπref(yl | x)\n\u0013\u0015\n. (7)\nThis way, we fit an implicit reward using an alternative parameterization, whose optimal policy is\nsimply πθ. Moreover, since our procedure"
+  }
+]
+
+================================================================================
+完整研究链路总览
+================================================================================
+1. AgentChatRequest 接收原始问题：帮我看看 DPO 这篇论文的核心公式
+2. QueryContract 将问题结构化为 relation=formula_lookup，targets=["DPO"]，requested_fields=["formula", "variable_explanation", "source"]。
+3. Retriever / evidence disambiguation 发现 DPO 在本地库中有多个可能论文来源。
+4. VerificationReport 返回 status=clarify，missing_fields=["disambiguation"]。
+5. AssistantResponse 返回 clarification_question 和 4 个 clarification_options。
+6. 用户选择第 3 项：Direct Preference Optimization: Your Language Model is Secretly a Reward Model，paper_id=S6H9FE28。
+7. 第二轮请求带上 session_id=461a4fff2cc3 和 clarification_choice。
+8. Agent 根据 pending_clarification_options 重写 QueryContract，并在 notes 中写入 selected_paper_id=S6H9FE28。
+9. ResearchPlan 选择 anchor_first，solver_sequence=["formula_solver", "table_solver"]，evidence_limit=24。
+10. search_corpus 选中 1 篇论文，召回 24 条 evidence。
+11. compose 生成 1 个 claim，verify_grounding 校验通过。
+12. AssistantResponse 返回最终答案、1 条 citation，以及 verification_report.status=pass。
