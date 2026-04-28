@@ -180,7 +180,7 @@ class AgentRuntime:
             )
             state["verification"] = verification
         emit("verification", verification.model_dump())
-        execution_steps.append({"node": "agent_tool:verify_grounding", "summary": verification.status})
+        execution_steps.append({"node": "agent_tool:verify_claim", "summary": verification.status})
         return state
 
     def _execute_tool_loop(

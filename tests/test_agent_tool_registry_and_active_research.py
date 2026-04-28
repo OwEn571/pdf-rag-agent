@@ -198,6 +198,12 @@ def test_tool_sequence_policies_are_centralized() -> None:
     assert normalize_plan_actions(actions=["search_corpus", "not_a_tool"], allowed=all_agent_tool_names()) == ["search_corpus"]
 
 
+def test_legacy_solver_aliases_are_not_accepted_as_canonical_tools() -> None:
+    assert ResearchAssistantAgentV4._canonical_tools(
+        ["search_papers", "search_evidence", "solve_claims", "verify_grounding"]
+    ) == []
+
+
 def test_registered_research_tool_executor_runs_dependencies_once() -> None:
     calls: list[str] = []
     tools = {

@@ -60,16 +60,12 @@ CANONICAL_TOOL_ALIASES = {
     "answer_from_memory": "read_memory",
     "synthesize_previous_results": "read_memory",
     "recover_previous_recommendation_candidates": "read_memory",
-    "search_papers": "search_corpus",
-    "search_evidence": "search_corpus",
     "web_citation_lookup": "web_search",
     "rank_by_verified_citation_count": "web_search",
     "answer_conversation": "compose",
     "get_library_status": "compose",
     "get_library_recommendation": "compose",
-    "solve_claims": "compose",
     "resolve_ambiguity": "compose",
-    "verify_grounding": "compose",
     "compose_or_ask_human": "compose",
     "detect_ambiguity": "ask_human",
     "clarification_limit": "ask_human",
@@ -2641,12 +2637,8 @@ class ResearchAssistantAgentV4(
             "recover_previous_recommendation_candidates": "先恢复上一轮推荐候选，避免凭空换一批论文。",
             "web_citation_lookup": "引用数是外部动态指标，逐篇调用 Web citation 检索工具。",
             "rank_by_verified_citation_count": "只用抽取得到的 citation count 做排序，并说明证据边界。",
-            "search_papers": f"去本地论文库召回与 {target_text} 相关的候选论文。",
-            "search_evidence": "从候选论文里扩展 page/table/caption/figure 等证据块。",
             "web_search": "本地证据不够或问题需要外部动态信息，补充 Web 检索。",
             "fetch_url": "读取一个已知 HTTPS URL 的正文，并执行 SSRF 安全校验。",
-            "solve_claims": "基于证据抽取可验证 claims，而不是直接拼接检索片段。",
-            "verify_grounding": "校验 claims 是否被证据支撑；不够就 retry 或请求澄清。",
             "ask_human": "当前存在实质歧义，需要用户选择后再继续。",
             "compose_or_ask_human": "证据链检查完成，整理最终回答或交互选项。",
         }
@@ -2693,8 +2685,9 @@ class ResearchAssistantAgentV4(
         paper_query = str(tool_input.get("query", "") or "").strip() or self._paper_query_text(contract)
         self._emit_agent_tool_call(
             emit=emit,
-            tool="search_papers",
+            tool="search_corpus",
             arguments={
+                "stage": "search_papers",
                 "query": paper_query,
                 "limit": plan.paper_limit,
                 "requested_fields": contract.requested_fields,
@@ -2744,9 +2737,10 @@ class ResearchAssistantAgentV4(
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
-            tool="search_papers",
+            tool="search_corpus",
             summary=f"candidates={len(candidate_papers)}, selected={len(screened_papers)}",
             payload={
+                "stage": "search_papers",
                 "candidate_count": len(candidate_papers),
                 "selected_count": len(screened_papers),
                 "selected_titles": [item.title for item in screened_papers[:5]],
@@ -2823,8 +2817,9 @@ class ResearchAssistantAgentV4(
         evidence_query = str(tool_input.get("query", "") or "").strip() or self._evidence_query_text(contract)
         self._emit_agent_tool_call(
             emit=emit,
-            tool="search_evidence",
+            tool="search_corpus",
             arguments={
+                "stage": "search_evidence",
                 "query": evidence_query,
                 "paper_ids": [item.paper_id for item in screened_papers],
                 "limit": plan.evidence_limit,
@@ -2863,9 +2858,10 @@ class ResearchAssistantAgentV4(
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
-            tool="search_evidence",
+            tool="search_corpus",
             summary=f"evidence={len(evidence)}",
             payload={
+                "stage": "search_evidence",
                 "evidence_count": len(evidence),
                 "block_types": list(dict.fromkeys(item.block_type for item in evidence[:12])),
             },
@@ -2928,8 +2924,8 @@ class ResearchAssistantAgentV4(
         evidence: list[EvidenceBlock] = state["evidence"]
         self._emit_agent_tool_call(
             emit=emit,
-            tool="solve_claims",
-            arguments={"solver_sequence": plan.solver_sequence, "evidence_count": len(evidence)},
+            tool="compose",
+            arguments={"stage": "solve_claims", "solver_sequence": plan.solver_sequence, "evidence_count": len(evidence)},
         )
         ambiguity_options = self._disambiguation_options_from_evidence(
             contract=contract,
@@ -3026,9 +3022,9 @@ class ResearchAssistantAgentV4(
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
-            tool="solve_claims",
+            tool="compose",
             summary=f"claims={len(claims)}",
-            payload={"claim_count": len(claims), "claim_types": [item.claim_type for item in claims]},
+            payload={"stage": "solve_claims", "claim_count": len(claims), "claim_types": [item.claim_type for item in claims]},
         )
 
     def _agent_verify_grounding(
@@ -3046,9 +3042,9 @@ class ResearchAssistantAgentV4(
             self._record_agent_observation(
                 emit=emit,
                 execution_steps=execution_steps,
-                tool="verify_grounding",
+                tool="verify_claim",
                 summary=verification.status,
-                payload=verification.model_dump(),
+                payload={"stage": "verify_grounding", **verification.model_dump()},
             )
             return
         contract: QueryContract = state["contract"]
@@ -3058,8 +3054,8 @@ class ResearchAssistantAgentV4(
         evidence: list[EvidenceBlock] = state["evidence"]
         self._emit_agent_tool_call(
             emit=emit,
-            tool="verify_grounding",
-            arguments={"claim_count": len(claims), "required_claims": plan.required_claims},
+            tool="verify_claim",
+            arguments={"stage": "verify_grounding", "claim_count": len(claims), "required_claims": plan.required_claims},
         )
         verification = self._verify_claims(
             contract=contract,
@@ -3092,9 +3088,9 @@ class ResearchAssistantAgentV4(
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
-            tool="verify_grounding",
+            tool="verify_claim",
             summary=verification.status,
-            payload=verification.model_dump(),
+            payload={"stage": "verify_grounding", **verification.model_dump()},
         )
 
     def _agent_retry_after_verification(
@@ -5163,9 +5159,9 @@ class ResearchAssistantAgentV4(
             self._record_agent_observation(
                 emit=emit,
                 execution_steps=execution_steps,
-                tool="search_evidence",
+                tool="search_corpus",
                 summary=f"auto_resolved_evidence={len(evidence)}",
-                payload={"selected_paper_id": paper_id, "evidence_count": len(evidence)},
+                payload={"stage": "search_evidence", "selected_paper_id": paper_id, "evidence_count": len(evidence)},
             )
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
