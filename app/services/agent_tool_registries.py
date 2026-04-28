@@ -7,89 +7,29 @@ from typing import Any, Callable
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
-from app.services.evidence_tools import evidence_from_payload, summarize_evidence, summarize_text, verify_claim_against_evidence
+from app.services.evidence_tools import (
+    evidence_from_payload,
+    summarize_evidence,
+    summarize_text,
+    verify_claim_against_evidence,
+)
 from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.query_rewrite import rewrite_query
+from app.services.tool_registry_helpers import (
+    coerce_int,
+    evidence_blocks_from_state,
+    focus_values,
+    format_fetched_urls_answer,
+    format_summaries_answer,
+    format_task_results_answer,
+    normalize_todo_items,
+    store_session_todos,
+    summary_source_from_state,
+)
 from app.services.url_fetcher import fetch_url as fetch_url_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
-
-
-def _normalize_todo_items(value: Any) -> list[dict[str, str]]:
-    if not isinstance(value, list):
-        return []
-    items: list[dict[str, str]] = []
-    allowed_statuses = {"pending", "doing", "done", "cancelled"}
-    for index, raw in enumerate(value, start=1):
-        if not isinstance(raw, dict):
-            continue
-        text = " ".join(str(raw.get("text", "") or "").split())
-        if not text:
-            continue
-        item_id = " ".join(str(raw.get("id", "") or "").split()) or f"todo-{index}"
-        status = str(raw.get("status", "") or "pending").strip()
-        if status not in allowed_statuses:
-            status = "pending"
-        items.append({"id": item_id, "text": text, "status": status})
-    return items
-
-
-def _store_session_todos(session: SessionContext, items: list[dict[str, str]]) -> None:
-    memory = dict(session.working_memory or {})
-    memory["todos"] = items
-    session.working_memory = memory
-
-
-def _format_task_results_answer(task_results: list[dict[str, Any]]) -> str:
-    sections: list[str] = []
-    for index, result in enumerate(task_results, start=1):
-        prompt = str(result.get("prompt", "") or f"子任务 {index}").strip()
-        answer = str(result.get("answer", "") or "").strip()
-        if not answer:
-            continue
-        sections.append(f"## {index}. {prompt}\n\n{answer}")
-    return "\n\n".join(sections).strip()
-
-
-def _format_fetched_urls_answer(fetched_urls: list[dict[str, Any]]) -> str:
-    sections: list[str] = []
-    for item in fetched_urls:
-        url = str(item.get("url", "") or "").strip()
-        if not url:
-            continue
-        if not bool(item.get("ok")):
-            sections.append(f"- `{url}`：读取失败（{item.get('error', 'unknown_error')}）")
-            continue
-        title = str(item.get("title", "") or url).strip()
-        text = str(item.get("text", "") or "").strip()
-        sections.append(f"### {title}\n\n来源：{url}\n\n{text}")
-    return "\n\n".join(sections).strip()
-
-
-def _format_summaries_answer(summaries: list[dict[str, Any]]) -> str:
-    return "\n\n".join(str(item.get("summary", "") or "").strip() for item in summaries if str(item.get("summary", "") or "").strip())
-
-
-def _focus_values(raw: Any, fallback: list[str]) -> list[str]:
-    values = raw if isinstance(raw, list) else fallback
-    return [str(item).strip() for item in list(values or []) if str(item).strip()]
-
-
-def _evidence_blocks_from_state(state: dict[str, Any]) -> list[EvidenceBlock]:
-    evidence: list[EvidenceBlock] = []
-    for key in ("evidence", "web_evidence"):
-        for item in list(state.get(key, []) or []):
-            if isinstance(item, EvidenceBlock):
-                evidence.append(item)
-    evidence.extend(evidence_from_payload(state.get("fetched_urls", [])))
-    return list({item.doc_id or item.snippet: item for item in evidence}.values())
-
-
-def _summary_source_from_state(state: dict[str, Any]) -> str:
-    fetched_text = "\n".join(str(item.get("text", "") or "") for item in list(state.get("fetched_urls", []) or []))
-    task_text = "\n".join(str(item.get("answer", "") or "") for item in list(state.get("task_results", []) or []))
-    return "\n".join(part for part in [fetched_text, task_text] if part.strip())
 
 
 def _propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str, Any]:
@@ -114,14 +54,6 @@ def _propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str
         **proposal.payload(),
         "admin_approval_required": True,
     }
-
-
-def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
 
 
 def build_conversation_tool_registry(
@@ -279,8 +211,8 @@ def build_conversation_tool_registry(
 
     def todo_write() -> None:
         planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
-        items = _normalize_todo_items(planned_input.get("items", []))
-        _store_session_todos(session, items)
+        items = normalize_todo_items(planned_input.get("items", []))
+        store_session_todos(session, items)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
             emit=emit,
@@ -321,17 +253,17 @@ def build_conversation_tool_registry(
 
     def summarize() -> None:
         planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
-        focus = _focus_values(planned_input.get("focus", contract.targets), contract.targets)
-        target_words = _coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
+        focus = focus_values(planned_input.get("focus", contract.targets), contract.targets)
+        target_words = coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
         text = str(planned_input.get("text", "") or "").strip()
         if text:
             summary = summarize_text(text=text, target_words=target_words, focus=focus)
             source_chars = len(text)
-        elif evidence := _evidence_blocks_from_state(state):
+        elif evidence := evidence_blocks_from_state(state):
             summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
             source_chars = sum(len(item.snippet or "") for item in evidence)
         else:
-            source_text = _summary_source_from_state(state)
+            source_text = summary_source_from_state(state)
             summary = summarize_text(text=source_text, target_words=target_words, focus=focus)
             source_chars = len(source_text)
         payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
@@ -351,8 +283,8 @@ def build_conversation_tool_registry(
         claim = str(planned_input.get("claim", "") or "").strip()
         evidence = evidence_from_payload(planned_input.get("evidence", []))
         if not evidence:
-            evidence = _evidence_blocks_from_state(state)
-        min_overlap = _coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
+            evidence = evidence_blocks_from_state(state)
+        min_overlap = coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
         check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
         payload = {
             "claim": claim,
@@ -547,7 +479,7 @@ def build_conversation_tool_registry(
 
     def compose() -> None:
         if state.get("task_results") and not state.get("answer"):
-            answer = _format_task_results_answer(list(state.get("task_results", []) or []))
+            answer = format_task_results_answer(list(state.get("task_results", []) or []))
             if answer:
                 citations = [
                     citation
@@ -557,11 +489,11 @@ def build_conversation_tool_registry(
                 state["citations"] = citations
                 agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         elif state.get("fetched_urls") and not state.get("answer"):
-            answer = _format_fetched_urls_answer(list(state.get("fetched_urls", []) or []))
+            answer = format_fetched_urls_answer(list(state.get("fetched_urls", []) or []))
             if answer:
                 agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         elif state.get("summaries") and not state.get("answer"):
-            answer = _format_summaries_answer(list(state.get("summaries", []) or []))
+            answer = format_summaries_answer(list(state.get("summaries", []) or []))
             if answer:
                 agent._set_conversation_answer(state=state, answer=answer, emit=emit)
         elif contract.relation == "library_status":
@@ -717,8 +649,8 @@ def build_research_tool_registry(
 
     def todo_write() -> None:
         planned_input = tool_input("todo_write") or dict(state.get("current_tool_input", {}) or {})
-        items = _normalize_todo_items(planned_input.get("items", []))
-        _store_session_todos(session, items)
+        items = normalize_todo_items(planned_input.get("items", []))
+        store_session_todos(session, items)
         emit("todo_update", {"items": items})
         agent._record_agent_observation(
             emit=emit,
@@ -864,7 +796,7 @@ def build_research_tool_registry(
             if str(item).strip()
         ]
         default_top_k = getattr(agent.settings, "evidence_limit_default", 12)
-        top_k = _coerce_int(planned_input.get("top_k", default_top_k), default=default_top_k, minimum=1, maximum=50)
+        top_k = coerce_int(planned_input.get("top_k", default_top_k), default=default_top_k, minimum=1, maximum=50)
         candidate_evidence = evidence_from_payload(planned_input.get("candidates", []))
         source_evidence = candidate_evidence or [
             item for item in list(state.get("evidence", []) or []) if isinstance(item, EvidenceBlock)
@@ -925,9 +857,9 @@ def build_research_tool_registry(
         if not paper_id:
             screened = list(state.get("screened_papers", []) or [])
             paper_id = str(getattr(screened[0], "paper_id", "") or "") if screened else ""
-        page_from = _coerce_int(planned_input.get("page_from", 1), default=1, minimum=1, maximum=10000)
-        page_to = _coerce_int(planned_input.get("page_to", page_from), default=page_from, minimum=page_from, maximum=10000)
-        max_chars = _coerce_int(planned_input.get("max_chars", 4000), default=4000, minimum=200, maximum=20000)
+        page_from = coerce_int(planned_input.get("page_from", 1), default=1, minimum=1, maximum=10000)
+        page_to = coerce_int(planned_input.get("page_to", page_from), default=page_from, minimum=page_from, maximum=10000)
+        max_chars = coerce_int(planned_input.get("max_chars", 4000), default=4000, minimum=200, maximum=20000)
         evidence = agent.retriever.read_pdf_pages(
             paper_id=paper_id,
             page_from=page_from,
@@ -974,7 +906,7 @@ def build_research_tool_registry(
             for item in (raw_targets if isinstance(raw_targets, list) else [])
             if str(item).strip()
         ]
-        max_queries = _coerce_int(planned_input.get("max_queries", 3), default=3, minimum=1, maximum=8)
+        max_queries = coerce_int(planned_input.get("max_queries", 3), default=3, minimum=1, maximum=8)
         result = rewrite_query(
             query=query,
             targets=targets,
@@ -995,14 +927,14 @@ def build_research_tool_registry(
     def summarize() -> None:
         planned_input = tool_input("summarize") or dict(state.get("current_tool_input", {}) or {})
         contract: QueryContract = state["contract"]
-        focus = _focus_values(planned_input.get("focus", contract.targets), contract.targets)
-        target_words = _coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
+        focus = focus_values(planned_input.get("focus", contract.targets), contract.targets)
+        target_words = coerce_int(planned_input.get("target_words", 120), default=120, minimum=20, maximum=1000)
         text = str(planned_input.get("text", "") or "").strip()
         if text:
             summary = summarize_text(text=text, target_words=target_words, focus=focus)
             source_chars = len(text)
         else:
-            evidence = evidence_from_payload(planned_input.get("evidence", [])) or _evidence_blocks_from_state(state)
+            evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
             summary = summarize_evidence(evidence=evidence, target_words=target_words, focus=focus)
             source_chars = sum(len(item.snippet or "") for item in evidence)
         payload = {"summary": summary, "source_chars": source_chars, "focus": focus, "target_words": target_words}
@@ -1018,8 +950,8 @@ def build_research_tool_registry(
     def verify_claim() -> None:
         planned_input = tool_input("verify_claim") or dict(state.get("current_tool_input", {}) or {})
         claim = str(planned_input.get("claim", "") or "").strip()
-        evidence = evidence_from_payload(planned_input.get("evidence", [])) or _evidence_blocks_from_state(state)
-        min_overlap = _coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
+        evidence = evidence_from_payload(planned_input.get("evidence", [])) or evidence_blocks_from_state(state)
+        min_overlap = coerce_int(planned_input.get("min_overlap", 2), default=2, minimum=1, maximum=20)
         check = verify_claim_against_evidence(claim=claim, evidence=evidence, min_overlap=min_overlap)
         payload = {
             "claim": claim,
