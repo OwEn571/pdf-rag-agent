@@ -50,6 +50,18 @@ from app.services.citation_ranking import (
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.confidence import confidence_from_verification_report, confidence_payload
+from app.services.contract_context import (
+    canonical_tools,
+    contract_allows_active_context_override,
+    contract_answer_slots,
+    contract_topic_state,
+    conversation_relation_updates_research_context,
+    intent_kind_from_contract,
+    note_float,
+    note_value,
+    note_values,
+    observed_tool_names,
+)
 from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
@@ -387,13 +399,7 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _conversation_relation_updates_research_context(relation: str) -> bool:
-        return relation in {
-            "library_status",
-            "library_recommendation",
-            "memory_followup",
-            "library_citation_ranking",
-            "memory_synthesis",
-        }
+        return conversation_relation_updates_research_context(relation)
 
     def _runtime_summary(
         self,
@@ -490,79 +496,43 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _note_value(*, notes: list[str], prefix: str) -> str:
-        values = ResearchAssistantAgentV4._note_values(notes=notes, prefix=prefix)
-        return values[0] if values else ""
+        return note_value(notes=notes, prefix=prefix)
 
     @staticmethod
     def _note_float(*, notes: list[str], prefix: str) -> float | None:
-        value = ResearchAssistantAgentV4._note_value(notes=notes, prefix=prefix)
-        if not value:
-            return None
-        try:
-            return float(value)
-        except ValueError:
-            return None
+        return note_float(notes=notes, prefix=prefix)
 
     @staticmethod
     def _note_values(*, notes: list[str], prefix: str) -> list[str]:
-        return [item.removeprefix(prefix) for item in notes if item.startswith(prefix)]
+        return note_values(notes=notes, prefix=prefix)
 
     @staticmethod
     def _contract_answer_slots(contract: QueryContract) -> list[str]:
-        slots = [str(item).strip() for item in list(getattr(contract, "answer_slots", []) or []) if str(item).strip()]
-        if slots:
-            return list(dict.fromkeys(slots))
-        notes = [str(item) for item in list(contract.notes or [])]
-        return ResearchAssistantAgentV4._note_values(notes=notes, prefix="answer_slot=")
+        return contract_answer_slots(contract)
 
     @staticmethod
     def _contract_topic_state(contract: QueryContract) -> str:
-        notes = [str(item) for item in list(contract.notes or [])]
-        value = ResearchAssistantAgentV4._note_value(notes=notes, prefix="topic_state=")
-        if value in {"continue", "switch", "new"}:
-            return value
-        if contract.continuation_mode == "followup":
-            return "continue"
-        if contract.continuation_mode == "context_switch":
-            return "switch"
-        return "new"
+        return contract_topic_state(contract)
 
     @staticmethod
     def _contract_allows_active_context_override(contract: QueryContract) -> bool:
-        return ResearchAssistantAgentV4._contract_topic_state(contract) == "continue"
+        return contract_allows_active_context_override(contract)
 
     @staticmethod
     def _observed_tool_names(execution_steps: list[dict[str, Any]]) -> list[str]:
-        names: list[str] = []
-        for step in execution_steps:
-            node = str(step.get("node", "") if isinstance(step, dict) else "")
-            if node.startswith("agent_tool:"):
-                names.append(node.split(":", 1)[1])
-            elif node in {"query_contract_extractor", "agent_planner", "compound_planner", "citation_rank_planner"}:
-                continue
-            elif node.startswith("compound_task:"):
-                names.append("compose")
-        return list(dict.fromkeys(name for name in names if name))
+        return observed_tool_names(execution_steps)
 
     @staticmethod
     def _canonical_tools(raw_tools: list[Any]) -> list[str]:
-        canonical: list[str] = []
-        for raw in raw_tools:
-            tool = str(raw)
-            mapped = CANONICAL_TOOL_ALIASES.get(tool, tool)
-            if mapped in CANONICAL_TOOL_NAMES and mapped not in canonical:
-                canonical.append(mapped)
-        return canonical
+        return canonical_tools(
+            raw_tools=raw_tools,
+            aliases=CANONICAL_TOOL_ALIASES,
+            canonical_names=CANONICAL_TOOL_NAMES,
+        )
 
     @staticmethod
     def _intent_kind_from_contract(contract: QueryContract) -> str:
-        if contract.interaction_mode == "research":
-            return "research"
-        if contract.relation.startswith("library"):
-            return "meta_library"
-        if contract.relation.startswith("memory"):
-            return "memory_op"
-        return "smalltalk"
+        return intent_kind_from_contract(contract)
 
     def _compose_memory_synthesis_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
         if self.clients.chat is not None:
