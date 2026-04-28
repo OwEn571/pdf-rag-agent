@@ -10,6 +10,7 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
+from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
 
@@ -40,7 +41,8 @@ def run_compound_turn_if_needed(
     query: str,
     clarification_choice: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    return agent._run_compound_query_if_needed(
+    return run_compound_query_if_needed(
+        agent=agent,
         query=query,
         session_id=run_context.session_id,
         session=run_context.session,

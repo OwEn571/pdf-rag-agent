@@ -42,8 +42,20 @@ def test_finish_agent_turn_writes_trace_and_returns_events(tmp_path) -> None:
     assert '"answer_preview": "hello"' in traces[0].read_text(encoding="utf-8")
 
 
-def test_run_compound_turn_if_needed_delegates_with_run_context() -> None:
-    agent = _FakeAgent(conversation_state={}, compound_payload={"answer": "compound"})
+def test_run_compound_turn_if_needed_delegates_with_run_context(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_compound_query_if_needed(**kwargs: Any) -> dict[str, str]:
+        captured.update(kwargs)
+        kwargs["emit"]("agent_plan", {"actions": ["Task"]})
+        kwargs["execution_steps"].append({"node": "compound_planner", "summary": "fake"})
+        return {"answer": "compound"}
+
+    monkeypatch.setattr(
+        "app.services.agent_loop.run_compound_query_if_needed",
+        fake_run_compound_query_if_needed,
+    )
+    agent = object()
     context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
 
     payload = run_compound_turn_if_needed(
@@ -54,9 +66,10 @@ def test_run_compound_turn_if_needed_delegates_with_run_context() -> None:
     )
 
     assert payload == {"answer": "compound"}
-    assert agent.compound_call["session_id"] == "demo"
-    assert agent.compound_call["session"] is context.session
-    assert agent.compound_call["clarification_choice"] == {"option_id": "a"}
+    assert captured["agent"] is agent
+    assert captured["session_id"] == "demo"
+    assert captured["session"] is context.session
+    assert captured["clarification_choice"] == {"option_id": "a"}
     assert context.events[0]["event"] == "agent_plan"
     assert context.execution_steps == [{"node": "compound_planner", "summary": "fake"}]
 
@@ -240,28 +253,19 @@ class _FakeAgent:
         *,
         conversation_state: dict[str, Any],
         research_state: dict[str, Any] | None = None,
-        compound_payload: dict[str, Any] | None = None,
         standard_contract: QueryContract | None = None,
         web_enabled: bool = False,
     ) -> None:
         self.runtime = _FakeRuntime(conversation_state, research_state)
         self.sessions = _FakeSessions()
-        self.compound_payload = compound_payload
         self.standard_contract = standard_contract
         self.web_enabled = web_enabled
         self.stored_pending = False
         self.cleared_pending = False
         self.remembered_verification = None
         self.remembered_research = False
-        self.compound_call: dict[str, Any] = {}
         self.extract_call: dict[str, Any] = {}
         self.plan_contract: QueryContract | None = None
-
-    def _run_compound_query_if_needed(self, **kwargs: Any) -> dict[str, Any] | None:
-        self.compound_call = dict(kwargs)
-        kwargs["emit"]("agent_plan", {"actions": ["Task"]})
-        kwargs["execution_steps"].append({"node": "compound_planner", "summary": "fake"})
-        return self.compound_payload
 
     def _extract_query_contract(self, **kwargs: Any) -> QueryContract:
         self.extract_call = dict(kwargs)
