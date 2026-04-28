@@ -327,6 +327,9 @@ def test_agent_runtime_runs_conversation_and_research_loops() -> None:
     assert conversation_state["answer"] == "hello from runtime"
     assert isinstance(research_state["verification"], VerificationReport)
     assert research_state["verification"].status == "pass"
+    assert research_state["confidence"]["basis"] == "verifier"
+    assert research_state["confidence"]["score"] > 0.8
+    assert any(event == "confidence" and payload["basis"] == "verifier" for event, payload in events)
     assert "search_corpus" in probe.steps
     assert "compose" in probe.steps
 

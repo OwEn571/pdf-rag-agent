@@ -37,6 +37,7 @@ from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
+from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.intent import IntentRecognizer
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -557,6 +558,7 @@ class ResearchAssistantAgentV4(
         planned = self._canonical_tools(planned_raw)
         observed = self._canonical_tools(observed_raw)
         verification_status = str((verification_report or {}).get("status") or "")
+        verifier_confidence = confidence_payload(confidence_from_verification_report(verification_report or {}))
         selected_paper_id = self._note_value(notes=notes, prefix="selected_paper_id=")
         selected_title = self._note_value(notes=notes, prefix="memory_title=")
         binding_sources = [
@@ -616,6 +618,7 @@ class ResearchAssistantAgentV4(
             },
             "grounding": {
                 "verification_status": verification_status or "pending",
+                "confidence": verifier_confidence,
                 "claim_count": len(claims or []),
                 "citation_count": len(citations or []),
                 "claim_sources": claim_source_counts,

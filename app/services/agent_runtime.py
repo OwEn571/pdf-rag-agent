@@ -14,7 +14,12 @@ from app.services.agent_tools import (
     research_execution_tool_names,
     research_tool_sequence,
 )
-from app.services.confidence import confidence_from_contract, should_ask_human
+from app.services.confidence import (
+    confidence_from_contract,
+    confidence_from_verification_report,
+    confidence_payload,
+    should_ask_human,
+)
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -181,6 +186,9 @@ class AgentRuntime:
             )
             state["verification"] = verification
         emit("verification", verification.model_dump())
+        runtime_confidence = confidence_from_verification_report(verification)
+        state["confidence"] = confidence_payload(runtime_confidence)
+        emit("confidence", state["confidence"])
         execution_steps.append({"node": "agent_tool:verify_claim", "summary": verification.status})
         return state
 

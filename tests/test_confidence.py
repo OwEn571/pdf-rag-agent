@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.domain.models import QueryContract
-from app.services.confidence import confidence_from_contract, should_ask_human
+from app.domain.models import QueryContract, VerificationReport
+from app.services.confidence import (
+    confidence_from_contract,
+    confidence_from_self_consistency,
+    confidence_from_verification_report,
+    confidence_payload,
+    should_ask_human,
+)
 
 
 def test_confidence_from_contract_uses_intent_confidence_note() -> None:
@@ -31,3 +37,41 @@ def test_confidence_defaults_to_high_when_no_uncertainty_signal_exists() -> None
     assert confidence.score == 1.0
     assert confidence.basis == "implicit_high_confidence"
     assert should_ask_human(confidence, SimpleNamespace(confidence_floor=0.99)) is False
+
+
+def test_confidence_from_self_consistency_scores_similar_samples_high() -> None:
+    confidence = confidence_from_self_consistency(
+        [
+            "DPO optimizes preference likelihood without a separate reward model.",
+            "DPO directly optimizes preference likelihood and avoids training a separate reward model.",
+            "Direct Preference Optimization optimizes preferences without fitting a separate reward model.",
+        ]
+    )
+
+    assert confidence.basis == "self_consistency"
+    assert confidence.score > 0.45
+    assert confidence.detail["sample_count"] == 3
+
+
+def test_confidence_from_self_consistency_scores_conflicting_samples_low() -> None:
+    confidence = confidence_from_self_consistency(
+        [
+            "DPO removes the reward model and uses preference likelihood.",
+            "Transformer introduced self-attention for sequence modeling.",
+            "A citation count ranking requires external web evidence.",
+        ]
+    )
+
+    assert confidence.score < 0.2
+    assert should_ask_human(confidence, SimpleNamespace(confidence_floor=0.6)) is True
+
+
+def test_confidence_from_verification_report_maps_status_to_score() -> None:
+    passed = confidence_from_verification_report(VerificationReport(status="pass"))
+    retry = confidence_from_verification_report(
+        VerificationReport(status="retry", missing_fields=["formula"], recommended_action="expand_recall")
+    )
+    clarify = confidence_from_verification_report(VerificationReport(status="clarify", missing_fields=["target"]))
+
+    assert passed.score > retry.score > clarify.score
+    assert confidence_payload(retry)["detail"]["recommended_action"] == "expand_recall"
