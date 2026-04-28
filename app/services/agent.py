@@ -92,6 +92,14 @@ from app.services.research_planning import (
     research_plan_goals,
     solver_sequence_for_goals,
 )
+from app.services.web_evidence import (
+    build_web_research_claim,
+    merge_evidence,
+    should_add_web_claim,
+    web_include_domains,
+    web_query_text,
+    web_search_topic,
+)
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
     AnswerComposerMixin,
@@ -4883,80 +4891,27 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _web_query_text(contract: QueryContract) -> str:
-        target_text = " ".join(contract.targets).strip()
-        query = contract.clean_query.strip()
-        goals = ResearchAssistantAgentV4._research_plan_goals(contract)
-        parts = [query]
-        if target_text and target_text.lower() not in query.lower():
-            parts.insert(0, target_text)
-        if goals & {"recommended_papers", "followup_papers", "summary", "results", "answer", "general_answer"}:
-            parts.extend(["paper", "arXiv", "publication"])
-        return " ".join(dict.fromkeys(part for part in parts if part)).strip()
+        return web_query_text(contract)
 
     @staticmethod
     def _web_search_topic(query: str) -> str:
-        lowered = str(query or "").lower()
-        if any(token in lowered for token in ["新闻", "news", "today", "昨天", "今天"]):
-            return "news"
-        return "general"
+        return web_search_topic(query)
 
     @staticmethod
     def _web_include_domains(contract: QueryContract) -> list[str]:
-        query = contract.clean_query.lower()
-        goals = ResearchAssistantAgentV4._research_plan_goals(contract)
-        if goals & {"recommended_papers", "followup_papers", "summary", "results", "answer", "general_answer"}:
-            if any(token in query for token in ["论文", "paper", "arxiv", "研究", "publication"]):
-                return [
-                    "arxiv.org",
-                    "openreview.net",
-                    "semanticscholar.org",
-                    "aclanthology.org",
-                    "proceedings.mlr.press",
-                    "papers.nips.cc",
-                    "thecvf.com",
-                ]
-        return []
+        return web_include_domains(contract)
 
     @staticmethod
     def _merge_evidence(local_evidence: list[EvidenceBlock], web_evidence: list[EvidenceBlock]) -> list[EvidenceBlock]:
-        merged: list[EvidenceBlock] = []
-        seen: set[str] = set()
-        for item in [*local_evidence, *web_evidence]:
-            if item.doc_id in seen:
-                continue
-            seen.add(item.doc_id)
-            merged.append(item)
-        return merged
+        return merge_evidence(local_evidence, web_evidence)
 
     @staticmethod
     def _should_add_web_claim(*, contract: QueryContract, claims: list[Claim], explicit_web: bool) -> bool:
-        if explicit_web:
-            return True
-        goals = ResearchAssistantAgentV4._research_plan_goals(contract)
-        if contract.allow_web_search and goals & {"answer", "general_answer", "recommended_papers", "followup_papers"}:
-            return True
-        return not claims
+        return should_add_web_claim(contract=contract, claims=claims, explicit_web=explicit_web)
 
     @staticmethod
     def _build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:
-        results = [
-            {
-                "title": item.title,
-                "url": item.file_path,
-                "snippet": item.snippet[:500],
-                "score": item.score,
-            }
-            for item in web_evidence
-        ]
-        return Claim(
-            claim_type="web_research",
-            entity=" ".join(contract.targets) if contract.targets else contract.clean_query,
-            value="web_search_results",
-            structured_data={"web_results": results},
-            evidence_ids=[item.doc_id for item in web_evidence],
-            paper_ids=[item.paper_id for item in web_evidence],
-            confidence=0.72,
-        )
+        return build_web_research_claim(contract=contract, web_evidence=web_evidence)
 
     @staticmethod
     def _normalize_lookup_text(text: str) -> str:
