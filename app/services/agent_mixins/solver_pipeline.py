@@ -411,17 +411,14 @@ class SolverPipelineMixin:
         if selected_paper is None:
             return []
         return [
-            Claim(
-                claim_type="metric_context",
+            metric_helpers.metric_context_claim(
                 entity=contract.targets[0] if contract.targets else selected_paper.title,
-                value="table-backed metric answer",
-                structured_data={
-                    "metric_lines": self._extract_metric_lines(metric_evidence or evidence),
-                    "paper_titles": [paper.title for paper in selected_papers],
-                },
-                evidence_ids=[item.doc_id for item in metric_evidence[:4]] or self._evidence_ids_for_paper(evidence, selected_paper.paper_id, limit=4),
+                selected_paper=selected_paper,
+                selected_papers=selected_papers,
+                metric_lines=self._extract_metric_lines(metric_evidence or evidence),
+                metric_evidence=metric_evidence,
+                fallback_evidence_ids=self._evidence_ids_for_paper(evidence, selected_paper.paper_id, limit=4),
                 paper_ids=paper_ids or [selected_paper.paper_id],
-                confidence=0.74,
             )
         ]
 
@@ -804,14 +801,12 @@ class SolverPipelineMixin:
             return [vlm_claim]
         lines = self._extract_metric_lines(ranked_blocks)
         return [
-            Claim(
-                claim_type="metric_value",
+            metric_helpers.text_table_metric_claim(
                 entity=contract.targets[0] if contract.targets else selected_paper.title,
-                value=lines[0] if lines else "已定位到表格指标证据。",
-                structured_data={"metric_lines": lines, "mode": "text_table"},
+                metric_lines=lines,
                 evidence_ids=evidence_ids,
                 paper_ids=paper_ids or [selected_paper.paper_id],
-                confidence=0.86,
+                selected_paper=selected_paper,
             )
         ]
 

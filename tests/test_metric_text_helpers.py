@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
-from app.services.metric_text_helpers import extract_metric_lines, metric_block_score, metric_line_score
+from app.services.metric_text_helpers import (
+    extract_metric_lines,
+    metric_block_score,
+    metric_context_claim,
+    metric_line_score,
+    text_table_metric_claim,
+)
 
 
 METRIC_WEIGHTS = {"win rate": 3.0, "accuracy": 2.0, "acc": 1.0}
@@ -66,3 +72,40 @@ def test_metric_block_score_rewards_table_target_and_primary_paper_match() -> No
     )
 
     assert matched == base + 6.0
+
+
+def test_metric_context_claim_uses_metric_evidence_or_fallback_ids() -> None:
+    paper = CandidatePaper(paper_id="paper-1", title="AlignX", year="2025")
+    evidence = [_evidence("ev-1", snippet="PBA accuracy", block_type="table")]
+
+    claim = metric_context_claim(
+        entity="PBA",
+        selected_paper=paper,
+        selected_papers=[paper],
+        metric_lines=["PBA accuracy 59.66"],
+        metric_evidence=evidence,
+        fallback_evidence_ids=["fallback"],
+        paper_ids=[],
+    )
+
+    assert claim.claim_type == "metric_context"
+    assert claim.evidence_ids == ["ev-1"]
+    assert claim.paper_ids == ["paper-1"]
+    assert claim.structured_data["paper_titles"] == ["AlignX"]
+
+
+def test_text_table_metric_claim_uses_first_line_or_default_text() -> None:
+    paper = CandidatePaper(paper_id="paper-1", title="AlignX")
+
+    claim = text_table_metric_claim(
+        entity="PBA",
+        metric_lines=[],
+        evidence_ids=["ev-1"],
+        paper_ids=[],
+        selected_paper=paper,
+    )
+
+    assert claim.claim_type == "metric_value"
+    assert claim.value == "已定位到表格指标证据。"
+    assert claim.structured_data["mode"] == "text_table"
+    assert claim.paper_ids == ["paper-1"]

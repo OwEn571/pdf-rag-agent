@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract
 
 
 def extract_metric_lines(evidence: list[EvidenceBlock], *, token_weights: Mapping[str, float]) -> list[str]:
@@ -59,3 +59,46 @@ def metric_block_score(
     if paper_by_id.get(item.paper_id) is not None and contract.targets and target_paper_match:
         score += 6.0
     return score
+
+
+def metric_context_claim(
+    *,
+    entity: str,
+    selected_paper: CandidatePaper,
+    selected_papers: list[CandidatePaper],
+    metric_lines: list[str],
+    metric_evidence: list[EvidenceBlock],
+    fallback_evidence_ids: list[str],
+    paper_ids: list[str],
+) -> Claim:
+    return Claim(
+        claim_type="metric_context",
+        entity=entity,
+        value="table-backed metric answer",
+        structured_data={
+            "metric_lines": metric_lines,
+            "paper_titles": [paper.title for paper in selected_papers],
+        },
+        evidence_ids=[item.doc_id for item in metric_evidence[:4]] or fallback_evidence_ids,
+        paper_ids=paper_ids or [selected_paper.paper_id],
+        confidence=0.74,
+    )
+
+
+def text_table_metric_claim(
+    *,
+    entity: str,
+    metric_lines: list[str],
+    evidence_ids: list[str],
+    paper_ids: list[str],
+    selected_paper: CandidatePaper,
+) -> Claim:
+    return Claim(
+        claim_type="metric_value",
+        entity=entity,
+        value=metric_lines[0] if metric_lines else "已定位到表格指标证据。",
+        structured_data={"metric_lines": metric_lines, "mode": "text_table"},
+        evidence_ids=evidence_ids,
+        paper_ids=paper_ids or [selected_paper.paper_id],
+        confidence=0.86,
+    )
