@@ -135,6 +135,10 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert manifest_names == {
         "read_memory",
         "search_corpus",
+        "bm25_search",
+        "vector_search",
+        "hybrid_search",
+        "rerank",
         "web_search",
         "fetch_url",
         "query_library_metadata",
@@ -147,6 +151,12 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     search_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "search_corpus")
     assert search_schema["required"] == ["query"]
     assert search_schema["properties"]["top_k"]["maximum"] == 50
+    bm25_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "bm25_search")
+    assert bm25_schema["required"] == ["query"]
+    hybrid_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "hybrid_search")
+    assert hybrid_schema["properties"]["alpha"]["maximum"] == 1.0
+    rerank_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "rerank")
+    assert rerank_schema["required"] == ["query"]
     todo_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "todo_write")
     assert todo_schema["required"] == ["items"]
     remember_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "remember")
@@ -244,6 +254,10 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "todo_write",
         "remember",
         "search_corpus",
+        "bm25_search",
+        "vector_search",
+        "hybrid_search",
+        "rerank",
         "web_search",
         "fetch_url",
         "compose",

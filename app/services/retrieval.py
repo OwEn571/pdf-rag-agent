@@ -46,12 +46,14 @@ class DualIndexRetriever:
         self._block_docs_by_paper_id: dict[str, list[Document]] = {}
         self._load_library_docs()
         self._paper_bm25: BM25Retriever | None = self._build_bm25(self._paper_docs, settings.paper_bm25_top_k)
+        self._block_bm25: BM25Retriever | None = self._build_bm25(self._block_docs, settings.block_bm25_top_k)
         self._paper_dense = CollectionVectorIndex(settings, collection_name=settings.milvus_paper_collection)
         self._block_dense = CollectionVectorIndex(settings, collection_name=settings.milvus_block_collection)
 
     def refresh(self) -> None:
         self._load_library_docs()
         self._paper_bm25 = self._build_bm25(self._paper_docs, self.settings.paper_bm25_top_k)
+        self._block_bm25 = self._build_bm25(self._block_docs, self.settings.block_bm25_top_k)
 
     def close(self) -> None:
         self._paper_dense.close()
@@ -105,6 +107,136 @@ class DualIndexRetriever:
             )
         deduped = self._deduplicate_candidates(candidates)
         return self.screen_papers(deduped, contract=contract, limit=limit)
+
+    def bm25_search(
+        self,
+        *,
+        query: str,
+        contract: QueryContract,
+        scope: str = "auto",
+        paper_ids: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[EvidenceBlock]:
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or self.settings.evidence_limit_default), 50))
+        docs: list[tuple[str, list[Document]]] = []
+        normalized_scope = scope if scope in {"auto", "papers", "blocks"} else "auto"
+        if normalized_scope in {"auto", "papers"} and self._paper_bm25 is not None:
+            docs.append(("paper_bm25", self._paper_bm25.invoke(query)))
+        if normalized_scope in {"auto", "blocks"} and self._block_bm25 is not None:
+            docs.append(("block_bm25", self._filter_docs_by_paper_ids(self._block_bm25.invoke(query), paper_ids or [])))
+        return self._rank_search_tool_documents(
+            docs=docs,
+            query=query,
+            contract=contract,
+            limit=limit,
+        )
+
+    def vector_search(
+        self,
+        *,
+        query: str,
+        contract: QueryContract,
+        scope: str = "auto",
+        paper_ids: list[str] | None = None,
+        limit: int | None = None,
+    ) -> list[EvidenceBlock]:
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or self.settings.evidence_limit_default), 50))
+        normalized_scope = scope if scope in {"auto", "papers", "blocks"} else "auto"
+        docs: list[tuple[str, list[Document]]] = []
+        if normalized_scope in {"auto", "papers"}:
+            paper_docs = [
+                doc
+                for doc in self._paper_dense.search_documents(query, limit=min(limit, self.settings.paper_dense_top_k))
+                if self._is_allowed_library_doc(doc)
+            ]
+            docs.append(("paper_dense", paper_docs))
+        if normalized_scope in {"auto", "blocks"}:
+            block_docs = self._block_dense.search_documents(query, limit=min(limit, self.settings.block_dense_top_k))
+            docs.append(("block_dense", self._filter_docs_by_paper_ids(block_docs, paper_ids or [])))
+        return self._rank_search_tool_documents(
+            docs=docs,
+            query=query,
+            contract=contract,
+            limit=limit,
+        )
+
+    def hybrid_search(
+        self,
+        *,
+        query: str,
+        contract: QueryContract,
+        scope: str = "auto",
+        paper_ids: list[str] | None = None,
+        limit: int | None = None,
+        alpha: float = 0.5,
+    ) -> list[EvidenceBlock]:
+        query = str(query or "").strip()
+        if not query:
+            return []
+        limit = max(1, min(int(limit or self.settings.evidence_limit_default), 50))
+        try:
+            dense_weight = max(0.0, min(1.0, float(alpha)))
+        except (TypeError, ValueError):
+            dense_weight = 0.5
+        sparse_weight = 1.0 - dense_weight
+        bm25 = self.bm25_search(
+            query=query,
+            contract=contract,
+            scope=scope,
+            paper_ids=paper_ids,
+            limit=limit,
+        )
+        dense = self.vector_search(
+            query=query,
+            contract=contract,
+            scope=scope,
+            paper_ids=paper_ids,
+            limit=limit,
+        )
+        weighted_docs = [
+            (sparse_weight or 0.01, [self._evidence_to_document(item) for item in bm25]),
+            (dense_weight or 0.01, [self._evidence_to_document(item) for item in dense]),
+        ]
+        fused_docs = self._rrf_fuse(weighted_docs)
+        return self._rank_search_tool_documents(
+            docs=[("hybrid_search", fused_docs)],
+            query=query,
+            contract=contract,
+            limit=limit,
+        )
+
+    def rerank_evidence(
+        self,
+        *,
+        query: str,
+        evidence: list[EvidenceBlock],
+        top_k: int | None = None,
+        focus: list[str] | None = None,
+    ) -> list[EvidenceBlock]:
+        if not evidence:
+            return []
+        limit = max(1, min(int(top_k or len(evidence)), 50))
+        tokens = self._query_tokens(query, extra=list(focus or []))
+        reranked: list[EvidenceBlock] = []
+        for item in evidence:
+            haystack = f"{item.title}\n{item.caption}\n{item.snippet}"
+            lexical = self._lexical_score(haystack, tokens)
+            focus_bonus = 0.0
+            for target in list(focus or []):
+                if target and self._matches_target(haystack, target):
+                    focus_bonus += 1.5
+            score = float(item.score or 0.0) + lexical + focus_bonus
+            metadata = dict(item.metadata or {})
+            metadata["rerank_score"] = score
+            reranked.append(item.model_copy(update={"score": score, "metadata": metadata}))
+        reranked.sort(key=lambda item: (-item.score, item.page, item.doc_id))
+        return reranked[:limit]
 
     def search_concept_evidence(
         self,
@@ -675,6 +807,102 @@ class DualIndexRetriever:
         for paper_id in ordered_ids:
             docs.extend(self._block_docs_by_paper_id.get(paper_id, []))
         return docs
+
+    @staticmethod
+    def _filter_docs_by_paper_ids(docs: list[Document], paper_ids: list[str]) -> list[Document]:
+        allowed = {str(item).strip() for item in paper_ids if str(item).strip()}
+        if not allowed:
+            return docs
+        return [doc for doc in docs if str((doc.metadata or {}).get("paper_id", "")).strip() in allowed]
+
+    def _rank_search_tool_documents(
+        self,
+        *,
+        docs: list[tuple[str, list[Document]]],
+        query: str,
+        contract: QueryContract,
+        limit: int,
+    ) -> list[EvidenceBlock]:
+        target_terms = self._contract_target_terms(contract)
+        tokens = self._query_tokens(query, extra=target_terms)
+        candidates: list[EvidenceBlock] = []
+        for source, source_docs in docs:
+            for rank, doc in enumerate(source_docs, start=1):
+                if not self._is_allowed_library_doc(doc):
+                    continue
+                evidence = self._evidence_from_document(
+                    doc=doc,
+                    query=query,
+                    target_terms=target_terms,
+                    tokens=tokens,
+                    score_seed=1.0 / rank,
+                    source=source,
+                )
+                if evidence is not None:
+                    candidates.append(evidence)
+        candidates.sort(key=lambda item: (-item.score, item.page, item.doc_id))
+        deduped: list[EvidenceBlock] = []
+        seen: set[str] = set()
+        for item in candidates:
+            key = item.doc_id or f"{item.paper_id}:{item.page}:{item.snippet[:80]}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped[: max(1, limit)]
+
+    def _evidence_from_document(
+        self,
+        *,
+        doc: Document,
+        query: str,
+        target_terms: list[str],
+        tokens: list[str],
+        score_seed: float,
+        source: str,
+    ) -> EvidenceBlock | None:
+        meta = dict(doc.metadata or {})
+        text = str(doc.page_content or "")
+        if not text:
+            return None
+        title = str(meta.get("title", ""))
+        block_type = str(meta.get("block_type", "") or "paper_card")
+        snippet = self._focused_snippet(text=text, targets=target_terms, query=query, max_chars=700)
+        score = score_seed + self._lexical_score(self._normalize_text(f"{title}\n{text}"), tokens) * 0.2
+        if target_terms and any(target and self._matches_target(f"{title}\n{text}", target) for target in target_terms):
+            score += 1.0
+        if "dense_score" in meta:
+            try:
+                score += max(0.0, float(meta.get("dense_score", 0.0) or 0.0)) * 0.05
+            except (TypeError, ValueError):
+                pass
+        meta["search_source"] = source
+        return EvidenceBlock(
+            doc_id=str(meta.get("doc_id", "")) or f"{source}:{self._doc_key(doc)}",
+            paper_id=str(meta.get("paper_id", "")),
+            title=title,
+            file_path=str(meta.get("file_path", "")),
+            page=int(meta.get("page", 0) or 0),
+            block_type=block_type,
+            caption=str(meta.get("caption", "")),
+            bbox=str(meta.get("bbox", "")),
+            snippet=snippet,
+            score=score,
+            metadata=meta,
+        )
+
+    @staticmethod
+    def _evidence_to_document(item: EvidenceBlock) -> Document:
+        metadata = dict(item.metadata or {})
+        metadata.setdefault("doc_id", item.doc_id)
+        metadata.setdefault("paper_id", item.paper_id)
+        metadata.setdefault("title", item.title)
+        metadata.setdefault("page", item.page)
+        metadata.setdefault("block_type", item.block_type)
+        metadata.setdefault("file_path", item.file_path)
+        metadata.setdefault("caption", item.caption)
+        metadata.setdefault("bbox", item.bbox)
+        return Document(page_content=item.snippet, metadata=metadata)
 
     def _rebuild_lookup_indexes(self) -> None:
         self._paper_docs_by_id = {}

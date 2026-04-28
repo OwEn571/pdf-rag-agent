@@ -6,7 +6,7 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from app.core.config import Settings
-from app.domain.models import QueryContract
+from app.domain.models import EvidenceBlock, QueryContract
 from app.services.indexing import V4IngestionService
 from app.services.retrieval import DualIndexRetriever
 from app.services.zotero_sqlite import PaperRecord
@@ -104,6 +104,45 @@ def test_retriever_lookup_indexes_filter_evidence_by_paper_id(tmp_path: Path) ->
     assert retriever.block_doc_by_id("b2") is not None
     assert [doc.metadata["doc_id"] for doc in retriever.block_documents_for_paper("P1", limit=10)] == ["b1"]
     assert {item.paper_id for item in evidence} == {"P2"}
+
+
+def test_retriever_exposes_atomic_bm25_and_hybrid_search_tools(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    paper_docs = [
+        Document(page_content="title: Direct Preference Optimization\nDPO optimizes a preference objective.", metadata={"doc_id": "paper::DPO", "paper_id": "DPO", "title": "Direct Preference Optimization"}),
+        Document(page_content="title: Proximal Policy Optimization\nPPO clips policy ratios.", metadata={"doc_id": "paper::PPO", "paper_id": "PPO", "title": "Proximal Policy Optimization"}),
+    ]
+    block_docs = [
+        Document(page_content="The DPO loss directly optimizes preferences without a reward model.", metadata={"doc_id": "dpo-block", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 2}),
+        Document(page_content="The PPO clipped surrogate objective limits policy updates.", metadata={"doc_id": "ppo-block", "paper_id": "PPO", "title": "Proximal Policy Optimization", "block_type": "page_text", "page": 3}),
+    ]
+    V4IngestionService._persist_jsonl(settings.paper_store_path, paper_docs)
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    retriever = DualIndexRetriever(settings)
+    contract = QueryContract(clean_query="DPO loss", targets=["DPO"], requested_fields=["formula"])
+
+    bm25 = retriever.bm25_search(query="DPO loss", contract=contract, scope="blocks", limit=3)
+    hybrid = retriever.hybrid_search(query="DPO loss", contract=contract, scope="auto", limit=3)
+
+    assert bm25
+    assert bm25[0].paper_id == "DPO"
+    assert bm25[0].metadata["search_source"] == "block_bm25"
+    assert hybrid
+    assert hybrid[0].paper_id == "DPO"
+
+
+def test_retriever_reranks_existing_evidence_by_focus_terms(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    retriever = DualIndexRetriever(settings)
+    evidence = [
+        EvidenceBlock(doc_id="a", paper_id="P1", title="A", file_path="", page=1, block_type="page_text", snippet="generic policy text", score=1.0),
+        EvidenceBlock(doc_id="b", paper_id="P2", title="B", file_path="", page=1, block_type="page_text", snippet="DPO loss optimizes preferences", score=0.1),
+    ]
+
+    reranked = retriever.rerank_evidence(query="DPO loss", evidence=evidence, top_k=2, focus=["DPO"])
+
+    assert [item.doc_id for item in reranked] == ["b", "a"]
+    assert reranked[0].metadata["rerank_score"] > reranked[1].metadata["rerank_score"]
 
 
 def test_ingestion_extracts_body_acronym_aliases_from_definitions_and_formulae() -> None:

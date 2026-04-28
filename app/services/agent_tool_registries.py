@@ -702,6 +702,99 @@ def build_research_tool_registry(
             execution_steps=execution_steps,
         )
 
+    def run_atomic_search(name: str) -> None:
+        planned_input = tool_input(name) or dict(state.get("current_tool_input", {}) or {})
+        query = str(planned_input.get("query", "") or state["contract"].clean_query).strip()
+        scope = str(planned_input.get("scope", "") or "auto").strip()
+        top_k = planned_input.get("top_k", planned_input.get("limit", agent.settings.evidence_limit_default))
+        raw_paper_ids = planned_input.get("paper_ids", [])
+        paper_ids = [
+            str(item).strip()
+            for item in (raw_paper_ids if isinstance(raw_paper_ids, list) else [])
+            if str(item).strip()
+        ]
+        kwargs: dict[str, Any] = {
+            "query": query,
+            "contract": state["contract"],
+            "scope": scope,
+            "paper_ids": paper_ids,
+            "limit": top_k,
+        }
+        if name == "hybrid_search":
+            kwargs["alpha"] = planned_input.get("alpha", 0.5)
+        evidence = getattr(agent.retriever, name)(**kwargs)
+        state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
+        papers = [
+            paper
+            for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
+            if (paper := agent._candidate_from_paper_id(paper_id)) is not None
+        ]
+        if papers:
+            existing_screened = {paper.paper_id for paper in list(state.get("screened_papers", []) or [])}
+            state["screened_papers"] = [
+                *list(state.get("screened_papers", []) or []),
+                *[paper for paper in papers if paper.paper_id not in existing_screened],
+            ]
+            existing_candidates = {paper.paper_id for paper in list(state.get("candidate_papers", []) or [])}
+            state["candidate_papers"] = [
+                *list(state.get("candidate_papers", []) or []),
+                *[paper for paper in papers if paper.paper_id not in existing_candidates],
+            ]
+        emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool=name,
+            summary=f"evidence={len(evidence)}",
+            payload={
+                "query": query,
+                "scope": scope,
+                "evidence_count": len(evidence),
+                "paper_count": len(papers),
+                "sources": list(dict.fromkeys(str(item.metadata.get("search_source", "")) for item in evidence if item.metadata)),
+            },
+        )
+
+    def bm25_search() -> None:
+        run_atomic_search("bm25_search")
+
+    def vector_search() -> None:
+        run_atomic_search("vector_search")
+
+    def hybrid_search() -> None:
+        run_atomic_search("hybrid_search")
+
+    def rerank() -> None:
+        planned_input = tool_input("rerank") or dict(state.get("current_tool_input", {}) or {})
+        query = str(planned_input.get("query", "") or state["contract"].clean_query).strip()
+        raw_focus = planned_input.get("focus", state["contract"].targets)
+        focus = [
+            str(item).strip()
+            for item in (raw_focus if isinstance(raw_focus, list) else [])
+            if str(item).strip()
+        ]
+        top_k = planned_input.get("top_k", agent.settings.evidence_limit_default)
+        evidence = agent.retriever.rerank_evidence(
+            query=query,
+            evidence=list(state.get("evidence", []) or []),
+            top_k=top_k,
+            focus=focus,
+        )
+        state["evidence"] = evidence
+        emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="rerank",
+            summary=f"evidence={len(evidence)}",
+            payload={
+                "query": query,
+                "focus": focus,
+                "evidence_count": len(evidence),
+                "top_doc_ids": [item.doc_id for item in evidence[:5]],
+            },
+        )
+
     def web_search() -> None:
         agent._agent_web_search(
             state=state,
@@ -815,6 +908,10 @@ def build_research_tool_registry(
         "read_memory": RegisteredAgentTool("read_memory", read_memory),
         "todo_write": RegisteredAgentTool("todo_write", todo_write),
         "remember": RegisteredAgentTool("remember", remember),
+        "bm25_search": RegisteredAgentTool("bm25_search", bm25_search),
+        "vector_search": RegisteredAgentTool("vector_search", vector_search),
+        "hybrid_search": RegisteredAgentTool("hybrid_search", hybrid_search),
+        "rerank": RegisteredAgentTool("rerank", rerank),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),
         "compose": RegisteredAgentTool("compose", compose, terminal=True),
         "web_search": RegisteredAgentTool("web_search", web_search),

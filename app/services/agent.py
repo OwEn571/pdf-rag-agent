@@ -78,6 +78,10 @@ CANONICAL_TOOL_ALIASES = {
 CANONICAL_TOOL_NAMES = {
     "read_memory",
     "search_corpus",
+    "bm25_search",
+    "vector_search",
+    "hybrid_search",
+    "rerank",
     "web_search",
     "fetch_url",
     "query_library_metadata",
@@ -2609,6 +2613,10 @@ class ResearchAssistantAgentV4(
         messages = {
             "read_memory": "读取会话工作记忆，确认上一轮目标、选择和工具结果。",
             "search_corpus": f"从本地论文库检索与 {target_text} 相关的论文和证据块。",
+            "bm25_search": f"对 {target_text} 相关内容做关键词检索，优先召回精确术语、公式和标题。",
+            "vector_search": f"对 {target_text} 相关内容做语义向量检索，补足改写表达。",
+            "hybrid_search": f"对 {target_text} 相关内容做混合检索，融合关键词和语义召回。",
+            "rerank": "按当前问题重新排序已收集证据，优先保留最相关片段。",
             "compose": "基于当前记忆或证据进入最终整理；研究问题会先完成内部求解和校验。",
             "todo_write": "更新可见任务列表，让多步检索/验证过程可以被前端追踪。",
             "remember": "把可复用的学习或用户偏好持久化，供后续轮次读取。",
