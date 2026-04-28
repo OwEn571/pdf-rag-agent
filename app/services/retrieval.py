@@ -238,6 +238,119 @@ class DualIndexRetriever:
         reranked.sort(key=lambda item: (-item.score, item.page, item.doc_id))
         return reranked[:limit]
 
+    def read_pdf_pages(
+        self,
+        *,
+        paper_id: str,
+        page_from: int,
+        page_to: int | None = None,
+        max_chars: int = 4000,
+    ) -> list[EvidenceBlock]:
+        paper_id = str(paper_id or "").strip()
+        if not paper_id:
+            return []
+        start = max(1, int(page_from or 1))
+        end = max(start, int(page_to or start))
+        max_chars = max(200, min(int(max_chars or 4000), 20000))
+        used_chars = 0
+        blocks: list[EvidenceBlock] = []
+        block_order = {"page_text": 0, "table": 1, "caption": 2, "figure": 3}
+        docs = sorted(
+            self._block_docs_by_paper_id.get(paper_id, []),
+            key=lambda doc: (
+                int((doc.metadata or {}).get("page", 0) or 0),
+                block_order.get(str((doc.metadata or {}).get("block_type", "")), 9),
+                str((doc.metadata or {}).get("doc_id", "")),
+            ),
+        )
+        for doc in docs:
+            meta = dict(doc.metadata or {})
+            page = int(meta.get("page", 0) or 0)
+            if page < start or page > end:
+                continue
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
+            text = str(doc.page_content or "").strip()
+            if not text:
+                continue
+            snippet = text[:remaining]
+            used_chars += len(snippet)
+            meta["read_source"] = "read_pdf_page"
+            blocks.append(
+                EvidenceBlock(
+                    doc_id=str(meta.get("doc_id", "")),
+                    paper_id=str(meta.get("paper_id", "")),
+                    title=str(meta.get("title", "")),
+                    file_path=str(meta.get("file_path", "")),
+                    page=page,
+                    block_type=str(meta.get("block_type", "")),
+                    caption=str(meta.get("caption", "")),
+                    bbox=str(meta.get("bbox", "")),
+                    snippet=snippet,
+                    score=1.0,
+                    metadata=meta,
+                )
+            )
+        return blocks
+
+    def grep_corpus(
+        self,
+        *,
+        pattern: str,
+        scope: str = "auto",
+        paper_ids: list[str] | None = None,
+        max_hits: int = 20,
+    ) -> list[EvidenceBlock]:
+        pattern = str(pattern or "").strip()
+        if not pattern or len(pattern) > 240:
+            return []
+        try:
+            regex = re.compile(pattern, flags=re.IGNORECASE)
+        except re.error:
+            return []
+        max_hits = max(1, min(int(max_hits or 20), 100))
+        normalized_scope = scope if scope in {"auto", "papers", "blocks"} else "auto"
+        docs: list[Document] = []
+        if normalized_scope in {"auto", "papers"}:
+            docs.extend(self._paper_docs)
+        if normalized_scope in {"auto", "blocks"}:
+            docs.extend(self._filter_docs_by_paper_ids(self._block_docs, paper_ids or []))
+        hits: list[EvidenceBlock] = []
+        for doc in docs:
+            if len(hits) >= max_hits:
+                break
+            meta = dict(doc.metadata or {})
+            text = str(doc.page_content or "")
+            match = regex.search(text)
+            if match is None:
+                continue
+            start = max(0, match.start() - 220)
+            end = min(len(text), match.end() + 420)
+            snippet = text[start:end].strip()
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(text):
+                snippet = snippet + "..."
+            meta["grep_pattern"] = pattern
+            meta["search_source"] = "grep_corpus"
+            hits.append(
+                EvidenceBlock(
+                    doc_id=str(meta.get("doc_id", "")),
+                    paper_id=str(meta.get("paper_id", "")),
+                    title=str(meta.get("title", "")),
+                    file_path=str(meta.get("file_path", "")),
+                    page=int(meta.get("page", 0) or 0),
+                    block_type=str(meta.get("block_type", "") or "paper_card"),
+                    caption=str(meta.get("caption", "")),
+                    bbox=str(meta.get("bbox", "")),
+                    snippet=snippet,
+                    score=1.0,
+                    metadata=meta,
+                )
+            )
+        return hits
+
     def search_concept_evidence(
         self,
         *,

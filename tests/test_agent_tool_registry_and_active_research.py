@@ -139,6 +139,8 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
         "vector_search",
         "hybrid_search",
         "rerank",
+        "read_pdf_page",
+        "grep_corpus",
         "web_search",
         "fetch_url",
         "query_library_metadata",
@@ -157,6 +159,10 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert hybrid_schema["properties"]["alpha"]["maximum"] == 1.0
     rerank_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "rerank")
     assert rerank_schema["required"] == ["query"]
+    read_page_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "read_pdf_page")
+    assert read_page_schema["required"] == ["paper_id", "page_from"]
+    grep_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "grep_corpus")
+    assert grep_schema["required"] == ["regex"]
     todo_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "todo_write")
     assert todo_schema["required"] == ["items"]
     remember_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "remember")
@@ -258,6 +264,8 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "vector_search",
         "hybrid_search",
         "rerank",
+        "read_pdf_page",
+        "grep_corpus",
         "web_search",
         "fetch_url",
         "compose",

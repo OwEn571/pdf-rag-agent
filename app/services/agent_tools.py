@@ -203,6 +203,40 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
         research_executable=True,
     ),
     AgentToolSpec(
+        name="read_pdf_page",
+        when="Use to read indexed text/table/caption blocks from a known local PDF paper_id and page range.",
+        returns="Evidence blocks from the requested paper pages, preserving page numbers and block types.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "paper_id": {"type": "string"},
+                "page_from": {"type": "integer", "minimum": 1},
+                "page_to": {"type": "integer", "minimum": 1},
+                "max_chars": {"type": "integer", "minimum": 200, "maximum": 20000, "default": 4000},
+            },
+            "required": ["paper_id", "page_from"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+    ),
+    AgentToolSpec(
+        name="grep_corpus",
+        when="Use for exact string or regex lookup over local paper cards and PDF blocks, especially formulas, identifiers, section labels, and quoted terms.",
+        returns="Matching local evidence snippets with paper_id, page, block type, and grep pattern metadata.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "regex": {"type": "string"},
+                "scope": {"type": "string", "enum": ["auto", "papers", "blocks"], "default": "auto"},
+                "paper_ids": {"type": "array", "items": {"type": "string"}},
+                "max_hits": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+            "required": ["regex"],
+            "additionalProperties": False,
+        },
+        research_executable=True,
+    ),
+    AgentToolSpec(
         name="web_search",
         when="Use for latest/current facts, external sources, citation counts, or when local corpus evidence is insufficient.",
         returns="External web evidence or citation-count lookup results. Treat them as dynamic and cite source URLs.",

@@ -145,6 +145,32 @@ def test_retriever_reranks_existing_evidence_by_focus_terms(tmp_path: Path) -> N
     assert reranked[0].metadata["rerank_score"] > reranked[1].metadata["rerank_score"]
 
 
+def test_retriever_reads_pdf_page_blocks_and_greps_corpus(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    paper_docs = [
+        Document(
+            page_content="title: Direct Preference Optimization",
+            metadata={"doc_id": "paper::DPO", "paper_id": "DPO", "title": "Direct Preference Optimization"},
+        )
+    ]
+    block_docs = [
+        Document(page_content="Page one introduction", metadata={"doc_id": "dpo-p1", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 1}),
+        Document(page_content="Page two contains L_DPO and preference loss details.", metadata={"doc_id": "dpo-p2", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 2}),
+        Document(page_content="Page three appendix", metadata={"doc_id": "dpo-p3", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 3}),
+    ]
+    V4IngestionService._persist_jsonl(settings.paper_store_path, paper_docs)
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    retriever = DualIndexRetriever(settings)
+
+    page_blocks = retriever.read_pdf_pages(paper_id="DPO", page_from=2, page_to=2, max_chars=2000)
+    grep_hits = retriever.grep_corpus(pattern=r"L_DPO", scope="blocks", paper_ids=["DPO"], max_hits=5)
+
+    assert [item.doc_id for item in page_blocks] == ["dpo-p2"]
+    assert "preference loss" in page_blocks[0].snippet
+    assert [item.doc_id for item in grep_hits] == ["dpo-p2"]
+    assert grep_hits[0].metadata["grep_pattern"] == r"L_DPO"
+
+
 def test_ingestion_extracts_body_acronym_aliases_from_definitions_and_formulae() -> None:
     aliases = V4IngestionService._extract_acronym_aliases(
         "Preference-Bridged Alignment (PBA) defines the L_{PBA} objective for persona-conditioned generation."

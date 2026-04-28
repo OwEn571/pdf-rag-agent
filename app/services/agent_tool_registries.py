@@ -75,6 +75,14 @@ def _task_plan_with_allow_list(plan: dict[str, Any], tools_allowed: list[str]) -
     return {**plan, "actions": actions, "tool_call_args": tool_call_args}
 
 
+def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def build_conversation_tool_registry(
     *,
     agent: Any,
@@ -795,6 +803,77 @@ def build_research_tool_registry(
             },
         )
 
+    def add_evidence_result(name: str, evidence: list[EvidenceBlock], payload: dict[str, Any]) -> None:
+        state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
+        papers = [
+            paper
+            for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
+            if (paper := agent._candidate_from_paper_id(paper_id)) is not None
+        ]
+        if papers:
+            existing_screened = {paper.paper_id for paper in list(state.get("screened_papers", []) or [])}
+            state["screened_papers"] = [
+                *list(state.get("screened_papers", []) or []),
+                *[paper for paper in papers if paper.paper_id not in existing_screened],
+            ]
+            existing_candidates = {paper.paper_id for paper in list(state.get("candidate_papers", []) or [])}
+            state["candidate_papers"] = [
+                *list(state.get("candidate_papers", []) or []),
+                *[paper for paper in papers if paper.paper_id not in existing_candidates],
+            ]
+        emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
+        agent._record_agent_observation(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool=name,
+            summary=f"evidence={len(evidence)}",
+            payload={**payload, "evidence_count": len(evidence), "paper_count": len(papers)},
+        )
+
+    def read_pdf_page() -> None:
+        planned_input = tool_input("read_pdf_page") or dict(state.get("current_tool_input", {}) or {})
+        paper_id = str(planned_input.get("paper_id", "") or "").strip()
+        if not paper_id:
+            screened = list(state.get("screened_papers", []) or [])
+            paper_id = str(getattr(screened[0], "paper_id", "") or "") if screened else ""
+        page_from = _coerce_int(planned_input.get("page_from", 1), default=1, minimum=1, maximum=10000)
+        page_to = _coerce_int(planned_input.get("page_to", page_from), default=page_from, minimum=page_from, maximum=10000)
+        max_chars = _coerce_int(planned_input.get("max_chars", 4000), default=4000, minimum=200, maximum=20000)
+        evidence = agent.retriever.read_pdf_pages(
+            paper_id=paper_id,
+            page_from=page_from,
+            page_to=page_to,
+            max_chars=max_chars,
+        )
+        add_evidence_result(
+            "read_pdf_page",
+            evidence,
+            {"paper_id": paper_id, "page_from": page_from, "page_to": page_to, "max_chars": max_chars},
+        )
+
+    def grep_corpus() -> None:
+        planned_input = tool_input("grep_corpus") or dict(state.get("current_tool_input", {}) or {})
+        pattern = str(planned_input.get("regex", "") or planned_input.get("pattern", "") or "").strip()
+        scope = str(planned_input.get("scope", "") or "auto").strip()
+        raw_paper_ids = planned_input.get("paper_ids", [])
+        paper_ids = [
+            str(item).strip()
+            for item in (raw_paper_ids if isinstance(raw_paper_ids, list) else [])
+            if str(item).strip()
+        ]
+        max_hits = planned_input.get("max_hits", 20)
+        evidence = agent.retriever.grep_corpus(
+            pattern=pattern,
+            scope=scope,
+            paper_ids=paper_ids,
+            max_hits=max_hits,
+        )
+        add_evidence_result(
+            "grep_corpus",
+            evidence,
+            {"regex": pattern, "scope": scope, "paper_ids": paper_ids, "max_hits": max_hits},
+        )
+
     def web_search() -> None:
         agent._agent_web_search(
             state=state,
@@ -912,6 +991,8 @@ def build_research_tool_registry(
         "vector_search": RegisteredAgentTool("vector_search", vector_search),
         "hybrid_search": RegisteredAgentTool("hybrid_search", hybrid_search),
         "rerank": RegisteredAgentTool("rerank", rerank),
+        "read_pdf_page": RegisteredAgentTool("read_pdf_page", read_pdf_page),
+        "grep_corpus": RegisteredAgentTool("grep_corpus", grep_corpus),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),
         "compose": RegisteredAgentTool("compose", compose, terminal=True),
         "web_search": RegisteredAgentTool("web_search", web_search),
