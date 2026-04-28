@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
+from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.evidence_tools import evidence_from_payload, summarize_evidence, summarize_text, verify_claim_against_evidence
 from app.services.learnings import remember_learning
@@ -113,19 +114,6 @@ def _propose_tool_payload(agent: Any, planned_input: dict[str, Any]) -> dict[str
         **proposal.payload(),
         "admin_approval_required": True,
     }
-
-
-def _task_plan_with_allow_list(plan: dict[str, Any], tools_allowed: list[str]) -> dict[str, Any]:
-    if not tools_allowed:
-        return plan
-    allowed = {str(item) for item in tools_allowed if str(item).strip()}
-    actions = [str(item) for item in list(plan.get("actions", []) or []) if str(item) in allowed]
-    tool_call_args = [
-        item
-        for item in list(plan.get("tool_call_args", []) or [])
-        if isinstance(item, dict) and str(item.get("name", "") or "") in allowed
-    ]
-    return {**plan, "actions": actions, "tool_call_args": tool_call_args}
 
 
 def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
@@ -398,72 +386,17 @@ def build_conversation_tool_registry(
             if str(item).strip()
         ]
         max_steps = planned_input.get("max_steps", None)
-        sub_contract = agent._extract_query_contract(
-            query=prompt,
+        result = run_task_subagent(
+            agent=agent,
+            prompt=prompt,
+            description=str(planned_input.get("description", "") or ""),
+            tools_allowed=tools_allowed,
+            max_steps=max_steps,
             session=session,
-            mode="auto",
-            clarification_choice=None,
-        )
-        sub_plan = agent._plan_agent_actions(contract=sub_contract, session=session, use_web_search=False)
-        sub_plan = _task_plan_with_allow_list(sub_plan, tools_allowed)
-        emit("agent_plan", {"subtask": prompt, "task_tool": True, **sub_plan})
-        agent._emit_agent_tool_call(
+            max_web_results=max_web_results,
             emit=emit,
-            tool="Task",
-            arguments={
-                "description": planned_input.get("description", ""),
-                "prompt": prompt,
-                "tools_allowed": tools_allowed,
-                "max_steps": max_steps,
-            },
+            execution_steps=execution_steps,
         )
-        if sub_contract.interaction_mode == "conversation":
-            sub_state = agent.runtime.execute_conversation_tools(
-                contract=sub_contract,
-                query=prompt,
-                session=session,
-                agent_plan=sub_plan,
-                max_web_results=max_web_results,
-                emit=emit,
-                execution_steps=execution_steps,
-            )
-            answer = str(sub_state.get("answer", "") or "")
-            citations = list(sub_state.get("citations", []) or [])
-            verification_payload = dict(sub_state.get("verification_report", {}) or {"status": "pass"})
-            result = {
-                "prompt": prompt,
-                "answer": answer,
-                "citations": citations,
-                "verification": verification_payload,
-                "contract": sub_contract.model_dump(),
-            }
-        else:
-            sub_state = agent.runtime.run_research_agent_loop(
-                contract=sub_contract,
-                session=session,
-                agent_plan=sub_plan,
-                web_enabled=False,
-                explicit_web_search=False,
-                max_web_results=max_web_results,
-                emit=emit,
-                execution_steps=execution_steps,
-            )
-            verification = sub_state.get("verification")
-            answer, citations = agent._compose_answer(
-                contract=sub_state["contract"],
-                claims=sub_state["claims"],
-                evidence=sub_state["evidence"],
-                papers=sub_state["screened_papers"],
-                verification=verification,
-                session=session,
-            )
-            result = {
-                "prompt": prompt,
-                "answer": answer,
-                "citations": citations,
-                "verification": verification.model_dump() if hasattr(verification, "model_dump") else {},
-                "contract": sub_state["contract"].model_dump(),
-            }
         state.setdefault("task_results", []).append(result)
         agent._record_agent_observation(
             emit=emit,
