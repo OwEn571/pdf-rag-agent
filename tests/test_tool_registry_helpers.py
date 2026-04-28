@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.domain.models import EvidenceBlock, QueryContract, SessionContext
+from app.domain.models import ActiveResearch, EvidenceBlock, QueryContract, SessionContext, SessionTurn
 from app.services.tool_registry_helpers import (
     coerce_int,
     conversation_intent_summary,
@@ -17,6 +17,7 @@ from app.services.tool_registry_helpers import (
     normalize_todo_items,
     planned_tool_input_from_state,
     propose_tool_payload,
+    read_memory_tool_payload,
     remember_tool_payload,
     research_intent_summary,
     store_session_todos,
@@ -83,6 +84,24 @@ def test_tool_registry_helpers_read_tool_input_and_intent_summary() -> None:
     summary, payload = research_intent_summary(contract)
     assert summary == "previous_rationale"
     assert payload["required_modalities"] == ["page_text"]
+
+
+def test_tool_registry_helpers_build_read_memory_payload() -> None:
+    session = SessionContext(
+        session_id="s1",
+        working_memory={"note": "keep"},
+        active_research=ActiveResearch(targets=["DPO"], titles=["A", "B", "C"], clean_query="DPO"),
+        turns=[SessionTurn(query="q", answer="a")],
+    )
+    agent = SimpleNamespace(_session_conversation_context=lambda _: {"working_memory": session.working_memory})
+
+    call_arguments, summary, payload = read_memory_tool_payload(agent=agent, session=session, active_title_limit=2)
+
+    assert call_arguments == {"turn_count": 1, "active_targets": ["DPO"]}
+    assert summary == "turns=1"
+    assert payload["active_research_context"]["titles"] == ["A", "B"]
+    assert payload["active_research_context"]["active_titles"] == ["A", "B"]
+    assert payload["has_working_memory"] is True
 
 
 def test_tool_registry_helpers_format_compose_sources() -> None:

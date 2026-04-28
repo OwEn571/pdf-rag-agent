@@ -57,6 +57,26 @@ def research_intent_summary(contract: QueryContract) -> tuple[str, dict[str, Any
     return summary, payload
 
 
+def read_memory_tool_payload(
+    *,
+    agent: Any,
+    session: SessionContext,
+    active_title_limit: int | None = None,
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    context = agent._session_conversation_context(session)
+    active_context = session.active_research_context_payload()
+    payload_active_context = dict(active_context)
+    if active_title_limit is not None:
+        payload_active_context["titles"] = list(active_context.get("titles", []) or [])[:active_title_limit]
+        payload_active_context["active_titles"] = list(active_context.get("active_titles", []) or [])[:active_title_limit]
+    call_arguments = {"turn_count": len(session.turns), "active_targets": active_context["targets"]}
+    payload = {
+        "active_research_context": payload_active_context,
+        "has_working_memory": bool(context.get("working_memory")),
+    }
+    return call_arguments, f"turns={len(session.turns)}", payload
+
+
 def normalize_todo_items(value: Any) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []

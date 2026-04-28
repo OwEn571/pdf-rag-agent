@@ -19,6 +19,7 @@ from app.services.tool_registry_helpers import (
     format_task_results_answer,
     planned_tool_input_from_state,
     propose_tool_payload,
+    read_memory_tool_payload,
     remember_tool_payload,
     research_intent_summary,
     summarize_tool_payload,
@@ -141,19 +142,18 @@ def build_conversation_tool_registry(
         )
 
     def read_conversation_memory() -> None:
-        context = agent._session_conversation_context(session)
-        active_context = session.active_research_context_payload()
+        call_arguments, summary, payload = read_memory_tool_payload(agent=agent, session=session)
         agent._emit_agent_tool_call(
             emit=emit,
             tool="read_conversation_memory",
-            arguments={"turn_count": len(session.turns), "active_targets": active_context["targets"]},
+            arguments=call_arguments,
         )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="read_conversation_memory",
-            summary=f"turns={len(session.turns)}",
-            payload={"active_research_context": active_context, "has_working_memory": bool(context.get("working_memory"))},
+            summary=summary,
+            payload=payload,
         )
 
     def read_memory() -> None:
@@ -521,26 +521,18 @@ def build_research_tool_registry(
         )
 
     def read_memory() -> None:
-        context = agent._session_conversation_context(session)
-        active_context = session.active_research_context_payload()
+        call_arguments, summary, payload = read_memory_tool_payload(agent=agent, session=session, active_title_limit=4)
         agent._emit_agent_tool_call(
             emit=emit,
             tool="read_memory",
-            arguments={"turn_count": len(session.turns), "active_targets": active_context["targets"]},
+            arguments=call_arguments,
         )
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="read_memory",
-            summary=f"turns={len(session.turns)}",
-            payload={
-                "active_research_context": {
-                    **active_context,
-                    "titles": list(active_context.get("titles", []) or [])[:4],
-                    "active_titles": list(active_context.get("active_titles", []) or [])[:4],
-                },
-                "has_working_memory": bool(context.get("working_memory")),
-            },
+            summary=summary,
+            payload=payload,
         )
 
     def todo_write() -> None:
