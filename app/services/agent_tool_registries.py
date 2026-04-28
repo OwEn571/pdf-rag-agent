@@ -925,10 +925,15 @@ def build_research_tool_registry(
             for item in (raw_focus if isinstance(raw_focus, list) else [])
             if str(item).strip()
         ]
-        top_k = planned_input.get("top_k", agent.settings.evidence_limit_default)
+        default_top_k = getattr(agent.settings, "evidence_limit_default", 12)
+        top_k = _coerce_int(planned_input.get("top_k", default_top_k), default=default_top_k, minimum=1, maximum=50)
+        candidate_evidence = evidence_from_payload(planned_input.get("candidates", []))
+        source_evidence = candidate_evidence or [
+            item for item in list(state.get("evidence", []) or []) if isinstance(item, EvidenceBlock)
+        ]
         evidence = agent.retriever.rerank_evidence(
             query=query,
-            evidence=list(state.get("evidence", []) or []),
+            evidence=source_evidence,
             top_k=top_k,
             focus=focus,
         )
@@ -942,6 +947,8 @@ def build_research_tool_registry(
             payload={
                 "query": query,
                 "focus": focus,
+                "used_explicit_candidates": bool(candidate_evidence),
+                "input_candidate_count": len(source_evidence),
                 "evidence_count": len(evidence),
                 "top_doc_ids": [item.doc_id for item in evidence[:5]],
             },

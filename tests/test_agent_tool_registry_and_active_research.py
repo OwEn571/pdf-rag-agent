@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.domain.models import ActiveResearch, ResearchPlan, SessionContext, VerificationReport
+from types import SimpleNamespace
+
+from app.domain.models import ActiveResearch, EvidenceBlock, ResearchPlan, SessionContext, VerificationReport
 from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
 from app.domain.models import QueryContract
@@ -110,6 +112,24 @@ class _RegistryProbeAgent:
         state["reflection"] = {"checked": True}
 
 
+class _RerankProbeRetriever:
+    def rerank_evidence(
+        self,
+        *,
+        query: str,
+        evidence: list[EvidenceBlock],
+        top_k: int,
+        focus: list[str] | None = None,
+    ) -> list[EvidenceBlock]:
+        terms = [item.lower() for item in [query, *list(focus or [])] if item]
+
+        def score(item: EvidenceBlock) -> int:
+            text = f"{item.title} {item.snippet}".lower()
+            return sum(1 for term in terms if term in text)
+
+        return sorted(evidence, key=score, reverse=True)[:top_k]
+
+
 def _planner_agent(tmp_path, clients: object) -> ResearchAssistantAgentV4:
     settings = Settings(
         _env_file=None,
@@ -163,6 +183,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert hybrid_schema["properties"]["alpha"]["maximum"] == 1.0
     rerank_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "rerank")
     assert rerank_schema["required"] == ["query"]
+    assert "candidates" in rerank_schema["properties"]
     read_page_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "read_pdf_page")
     assert read_page_schema["required"] == ["paper_id", "page_from"]
     grep_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "grep_corpus")
@@ -437,6 +458,52 @@ def test_query_rewrite_tool_runs_inside_research_loop() -> None:
     assert state["query_rewrites"][0]["mode"] == "step_back"
     assert state["rewritten_queries"][0] == "核心公式"
     assert any(event == "observation" and payload["tool"] == "query_rewrite" for event, payload in events)
+
+
+def test_rerank_tool_accepts_explicit_candidates() -> None:
+    probe = _RegistryProbeAgent()
+    probe.settings = SimpleNamespace(evidence_limit_default=2)
+    probe.retriever = _RerankProbeRetriever()
+    runtime = AgentRuntime(agent=probe)
+    session = SessionContext(session_id="demo")
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    state = runtime.run_research_agent_loop(
+        contract=QueryContract(clean_query="DPO objective", relation="formula_lookup", targets=["DPO"]),
+        session=session,
+        agent_plan={
+            "actions": ["rerank", "compose"],
+            "tool_call_args": [
+                {
+                    "name": "rerank",
+                    "args": {
+                        "query": "DPO objective",
+                        "top_k": 1,
+                        "focus": ["DPO"],
+                        "candidates": [
+                            {"doc_id": "weak", "title": "Other", "snippet": "general RLHF background"},
+                            {
+                                "doc_id": "strong",
+                                "title": "DPO paper",
+                                "snippet": "DPO objective optimizes preference likelihood.",
+                            },
+                        ],
+                    },
+                }
+            ],
+        },
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=0,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=steps,
+    )
+
+    assert [item.doc_id for item in state["evidence"]] == ["strong"]
+    observation = next(payload for event, payload in events if event == "observation" and payload["tool"] == "rerank")
+    assert observation["payload"]["used_explicit_candidates"] is True
+    assert observation["payload"]["input_candidate_count"] == 2
 
 
 def test_todo_write_tool_updates_session_memory_and_emits_event() -> None:

@@ -192,14 +192,36 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
     ),
     AgentToolSpec(
         name="rerank",
-        when="Use to rerank already collected local evidence against the current query or focus terms before composing an answer.",
-        returns="The current evidence list reordered and trimmed by relevance.",
+        when="Use to rerank explicit candidate snippets or already collected local evidence against the current query before composing.",
+        returns="Evidence candidates reordered and trimmed by relevance.",
         input_schema={
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
                 "top_k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 12},
                 "focus": {"type": "array", "items": {"type": "string"}},
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "doc_id": {"type": "string"},
+                                    "paper_id": {"type": "string"},
+                                    "title": {"type": "string"},
+                                    "page": {"type": "integer"},
+                                    "block_type": {"type": "string"},
+                                    "snippet": {"type": "string"},
+                                    "text": {"type": "string"},
+                                    "score": {"type": "number"},
+                                },
+                                "additionalProperties": True,
+                            },
+                        ],
+                    },
+                },
             },
             "required": ["query"],
             "additionalProperties": False,
