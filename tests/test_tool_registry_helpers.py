@@ -10,6 +10,8 @@ from app.services.tool_registry_helpers import (
     evidence_blocks_from_state,
     fetch_url_evidence,
     fetch_url_payload,
+    fetch_url_tool_payload,
+    fetch_url_tool_request,
     focus_values,
     format_fetched_urls_answer,
     format_summaries_answer,
@@ -138,10 +140,18 @@ def test_tool_registry_helpers_convert_fetch_result_payload_and_evidence() -> No
     failed = FetchUrlResult(ok=False, url="https://example.com/b", error="timeout")
 
     payload = fetch_url_payload(result)
+    state_payload, summary, observation_payload = fetch_url_tool_payload(result)
     evidence = fetch_url_evidence(result)
 
     assert payload["ok"] is True
     assert payload["status_code"] == 200
+    assert fetch_url_tool_request({"url": " https://example.com/a ", "max_chars": 1000}) == {
+        "url": "https://example.com/a",
+        "max_chars": 1000,
+    }
+    assert state_payload == payload
+    assert summary == "ok"
+    assert observation_payload["text"] == "x" * 600
     assert evidence is not None
     assert evidence.doc_id.startswith("web::fetch::")
     assert evidence.paper_id == evidence.doc_id

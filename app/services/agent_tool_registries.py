@@ -13,7 +13,8 @@ from app.services.tool_registry_helpers import (
     coerce_int,
     conversation_intent_summary,
     fetch_url_evidence,
-    fetch_url_payload,
+    fetch_url_tool_payload,
+    fetch_url_tool_request,
     format_fetched_urls_answer,
     format_summaries_answer,
     format_task_results_answer,
@@ -379,18 +380,17 @@ def build_conversation_tool_registry(
 
     def fetch_url() -> None:
         planned_input = planned_tool_input_from_state(state, "fetch_url")
-        url = str(planned_input.get("url", "") or "").strip()
-        max_chars = planned_input.get("max_chars", 4000)
-        agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})
-        result = fetch_url_text(client=agent.clients.http_client, url=url, max_chars=max_chars)
-        payload = fetch_url_payload(result)
+        request = fetch_url_tool_request(planned_input)
+        agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments=request)
+        result = fetch_url_text(client=agent.clients.http_client, **request)
+        payload, summary, observation_payload = fetch_url_tool_payload(result)
         state.setdefault("fetched_urls", []).append(payload)
         agent._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="fetch_url",
-            summary="ok" if result.ok else result.error,
-            payload={**payload, "text": result.text[:600]},
+            summary=summary,
+            payload=observation_payload,
         )
 
     def compose() -> None:
@@ -850,11 +850,10 @@ def build_research_tool_registry(
 
     def fetch_url() -> None:
         planned_input = planned_tool_input_from_state(state, "fetch_url")
-        url = str(planned_input.get("url", "") or "").strip()
-        max_chars = planned_input.get("max_chars", 4000)
-        agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments={"url": url, "max_chars": max_chars})
-        result = fetch_url_text(client=agent.clients.http_client, url=url, max_chars=max_chars)
-        payload = fetch_url_payload(result)
+        request = fetch_url_tool_request(planned_input)
+        agent._emit_agent_tool_call(emit=emit, tool="fetch_url", arguments=request)
+        result = fetch_url_text(client=agent.clients.http_client, **request)
+        payload, summary, observation_payload = fetch_url_tool_payload(result)
         state.setdefault("fetched_urls", []).append(payload)
         evidence = fetch_url_evidence(result)
         if evidence is not None:
@@ -865,8 +864,8 @@ def build_research_tool_registry(
             emit=emit,
             execution_steps=execution_steps,
             tool="fetch_url",
-            summary="ok" if result.ok else result.error,
-            payload={**payload, "text": result.text[:600]},
+            summary=summary,
+            payload=observation_payload,
         )
 
     def solve_claims() -> None:

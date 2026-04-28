@@ -138,6 +138,13 @@ def format_fetched_urls_answer(fetched_urls: list[dict[str, Any]]) -> str:
     return "\n\n".join(sections).strip()
 
 
+def fetch_url_tool_request(planned_input: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "url": str(planned_input.get("url", "") or "").strip(),
+        "max_chars": planned_input.get("max_chars", 4000),
+    }
+
+
 def fetch_url_payload(result: FetchUrlResult) -> dict[str, Any]:
     return {
         "ok": result.ok,
@@ -147,6 +154,11 @@ def fetch_url_payload(result: FetchUrlResult) -> dict[str, Any]:
         "error": result.error,
         "status_code": result.status_code,
     }
+
+
+def fetch_url_tool_payload(result: FetchUrlResult) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    payload = fetch_url_payload(result)
+    return payload, "ok" if result.ok else result.error, {**payload, "text": result.text[:600]}
 
 
 def fetch_url_evidence(result: FetchUrlResult) -> EvidenceBlock | None:
