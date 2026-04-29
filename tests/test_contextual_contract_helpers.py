@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.domain.models import ActiveResearch, CandidatePaper, QueryContract
 from app.services.contextual_contract_helpers import (
+    CONTEXTUAL_CONTRACT_MARKERS,
     active_paper_reference_notes,
     contextual_active_paper_contract,
     formula_answer_correction_contract,
@@ -18,6 +19,7 @@ from app.services.contextual_contract_helpers import (
     paper_scope_correction_contract,
     promote_contextual_metric_contract,
 )
+from app.services.intent_marker_matching import query_matches_any
 
 
 def test_active_paper_reference_notes_adds_selected_paper_context_once() -> None:
@@ -108,6 +110,7 @@ def test_paper_from_query_hint_uses_metadata_context_for_acronym_hint() -> None:
 
 
 def test_paper_context_supports_formula_target_requires_target_and_formula_signal() -> None:
+    assert query_matches_any("objective", "", CONTEXTUAL_CONTRACT_MARKERS["formula_context"])
     assert paper_context_supports_formula_target(
         block_documents=[
             SimpleNamespace(metadata={"formula_hint": 1}, page_content="The DPO objective is shown here."),

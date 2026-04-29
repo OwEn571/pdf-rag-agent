@@ -10,7 +10,13 @@ from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
     looks_like_contextual_metric_query,
 )
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.query_shaping import is_short_acronym, matches_target
+
+
+CONTEXTUAL_CONTRACT_MARKERS: dict[str, MarkerProfile] = {
+    "formula_context": ("objective", "loss", "formula", "log σ", "log sigma", "lpba", "l pba"),
+}
 
 
 def active_paper_reference_notes(*, notes: list[str], paper: CandidatePaper, marker: str) -> list[str]:
@@ -146,7 +152,7 @@ def paper_context_supports_formula_target(*, block_documents: Iterable[Any], tar
         lowered = text.lower()
         if int(meta.get("formula_hint", 0) or 0):
             return True
-        if any(token in lowered for token in ["objective", "loss", "formula", "log σ", "log sigma", "lpba", "l pba"]):
+        if query_matches_any(lowered, "", CONTEXTUAL_CONTRACT_MARKERS["formula_context"]):
             return True
     return False
 
