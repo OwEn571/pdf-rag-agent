@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
-import subprocess
-from tempfile import TemporaryDirectory
-from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -161,6 +157,7 @@ from app.services.library_intents import (
 )
 from app.services.memory_artifact_helpers import answer_from_recent_tool_artifact_reference
 from app.services.memory_intents import is_memory_comparison_query
+from app.services.pdf_rendering import render_pdf_page_image_data_url
 from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
@@ -206,15 +203,6 @@ from app.services.session_context_helpers import (
 )
 
 logger = logging.getLogger(__name__)
-ALLOWED_SUBPROCESS_COMMANDS = {"pdftoppm"}
-
-def _subprocess_command_allowed(command: list[str]) -> bool:
-    if not command:
-        return False
-    executable = str(command[0] or "").strip()
-    if not executable:
-        return False
-    return executable == Path(executable).name and executable in ALLOWED_SUBPROCESS_COMMANDS
 
 
 class ResearchAssistantAgentV4(
@@ -3116,52 +3104,14 @@ class ResearchAssistantAgentV4(
         return figure_signal_score(text)
 
     def _render_page_image_data_url(self, *, file_path: str, page: int) -> str:
-        pdf_path = str(file_path or "").strip()
-        if not pdf_path or page <= 0:
-            return ""
-        cache_key = (pdf_path, page)
-        cached = self._rendered_page_data_url_cache.get(cache_key)
-        if cached is not None:
-            return cached
-        source = Path(pdf_path)
-        if not source.exists():
-            return ""
-        try:
-            with TemporaryDirectory(prefix="zprag_v4_fig_") as temp_dir:
-                output_prefix = Path(temp_dir) / "page"
-                command = [
-                    "pdftoppm",
-                    "-f",
-                    str(page),
-                    "-l",
-                    str(page),
-                    "-singlefile",
-                    "-png",
-                    "-r",
-                    str(max(72, int(self.settings.pdf_render_dpi))),
-                    str(source),
-                    str(output_prefix),
-                ]
-                if not _subprocess_command_allowed(command):
-                    logger.warning("blocked non-whitelisted subprocess command: %s", command[0] if command else "")
-                    return ""
-                subprocess.run(
-                    command,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=max(5.0, float(self.settings.figure_vlm_timeout_seconds)),
-                )
-                image_path = output_prefix.with_suffix(".png")
-                if not image_path.exists():
-                    return ""
-                encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-                data_url = f"data:image/png;base64,{encoded}"
-                self._rendered_page_data_url_cache[cache_key] = data_url
-                return data_url
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("failed to render figure page image: file=%s page=%s err=%s", pdf_path, page, exc)
-            return ""
+        return render_pdf_page_image_data_url(
+            file_path=file_path,
+            page=page,
+            pdf_render_dpi=int(self.settings.pdf_render_dpi),
+            timeout_seconds=float(self.settings.figure_vlm_timeout_seconds),
+            cache=self._rendered_page_data_url_cache,
+            logger=logger,
+        )
 
     def _clarification_question(self, contract: QueryContract, session: SessionContext) -> str:
         ambiguity_question = ambiguity_clarification_question(contract=contract, session=session)
