@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Callable
 
 from app.domain.models import QueryContract, SessionContext
 from app.services.agent_tools import (
     agent_tool_manifest,
     agent_tool_manifest_for_names,
-    normalize_plan_actions,
 )
 from app.services.agent_planner_helpers import (
-    JSON_PLANNER_SYSTEM_PROMPT,
     NEXT_ACTION_SYSTEM_PROMPT,
-    TOOL_CALL_PLANNER_SYSTEM_PROMPT,
     fallback_plan,
+    first_unexecuted_planned_action,
+    json_planner_human_prompt,
+    json_planner_system_prompt,
+    next_action_human_prompt,
     normalize_plan_payload,
     planner_context_payload,
-    planner_intent_payload,
-    planner_prompt_with_context,
-    planner_state_summary,
+    planner_messages_with_user,
+    tool_call_planner_human_prompt,
+    tool_call_planner_system_prompt,
 )
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
@@ -74,30 +74,23 @@ class AgentPlanner:
             use_web_search=use_web_search,
             include_available_tools=True,
         )
-        context_json = json.dumps(context_payload, ensure_ascii=False)
         invoke_json_messages = getattr(self.clients, "invoke_json_messages", None)
         if callable(invoke_json_messages):
             payload = invoke_json_messages(
-                system_prompt=planner_prompt_with_context(
-                    system_prompt=JSON_PLANNER_SYSTEM_PROMPT,
-                    context_json=context_json,
+                system_prompt=json_planner_system_prompt(context_payload),
+                messages=planner_messages_with_user(
+                    conversation_messages=self.conversation_messages(session),
+                    contract=contract,
                 ),
-                messages=[
-                    *self.conversation_messages(session),
-                    {"role": "user", "content": contract.clean_query},
-                ],
                 fallback=fallback,
             )
         else:
             payload = self.clients.invoke_json(
-                system_prompt=JSON_PLANNER_SYSTEM_PROMPT,
-                human_prompt=json.dumps(
-                    {
-                        "query": contract.clean_query,
-                        "conversation_context": self.conversation_context(session),
-                        **context_payload,
-                    },
-                    ensure_ascii=False,
+                system_prompt=json_planner_system_prompt(context_payload),
+                human_prompt=json_planner_human_prompt(
+                    contract=contract,
+                    conversation_context=self.conversation_context(session),
+                    context_payload=context_payload,
                 ),
                 fallback=fallback,
             )
@@ -128,26 +121,20 @@ class AgentPlanner:
         )
         if callable(planner_messages):
             return planner_messages(
-                system_prompt=planner_prompt_with_context(
-                    system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
-                    context_json=json.dumps(context_payload, ensure_ascii=False),
+                system_prompt=tool_call_planner_system_prompt(context_payload),
+                messages=planner_messages_with_user(
+                    conversation_messages=self.conversation_messages(session),
+                    contract=contract,
                 ),
-                messages=[
-                    *self.conversation_messages(session),
-                    {"role": "user", "content": contract.clean_query},
-                ],
                 tools=agent_tool_manifest(),
                 fallback={},
             )
         return planner(
-            system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
-            human_prompt=json.dumps(
-                {
-                    "query": contract.clean_query,
-                    "conversation_context": self.conversation_context(session),
-                    **context_payload,
-                },
-                ensure_ascii=False,
+            system_prompt=tool_call_planner_system_prompt(context_payload),
+            human_prompt=tool_call_planner_human_prompt(
+                contract=contract,
+                conversation_context=self.conversation_context(session),
+                context_payload=context_payload,
             ),
             tools=agent_tool_manifest(),
             fallback={},
@@ -170,24 +157,17 @@ class AgentPlanner:
             return None
         payload = planner(
             system_prompt=NEXT_ACTION_SYSTEM_PROMPT,
-            human_prompt=json.dumps(
-                {
-                    "query": contract.clean_query,
-                    "intent": planner_intent_payload(contract),
-                    "targets": contract.targets,
-                    "notes": contract.notes,
-                    "executed_actions": executed_actions,
-                    "state_summary": planner_state_summary(state),
-                    "conversation_context": self.conversation_context(session),
-                },
-                ensure_ascii=False,
+            human_prompt=next_action_human_prompt(
+                contract=contract,
+                state=state,
+                executed_actions=executed_actions,
+                conversation_context=self.conversation_context(session),
             ),
             tools=available_tools,
             fallback={},
         )
-        actions = normalize_plan_actions(actions=payload.get("actions", []), allowed=allowed_tools)
-        executed = set(executed_actions)
-        for action in actions:
-            if action not in executed:
-                return action
-        return None
+        return first_unexecuted_planned_action(
+            payload=payload,
+            allowed_tools=allowed_tools,
+            executed_actions=executed_actions,
+        )

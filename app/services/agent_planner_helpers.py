@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 from app.domain.models import QueryContract
@@ -124,6 +125,96 @@ def planner_context_payload(
 
 def planner_prompt_with_context(*, system_prompt: str, context_json: str) -> str:
     return system_prompt + "\n\n以下非语言上下文只用于工具选择，不是用户新问题：\n" + context_json
+
+
+def planner_context_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def planner_messages_with_user(
+    *,
+    conversation_messages: list[dict[str, str]],
+    contract: QueryContract,
+) -> list[dict[str, str]]:
+    return [*conversation_messages, {"role": "user", "content": contract.clean_query}]
+
+
+def json_planner_system_prompt(context_payload: dict[str, Any]) -> str:
+    return planner_prompt_with_context(
+        system_prompt=JSON_PLANNER_SYSTEM_PROMPT,
+        context_json=planner_context_json(context_payload),
+    )
+
+
+def json_planner_human_prompt(
+    *,
+    contract: QueryContract,
+    conversation_context: dict[str, Any],
+    context_payload: dict[str, Any],
+) -> str:
+    return planner_context_json(
+        {
+            "query": contract.clean_query,
+            "conversation_context": conversation_context,
+            **context_payload,
+        }
+    )
+
+
+def tool_call_planner_system_prompt(context_payload: dict[str, Any]) -> str:
+    return planner_prompt_with_context(
+        system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
+        context_json=planner_context_json(context_payload),
+    )
+
+
+def tool_call_planner_human_prompt(
+    *,
+    contract: QueryContract,
+    conversation_context: dict[str, Any],
+    context_payload: dict[str, Any],
+) -> str:
+    return planner_context_json(
+        {
+            "query": contract.clean_query,
+            "conversation_context": conversation_context,
+            **context_payload,
+        }
+    )
+
+
+def next_action_human_prompt(
+    *,
+    contract: QueryContract,
+    state: dict[str, Any],
+    executed_actions: list[str],
+    conversation_context: dict[str, Any],
+) -> str:
+    return planner_context_json(
+        {
+            "query": contract.clean_query,
+            "intent": planner_intent_payload(contract),
+            "targets": contract.targets,
+            "notes": contract.notes,
+            "executed_actions": executed_actions,
+            "state_summary": planner_state_summary(state),
+            "conversation_context": conversation_context,
+        }
+    )
+
+
+def first_unexecuted_planned_action(
+    *,
+    payload: dict[str, Any],
+    allowed_tools: set[str],
+    executed_actions: list[str],
+) -> str | None:
+    actions = normalize_plan_actions(actions=payload.get("actions", []), allowed=allowed_tools)
+    executed = set(executed_actions)
+    for action in actions:
+        if action not in executed:
+            return action
+    return None
 
 
 def fallback_plan(
