@@ -2906,44 +2906,6 @@ def test_followup_solver_uses_seed_paper_then_excludes_it_from_followups(tmp_pat
     assert "ALIGNXPLORE" in followup_ids
 
 
-def test_followup_relevance_boost_prioritizes_personalization_continuations(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    seed = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        year="2025",
-        metadata={"paper_card_text": "This paper introduces AlignX."},
-    )
-    candidates = [
-        seed,
-        CandidatePaper(
-            paper_id="COMMUNITY",
-            title="CommunityBench: Benchmarking Community-Level Alignment across Diverse Groups and Tasks",
-            year="2026",
-            score=1.2,
-            metadata={"paper_card_text": "A benchmark for community-level alignment."},
-        ),
-        CandidatePaper(
-            paper_id="POPI",
-            title="POPI: Personalizing LLMs via Optimized Preference Inference",
-            year="2026",
-            score=0.4,
-            metadata={"paper_card_text": "Modular personalization with preference inference and conditioned generation."},
-        ),
-    ]
-
-    ranked = agent._rank_followup_candidates_fallback(contract=contract, seed_papers=[seed], candidates=candidates)
-
-    assert ranked
-    assert ranked[0]["paper"].paper_id == "POPI"
-    assert all(item["paper"].paper_id != "ALIGNX" for item in ranked)
-
-
 def test_followup_answer_composer_lists_structured_candidates(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     claim = Claim(

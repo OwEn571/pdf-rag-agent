@@ -22,6 +22,7 @@ from app.services.followup_candidate_helpers import (
     paper_author_tokens,
     paper_keyword_set,
     paper_relationship_brief,
+    rank_followup_candidates_fallback,
     relationship_evidence_ids_from_payload,
     selected_followup_candidate_title,
 )
@@ -284,6 +285,48 @@ def test_followup_relationship_assessment_marks_direct_target_relation() -> None
     assert assessment["strength"] == "direct"
     assert assessment["confidence"] == 0.86
     assert "AlignX" in assessment["reason"]
+
+
+def test_rank_followup_candidates_fallback_prioritizes_personalization_continuations() -> None:
+    contract = QueryContract(
+        clean_query="AlignX数据集有后续工作吗？",
+        relation="followup_research",
+        targets=["AlignX"],
+    )
+    seed = CandidatePaper(
+        paper_id="ALIGNX",
+        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+        year="2025",
+        metadata={"paper_card_text": "This paper introduces AlignX."},
+    )
+    candidates = [
+        seed,
+        CandidatePaper(
+            paper_id="COMMUNITY",
+            title="CommunityBench: Benchmarking Community-Level Alignment across Diverse Groups and Tasks",
+            year="2026",
+            score=1.2,
+            metadata={"paper_card_text": "A benchmark for community-level alignment."},
+        ),
+        CandidatePaper(
+            paper_id="POPI",
+            title="POPI: Personalizing LLMs via Optimized Preference Inference",
+            year="2026",
+            score=0.4,
+            metadata={"paper_card_text": "Modular personalization with preference inference and conditioned generation."},
+        ),
+    ]
+
+    ranked = rank_followup_candidates_fallback(
+        contract=contract,
+        seed_papers=[seed],
+        candidates=candidates,
+        paper_summary_text=lambda _: "",
+    )
+
+    assert ranked
+    assert ranked[0]["paper"].paper_id == "POPI"
+    assert all(item["paper"].paper_id != "ALIGNX" for item in ranked)
 
 
 def test_merge_followup_rankings_deduplicates_by_paper_id() -> None:

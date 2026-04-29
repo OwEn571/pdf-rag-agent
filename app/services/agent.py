@@ -100,10 +100,6 @@ from app.services.followup_relationship_contracts import (
     inherit_followup_relationship_contract,
     normalize_followup_direction_contract,
 )
-from app.services.followup_relationship_intents import (
-    followup_relevance_score,
-    has_followup_soft_relation_signal,
-)
 from app.services.evidence_presentation import (
     build_figure_contexts,
     chunk_text,
@@ -123,8 +119,7 @@ from app.services.followup_candidate_helpers import (
     followup_validator_assessment_from_payload,
     merge_followup_rankings,
     paper_anchor_text,
-    paper_author_tokens,
-    paper_keyword_set,
+    rank_followup_candidates_fallback,
     selected_followup_candidate_title,
 )
 from app.services.figure_intents import figure_signal_score
@@ -3679,13 +3674,19 @@ class ResearchAssistantAgentV4(
                         }
                     )
                 if selected:
-                    fallback_selected = self._rank_followup_candidates_fallback(
+                    fallback_selected = rank_followup_candidates_fallback(
                         contract=contract,
                         seed_papers=seed_papers,
                         candidates=filtered,
+                        paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
                     )
                     return merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
-        return self._rank_followup_candidates_fallback(contract=contract, seed_papers=seed_papers, candidates=filtered)
+        return rank_followup_candidates_fallback(
+            contract=contract,
+            seed_papers=seed_papers,
+            candidates=filtered,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
 
     def _selected_followup_candidate_assessment(
         self,
@@ -3765,77 +3766,6 @@ class ResearchAssistantAgentV4(
             relationship_evidence=relationship_evidence,
             coerce_confidence=lambda value: self._coerce_confidence(value),
         )
-
-    def _rank_followup_candidates_fallback(
-        self,
-        *,
-        contract: QueryContract,
-        seed_papers: list[CandidatePaper],
-        candidates: list[CandidatePaper],
-    ) -> list[dict[str, Any]]:
-        seed_keywords = paper_keyword_set(
-            seed_papers,
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-        )
-        seed_author_tokens = paper_author_tokens(seed_papers)
-        target_text = " ".join(contract.targets)
-        seed_year = min((safe_year(item.year) for item in seed_papers), default=9999)
-        seed_ids = {item.paper_id for item in seed_papers}
-        scored: list[tuple[float, CandidatePaper, dict[str, Any]]] = []
-        for paper in filter_followup_candidates(
-            contract=contract,
-            candidates=candidates,
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-        ):
-            if paper.paper_id in seed_ids:
-                continue
-            score = paper.score
-            summary = self._paper_summary_text(paper.paper_id)
-            haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}"
-            if target_text and matches_target(haystack.lower(), target_text.lower()):
-                score += 1.2
-            if seed_year < 9999:
-                year = safe_year(paper.year)
-                if year >= seed_year:
-                    score += 0.4 + min(0.5, max(0, year - seed_year) * 0.1)
-            overlap = len(
-                seed_keywords
-                & paper_keyword_set([paper], paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id))
-            )
-            if overlap:
-                score += min(1.2, overlap * 0.18)
-            author_overlap = len(seed_author_tokens & paper_author_tokens([paper]))
-            if author_overlap:
-                score += min(0.8, author_overlap * 0.25)
-            if has_followup_soft_relation_signal(haystack):
-                score += 0.35
-            score += followup_relevance_score(haystack)
-            assessment = followup_relationship_assessment(
-                contract=contract,
-                seed_papers=seed_papers,
-                paper=paper,
-                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            )
-            if assessment["score"] < 0.3:
-                continue
-            score += float(assessment["score"])
-            scored.append((score, paper, assessment))
-        ranked = [
-            (paper, assessment)
-            for _, paper, assessment in sorted(scored, key=lambda item: (-item[0], safe_year(item[1].year), item[1].title))
-        ]
-        results: list[dict[str, Any]] = []
-        for paper, assessment in ranked[:10]:
-            results.append(
-                {
-                    "paper": paper,
-                    "relation_type": str(assessment["relation_type"]),
-                    "reason": str(assessment["reason"]),
-                    "confidence": float(assessment["confidence"]),
-                    "relationship_strength": str(assessment["strength"]),
-                }
-            )
-        return results
 
     def _paper_brief(self, paper: CandidatePaper) -> dict[str, Any]:
         return {
