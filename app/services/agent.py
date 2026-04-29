@@ -123,13 +123,7 @@ from app.services.query_shaping import (
 )
 from app.services.research_planning import (
     build_research_plan,
-    evidence_limit_for_goals,
-    goals_from_relation_compatibility,
-    normalize_research_goal,
-    paper_limit_for_goals,
-    required_claims_for_goals,
     research_plan_goals,
-    solver_sequence_for_goals,
 )
 from app.services.web_evidence import (
     build_web_research_claim,
@@ -4606,31 +4600,9 @@ class ResearchAssistantAgentV4(
     def _build_research_plan(self, contract: QueryContract) -> ResearchPlan:
         return build_research_plan(contract=contract, settings=self.settings)
 
-    def _paper_limit_for_goals(self, goals: set[str]) -> int:
-        return paper_limit_for_goals(goals, default=self.settings.paper_limit_default)
-
-    def _evidence_limit_for_goals(self, goals: set[str]) -> int:
-        return evidence_limit_for_goals(goals, default=self.settings.evidence_limit_default)
-
-    @staticmethod
-    def _solver_sequence_for_goals(goals: set[str], modalities: list[str]) -> list[str]:
-        return solver_sequence_for_goals(goals, modalities)
-
-    @staticmethod
-    def _required_claims_for_goals(goals: set[str]) -> list[str]:
-        return required_claims_for_goals(goals)
-
     @staticmethod
     def _research_plan_goals(contract: QueryContract) -> set[str]:
         return research_plan_goals(contract)
-
-    @staticmethod
-    def _normalize_research_goal(value: str) -> set[str]:
-        return normalize_research_goal(value)
-
-    @staticmethod
-    def _goals_from_relation_compatibility(relation: str) -> set[str]:
-        return goals_from_relation_compatibility(relation)
 
     def _compress_session_history_if_needed(self, session: SessionContext) -> None:
         if self.clients.chat is None:
