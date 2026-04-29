@@ -29,6 +29,9 @@ class AgentWebEvidenceResult:
     max_results: int
     web_evidence: list[EvidenceBlock]
     merged_evidence: list[EvidenceBlock]
+    tool_call_arguments: dict[str, Any]
+    observation_summary: str
+    observation_payload: dict[str, Any]
 
 
 def coerce_web_result_limit(value: Any, *, default: int) -> int:
@@ -118,6 +121,13 @@ def search_agent_web_evidence(
         max_results=result_limit,
         web_evidence=web_evidence,
         merged_evidence=merged_evidence,
+        tool_call_arguments={
+            "query": web_query,
+            "max_results": result_limit,
+            "enabled": web_enabled,
+        },
+        observation_summary=f"web_evidence={len(web_evidence)}",
+        observation_payload={"web_evidence_count": len(web_evidence)},
     )
 
 

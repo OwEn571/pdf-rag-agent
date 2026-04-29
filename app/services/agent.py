@@ -915,15 +915,7 @@ class ResearchAssistantAgentV4(
                 query_override=query,
             ),
         )
-        self._emit_agent_tool_call(
-            emit=emit,
-            tool="web_search",
-            arguments={
-                "query": result.query,
-                "max_results": result.max_results,
-                "enabled": web_enabled,
-            },
-        )
+        self._emit_agent_tool_call(emit=emit, tool="web_search", arguments=result.tool_call_arguments)
         web_evidence = result.web_evidence
         state["web_evidence"] = web_evidence
         if web_evidence:
@@ -934,8 +926,8 @@ class ResearchAssistantAgentV4(
             emit=emit,
             execution_steps=execution_steps,
             tool="web_search",
-            summary=f"web_evidence={len(web_evidence)}",
-            payload={"web_evidence_count": len(web_evidence)},
+            summary=result.observation_summary,
+            payload=result.observation_payload,
         )
 
     def _agent_solve_claims(

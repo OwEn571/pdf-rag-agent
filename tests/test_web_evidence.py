@@ -146,6 +146,13 @@ def test_web_evidence_agent_search_normalizes_query_limit_and_merges() -> None:
     assert result.max_results == 20
     assert result.web_evidence == web
     assert [item.doc_id for item in result.merged_evidence] == ["local-a", "web-a"]
+    assert result.tool_call_arguments == {
+        "query": "custom web query",
+        "max_results": 20,
+        "enabled": True,
+    }
+    assert result.observation_summary == "web_evidence=1"
+    assert result.observation_payload == {"web_evidence_count": 1}
     assert calls == [(contract, True, 20, "custom web query")]
 
 
@@ -167,6 +174,8 @@ def test_web_evidence_agent_search_keeps_existing_evidence_when_web_empty() -> N
     assert result.query == web_query_text(contract)
     assert result.web_evidence == []
     assert result.merged_evidence == local
+    assert result.tool_call_arguments["enabled"] is False
+    assert result.observation_summary == "web_evidence=0"
 
 
 def test_web_evidence_claim_decision_and_payload() -> None:
