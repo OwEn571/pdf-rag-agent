@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -9,6 +10,49 @@ from app.services.confidence import coerce_confidence_value
 
 
 FormulaTermExtractor = Callable[[str], list[str]]
+
+
+def formula_extractor_system_prompt() -> str:
+    return (
+        "你是论文公式抽取器。只从给定 evidence 中抽取用户目标对应的公式，"
+        "不要凭常识补全 DPO/PPO/PBA 等已知公式，不要使用白名单模板。"
+        "如果 evidence 中存在多个不同定义，只选择当前 paper/evidence 中最直接支撑用户目标的公式。"
+        "只输出 JSON：formula_text 或 formula_latex, formula_format(latex|text), "
+        "variables, evidence_ids, confidence。"
+        "如果 formula_format=latex，formula_text/formula_latex 必须是不带 $$ 的标准 LaTeX 公式体，"
+        "能够直接放入 Markdown 的 $$...$$ 中由 KaTeX 渲染；不要输出半 Unicode 半 LaTeX 的粘连形式。"
+        "把数学符号转写为 LaTeX 命令，例如 ∇θ 写作 \\nabla_{\\theta}，πθ 写作 \\pi_{\\theta}，"
+        "πref 写作 \\pi_{\\mathrm{ref}}，log 写作 \\log。"
+        "当用户只是问“公式/目标函数/损失”且没有明确问梯度、更新或推导时，优先抽取 scalar objective/loss；"
+        "不要返回以 \\nabla 或 ∇ 开头的 gradient 公式。只有用户明确问 gradient/梯度/更新/导数时才抽取梯度公式。"
+        "variables 必须是数组，每项为 {symbol, description}，description 只解释 evidence 中能支持的变量含义。"
+        "如果用户用中文提问，variables.description 必须用中文；公式符号、论文标题和专有名词可以保留英文。"
+        "variables.symbol 也必须使用可直接放在 $...$ 中渲染的 LaTeX，不要输出 ∇θLDPO 这类粘连符号。"
+        "formula_text 必须是 evidence 中明确出现或可由相邻断行直接拼接出来的公式；证据不足返回空字符串。"
+    )
+
+
+def formula_extractor_human_prompt(*, contract: QueryContract, evidence: list[EvidenceBlock]) -> str:
+    return json.dumps(
+        {
+            "query": contract.clean_query,
+            "targets": contract.targets,
+            "answer_slots": list(getattr(contract, "answer_slots", []) or []),
+            "requested_fields": contract.requested_fields,
+            "evidence": [
+                {
+                    "doc_id": item.doc_id,
+                    "paper_id": item.paper_id,
+                    "title": item.title,
+                    "page": item.page,
+                    "block_type": item.block_type,
+                    "snippet": item.snippet[:1600],
+                }
+                for item in evidence[:8]
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 def formula_payload_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:

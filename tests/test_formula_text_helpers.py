@@ -5,6 +5,8 @@ from app.services.formula_text_helpers import (
     fallback_formula_payload,
     formula_block_score,
     formula_claim_from_payload,
+    formula_extractor_human_prompt,
+    formula_extractor_system_prompt,
     formula_query_wants_gradient,
     llm_formula_payload_from_response,
     normalize_extracted_formula_text,
@@ -80,6 +82,31 @@ def test_llm_formula_payload_from_response_filters_evidence_and_normalizes_terms
     assert payload["evidence_ids"] == ["ev-1"]
     assert payload["terms"] == ["policy"]
     assert payload["source"] == "llm_formula_extractor"
+
+
+def test_formula_extractor_prompts_include_contract_and_evidence_payload() -> None:
+    evidence = [
+        EvidenceBlock(
+            doc_id="ev-1",
+            paper_id="p1",
+            title="Formula Paper",
+            file_path="/tmp/formula.pdf",
+            page=2,
+            block_type="page_text",
+            snippet="L_DPO = -log σ(β log πθ)",
+        )
+    ]
+    contract = QueryContract(clean_query="DPO 公式是什么？", targets=["DPO"], requested_fields=["formula"])
+
+    system_prompt = formula_extractor_system_prompt()
+    human_prompt = formula_extractor_human_prompt(contract=contract, evidence=evidence)
+
+    assert "论文公式抽取器" in system_prompt
+    assert "不要凭常识补全" in system_prompt
+    assert '"query": "DPO 公式是什么？"' in human_prompt
+    assert '"targets": ["DPO"]' in human_prompt
+    assert '"doc_id": "ev-1"' in human_prompt
+    assert "L_DPO" in human_prompt
 
 
 def test_fallback_formula_payload_extracts_window_and_evidence_ids() -> None:
