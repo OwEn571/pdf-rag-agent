@@ -63,8 +63,10 @@ from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     disambiguation_goal_markers,
+    disambiguation_judge_human_prompt,
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
+    disambiguation_judge_system_prompt,
     disambiguation_missing_fields,
     finalize_acronym_disambiguation_options,
     judge_allows_auto_resolve,
@@ -96,7 +98,6 @@ from app.services.compound_task_helpers import (
 from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
     canonical_tools,
-    contract_answer_slots,
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
@@ -1681,48 +1682,10 @@ class ResearchAssistantAgentV4(
         if self.clients.chat is None or len(options) < 2:
             return None
         payload = self.clients.invoke_json(
-            system_prompt=(
-                "你是通用论文/实体候选消歧裁判器。"
-                "你的唯一任务是在用户 query、QueryContract 和候选 metadata/snippet 之间判断哪个候选最符合用户真实意图。"
-                "不要硬编码任何具体缩写、方法名、论文标题或 paper_id 的默认答案；只能基于输入字段做判断。"
-                "不要生成最终研究答案，不要补充外部知识，只决定是否可自动绑定候选。"
-                "当 query 明确指向某个候选的标题、上下文、方法原始提出/直接定义证据，且其他候选只是引用、应用、比较或弱相关时，可以 auto_resolve。"
-                "输入中的 ranking_signals 是由候选自身 title/snippet/metadata 计算出的通用线索，不是某个缩写的白名单；"
-                "当 direct_definition_or_origin、strong_title_or_alias_alignment 明显集中在同一个候选，"
-                "而其他候选主要是 related_usage_or_citation 时，不要因为候选数量多而保守降到 0.70，应给出 >=0.85 的自动消歧。"
-                "如果证据不足、候选关系接近、query 可能指向多篇论文，必须 ask_human。"
-                "输出必须是 JSON，字段为 decision(auto_resolve|ask_human), selected_option_id, selected_paper_id, confidence, reason, rejected_options。"
-                "confidence >= 0.85 才表示可自动消歧；0.65 到 0.85 只表示可作为推荐项；低于 0.65 不要默认推荐。"
-            ),
-            human_prompt=json.dumps(
-                {
-                    "user_query": contract.clean_query,
-                    "query_contract": {
-                        "relation": contract.relation,
-                        "targets": contract.targets,
-                        "answer_slots": contract_answer_slots(contract),
-                        "requested_fields": contract.requested_fields,
-                        "required_modalities": contract.required_modalities,
-                        "answer_shape": contract.answer_shape,
-                        "precision_requirement": contract.precision_requirement,
-                        "continuation_mode": contract.continuation_mode,
-                        "notes": [
-                            note
-                            for note in contract.notes
-                            if not str(note).startswith("ambiguity_option=")
-                        ][:12],
-                    },
-                    "candidate_options": [self._disambiguation_judge_payload(option) for option in options[:8]],
-                    "output_schema": {
-                        "decision": "auto_resolve | ask_human",
-                        "selected_option_id": "string|null",
-                        "selected_paper_id": "string|null",
-                        "confidence": "number in [0,1]",
-                        "reason": "short reason based only on provided metadata/snippets",
-                        "rejected_options": [{"option_id": "string", "reason": "string"}],
-                    },
-                },
-                ensure_ascii=False,
+            system_prompt=disambiguation_judge_system_prompt(),
+            human_prompt=disambiguation_judge_human_prompt(
+                contract=contract,
+                candidate_options=[self._disambiguation_judge_payload(option) for option in options[:8]],
             ),
             fallback={},
         )

@@ -28,8 +28,10 @@ from app.services.clarification_intents import (
     contract_with_ambiguity_options,
     clear_pending_clarification,
     contract_from_pending_clarification,
+    disambiguation_judge_human_prompt,
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
+    disambiguation_judge_system_prompt,
     disambiguation_missing_fields,
     extract_acronym_expansion_from_text,
     finalize_acronym_disambiguation_options,
@@ -287,6 +289,28 @@ def test_selected_option_and_judge_summary_are_stable() -> None:
     assert selected_option_from_judge_decision(decision=decision, options=options) == options[1]
     assert disambiguation_judge_summary(options=options, judge_decision=decision) == "options=2, judge=ask_human, confidence=0.72"
     assert disambiguation_judge_summary(options=options, judge_decision=None) == "options=2, judge=unavailable"
+
+
+def test_disambiguation_judge_prompts_include_contract_and_candidate_payloads() -> None:
+    contract = QueryContract(
+        clean_query="PBA是什么",
+        relation="entity_definition",
+        targets=["PBA"],
+        requested_fields=["definition"],
+        notes=["ambiguity_option=hidden", "keep"],
+    )
+
+    prompt = disambiguation_judge_human_prompt(
+        contract=contract,
+        candidate_options=[{"option_id": "pba", "paper_id": "p1"}],
+    )
+    payload = json.loads(prompt)
+
+    assert "通用论文/实体候选消歧裁判器" in disambiguation_judge_system_prompt()
+    assert payload["user_query"] == "PBA是什么"
+    assert payload["query_contract"]["requested_fields"] == ["definition"]
+    assert payload["query_contract"]["notes"] == ["keep"]
+    assert payload["candidate_options"] == [{"option_id": "pba", "paper_id": "p1"}]
 
 
 def test_disambiguation_judge_recommendation_and_auto_contract_notes() -> None:
