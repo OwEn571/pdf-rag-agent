@@ -23,6 +23,28 @@ def test_normalize_observation_event_adds_tool_result_shape() -> None:
     assert payload["output"] == {"count": 2}
 
 
+def test_normalize_plan_verification_and_confidence_events_add_protocol_fields() -> None:
+    plan = normalize_agent_event("plan", {"solver_sequence": ["search", "compose"]})
+    verification = normalize_agent_event("verification", {"status": "pass", "total_claims": 2})
+    confidence = normalize_agent_event("confidence", {"score": "1.2", "basis": "verifier"})
+    unknown_confidence = normalize_agent_event("confidence", {"score": "bad"})
+
+    assert plan["type"] == "plan"
+    assert plan["payload"] == {"solver_sequence": ["search", "compose"]}
+    assert plan["items"] == [
+        {"id": "plan-1", "text": "search", "status": "pending"},
+        {"id": "plan-2", "text": "compose", "status": "pending"},
+    ]
+    assert verification["type"] == "verification"
+    assert verification["payload"] == {"status": "pass", "total_claims": 2}
+    assert verification["status"] == "pass"
+    assert confidence["type"] == "confidence"
+    assert confidence["value"] == 1.0
+    assert confidence["basis"] == "verifier"
+    assert unknown_confidence["value"] is None
+    assert unknown_confidence["basis"] == "unknown"
+
+
 def test_observation_events_record_tool_metrics(monkeypatch) -> None:
     calls = _CounterProbe()
     latency = _HistogramProbe()

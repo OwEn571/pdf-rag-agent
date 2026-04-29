@@ -25,6 +25,15 @@ def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
     elif event == "answer_delta":
         text = str(payload.get("text", payload.get("delta", payload.get("content", ""))) or "")
         payload.setdefault("text", text)
+    elif event == "plan":
+        payload.setdefault("payload", dict(data))
+        payload.setdefault("items", _plan_items(payload))
+    elif event == "verification":
+        payload.setdefault("payload", dict(data))
+        payload.setdefault("status", str(payload.get("status", "") or "unknown"))
+    elif event == "confidence":
+        payload.setdefault("value", _confidence_value(payload))
+        payload.setdefault("basis", str(payload.get("basis", "") or "unknown"))
     elif event == "agent_step":
         payload.setdefault("status", "doing")
     elif event == "error":
@@ -38,6 +47,9 @@ def _event_type(event: str) -> str:
         "tool_call": "tool_use",
         "observation": "tool_result",
         "answer_delta": "answer_delta",
+        "plan": "plan",
+        "verification": "verification",
+        "confidence": "confidence",
         "final": "final",
         "error": "error",
     }.get(event, event)
@@ -45,3 +57,25 @@ def _event_type(event: str) -> str:
 
 def _event_id(*, event: str, name: str) -> str:
     return f"{event}:{name or 'unknown'}"
+
+
+def _plan_items(payload: dict[str, Any]) -> list[dict[str, str]]:
+    sequence = payload.get("solver_sequence", payload.get("actions", []))
+    if not isinstance(sequence, list):
+        return []
+    items: list[dict[str, str]] = []
+    for index, raw_item in enumerate(sequence, start=1):
+        text = str(raw_item).strip()
+        if not text:
+            continue
+        items.append({"id": f"plan-{index}", "text": text, "status": "pending"})
+    return items
+
+
+def _confidence_value(payload: dict[str, Any]) -> float | None:
+    value = payload.get("value", payload.get("score"))
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(1.0, parsed))
