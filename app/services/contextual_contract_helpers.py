@@ -134,6 +134,23 @@ def paper_from_query_hint(
     return scored[0][1]
 
 
+def paper_context_supports_formula_target(*, block_documents: Iterable[Any], target: str) -> bool:
+    target = str(target or "").strip()
+    if not target:
+        return False
+    for doc in block_documents:
+        text = str(getattr(doc, "page_content", "") or "")
+        if not matches_target(text, target):
+            continue
+        meta = dict(getattr(doc, "metadata", {}) or {})
+        lowered = text.lower()
+        if int(meta.get("formula_hint", 0) or 0):
+            return True
+        if any(token in lowered for token in ["objective", "loss", "formula", "log σ", "log sigma", "lpba", "l pba"]):
+            return True
+    return False
+
+
 def promote_contextual_metric_contract(contract: QueryContract) -> QueryContract:
     if contract.relation == "metric_value_lookup":
         return contract

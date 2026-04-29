@@ -11,6 +11,7 @@ from app.services.contextual_contract_helpers import (
     formula_location_followup_contract,
     formula_query_allows_paper_context,
     normalize_entity_key,
+    paper_context_supports_formula_target,
     paper_from_query_hint,
     paper_hint_names,
     promote_contextual_metric_contract,
@@ -102,6 +103,27 @@ def test_paper_from_query_hint_uses_metadata_context_for_acronym_hint() -> None:
 
     assert paper is not None
     assert paper.paper_id == "dpo"
+
+
+def test_paper_context_supports_formula_target_requires_target_and_formula_signal() -> None:
+    assert paper_context_supports_formula_target(
+        block_documents=[
+            SimpleNamespace(metadata={"formula_hint": 1}, page_content="The DPO objective is shown here."),
+        ],
+        target="DPO",
+    )
+    assert paper_context_supports_formula_target(
+        block_documents=[
+            SimpleNamespace(metadata={"formula_hint": 0}, page_content="PBA loss formula is optimized."),
+        ],
+        target="PBA",
+    )
+    assert not paper_context_supports_formula_target(
+        block_documents=[
+            SimpleNamespace(metadata={"formula_hint": 1}, page_content="The DPO objective is shown here."),
+        ],
+        target="PBA",
+    )
 
 
 def test_promote_contextual_metric_contract_adds_metric_requirements() -> None:

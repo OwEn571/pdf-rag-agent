@@ -79,6 +79,7 @@ from app.services.contextual_contract_helpers import (
     formula_location_followup_contract,
     formula_query_allows_paper_context,
     normalize_entity_key,
+    paper_context_supports_formula_target,
     paper_from_query_hint,
     promote_contextual_metric_contract,
 )
@@ -2340,7 +2341,10 @@ class ResearchAssistantAgentV4(
         ):
             return contract
         target = str(contract.targets[0] or "").strip()
-        if not target or not self._paper_context_supports_formula_target(paper=paper, target=target):
+        if not target or not paper_context_supports_formula_target(
+            block_documents=self.retriever.block_documents_for_paper(paper.paper_id, limit=256),
+            target=target,
+        ):
             return contract
         return formula_contextual_paper_contract(contract=contract, paper=paper, target=target)
 
@@ -2407,22 +2411,6 @@ class ResearchAssistantAgentV4(
             }
         )
         return promote_contextual_metric_contract(scoped)
-
-    def _paper_context_supports_formula_target(self, *, paper: CandidatePaper, target: str) -> bool:
-        target = str(target or "").strip()
-        if not target:
-            return False
-        for doc in self.retriever.block_documents_for_paper(paper.paper_id, limit=256):
-            text = str(doc.page_content or "")
-            if not matches_target(text, target):
-                continue
-            meta = dict(doc.metadata or {})
-            lowered = text.lower()
-            if int(meta.get("formula_hint", 0) or 0):
-                return True
-            if any(token in lowered for token in ["objective", "loss", "formula", "log σ", "log sigma", "lpba", "l pba"]):
-                return True
-        return False
 
     def _paper_from_query_hint(self, query: str) -> CandidatePaper | None:
         return paper_from_query_hint(
