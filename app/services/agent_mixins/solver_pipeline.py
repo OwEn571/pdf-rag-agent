@@ -530,29 +530,23 @@ class SolverPipelineMixin:
         if not papers:
             return []
         claims: list[Claim] = []
-        target_terms = [str(item).strip() for item in contract.targets if str(item).strip()]
+        target_terms = formula_helpers.formula_target_terms(contract)
         for paper in papers:
             paper_evidence = [item for item in evidence if item.paper_id == paper.paper_id]
             if not paper_evidence:
                 continue
-            target_context = "\n".join([paper.title, str(paper.metadata.get("paper_card_text", "")), *[item.snippet for item in paper_evidence[:8]]])
-            matched_targets = [target for target in target_terms if self._matches_target(target_context, target)]
+            matched_targets = formula_helpers.formula_matched_targets(
+                paper=paper,
+                evidence=paper_evidence,
+                target_terms=target_terms,
+                target_matcher=self._matches_target,
+            )
             if target_terms and not matched_targets:
                 continue
-            scored_formula_blocks = [
-                (self._formula_block_score(item.snippet, contract=contract), item)
-                for item in paper_evidence
-            ]
-            strong_formula_blocks = [
-                item
-                for score, item in sorted(scored_formula_blocks, key=lambda row: (-row[0], row[1].page, row[1].doc_id))
-                if score >= 3.0
-            ]
-            formula_blocks = strong_formula_blocks or [
-                item
-                for item in paper_evidence
-                if "formula" in item.snippet.lower() or "objective" in item.snippet.lower()
-            ]
+            formula_blocks = formula_helpers.select_formula_blocks(
+                paper_evidence,
+                block_scorer=lambda text: self._formula_block_score(text, contract=contract),
+            )
             formula_payload = self._extract_formula_claim_payload(
                 contract=contract,
                 formula_blocks=formula_blocks,

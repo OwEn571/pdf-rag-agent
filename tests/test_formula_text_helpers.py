@@ -7,12 +7,27 @@ from app.services.formula_text_helpers import (
     formula_claim_from_payload,
     formula_extractor_human_prompt,
     formula_extractor_system_prompt,
+    formula_matched_targets,
     formula_query_wants_gradient,
+    formula_target_terms,
     llm_formula_payload_from_response,
     normalize_extracted_formula_text,
     normalize_formula_variables,
+    select_formula_blocks,
 )
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+
+
+def _evidence(doc_id: str, *, snippet: str, page: int = 1) -> EvidenceBlock:
+    return EvidenceBlock(
+        doc_id=doc_id,
+        paper_id="paper-1",
+        title="Formula Paper",
+        file_path="/tmp/formula.pdf",
+        page=page,
+        block_type="page_text",
+        snippet=snippet,
+    )
 
 
 def test_normalize_extracted_formula_text_converts_compact_unicode_math() -> None:
@@ -59,6 +74,39 @@ def test_formula_block_score_penalizes_gradient_when_query_wants_objective() -> 
 
     assert objective_score > gradient_score
     assert formula_query_wants_gradient("PBA 梯度怎么更新？")
+
+
+def test_formula_target_matching_uses_paper_and_evidence_context() -> None:
+    contract = QueryContract(clean_query="PBA 公式是什么？", targets=["PBA", "DPO", ""])
+    paper = CandidatePaper(paper_id="paper-1", title="Preference-bridged Alignment")
+    evidence = [_evidence("ev-1", snippet="We define the PBA objective in Equation 1.")]
+
+    targets = formula_target_terms(contract)
+    matched = formula_matched_targets(
+        paper=paper,
+        evidence=evidence,
+        target_terms=targets,
+        target_matcher=lambda text, target: target in text,
+    )
+
+    assert targets == ["PBA", "DPO"]
+    assert matched == ["PBA"]
+
+
+def test_select_formula_blocks_prefers_strong_scored_blocks_then_keyword_fallback() -> None:
+    weak = _evidence("weak", snippet="formula details", page=2)
+    strong = _evidence("strong", snippet="objective equation", page=1)
+    selected = select_formula_blocks(
+        [weak, strong],
+        block_scorer=lambda text: 4.0 if "objective" in text else 1.0,
+    )
+    fallback = select_formula_blocks(
+        [weak],
+        block_scorer=lambda text: 0.0,
+    )
+
+    assert selected == [strong]
+    assert fallback == [weak]
 
 
 def test_llm_formula_payload_from_response_filters_evidence_and_normalizes_terms() -> None:

@@ -10,6 +10,8 @@ from app.services.confidence import coerce_confidence_value
 
 
 FormulaTermExtractor = Callable[[str], list[str]]
+FormulaBlockScorer = Callable[[str], float]
+TargetMatcher = Callable[[str, str], bool]
 
 
 def formula_extractor_system_prompt() -> str:
@@ -53,6 +55,45 @@ def formula_extractor_human_prompt(*, contract: QueryContract, evidence: list[Ev
         },
         ensure_ascii=False,
     )
+
+
+def formula_target_terms(contract: QueryContract) -> list[str]:
+    return [str(item).strip() for item in contract.targets if str(item).strip()]
+
+
+def formula_matched_targets(
+    *,
+    paper: CandidatePaper,
+    evidence: list[EvidenceBlock],
+    target_terms: list[str],
+    target_matcher: TargetMatcher,
+) -> list[str]:
+    target_context = "\n".join(
+        [
+            paper.title,
+            str(paper.metadata.get("paper_card_text", "")),
+            *[item.snippet for item in evidence[:8]],
+        ]
+    )
+    return [target for target in target_terms if target_matcher(target_context, target)]
+
+
+def select_formula_blocks(
+    evidence: list[EvidenceBlock],
+    *,
+    block_scorer: FormulaBlockScorer,
+) -> list[EvidenceBlock]:
+    scored_blocks = [(block_scorer(item.snippet), item) for item in evidence]
+    strong_blocks = [
+        item
+        for score, item in sorted(scored_blocks, key=lambda row: (-row[0], row[1].page, row[1].doc_id))
+        if score >= 3.0
+    ]
+    return strong_blocks or [
+        item
+        for item in evidence
+        if "formula" in item.snippet.lower() or "objective" in item.snippet.lower()
+    ]
 
 
 def formula_payload_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
