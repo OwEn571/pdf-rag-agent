@@ -14,7 +14,7 @@ from app.services.confidence import (
 )
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.followup_candidate_helpers import filter_followup_candidates
-from app.services.query_shaping import evidence_query_text, is_short_acronym, should_use_concept_evidence
+from app.services.query_shaping import evidence_query_text, is_short_acronym, paper_query_text, should_use_concept_evidence
 from app.services.research_planning import research_plan_goals
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
@@ -29,6 +29,7 @@ FallbackNextFn = Callable[[set[str]], str | None]
 StopConditionFn = Callable[[set[str]], bool]
 PaperTitleLookupFn = Callable[[str], str | None]
 PaperLookupFn = Callable[[str], CandidatePaper | None]
+CandidatePaperSearchFn = Callable[[str, QueryContract, int], list[CandidatePaper]]
 PaperSummaryFn = Callable[[str], str]
 PaperIdentityMatcherFn = Callable[[list[CandidatePaper], list[str]], list[CandidatePaper]]
 EntityEvidenceSearchFn = Callable[[str, QueryContract, int], list[EvidenceBlock]]
@@ -42,6 +43,12 @@ class AgentEvidenceSearchResult:
     evidence: list[EvidenceBlock]
     query: str
     limit: int
+
+
+@dataclass(frozen=True)
+class AgentCandidatePaperSearchResult:
+    contract: QueryContract
+    candidate_papers: list[CandidatePaper]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +296,44 @@ def search_agent_evidence(
     if selected_paper_id:
         evidence = [item for item in evidence if item.paper_id == selected_paper_id]
     return AgentEvidenceSearchResult(evidence=evidence, query=evidence_query, limit=evidence_limit)
+
+
+def search_agent_candidate_papers(
+    *,
+    contract: QueryContract,
+    paper_query: str,
+    paper_limit: int,
+    active_targets: list[str],
+    excluded_titles: set[str],
+    search_papers: CandidatePaperSearchFn,
+    paper_lookup: PaperLookupFn,
+) -> AgentCandidatePaperSearchResult:
+    candidate_papers = search_papers(paper_query, contract, paper_limit)
+    if excluded_titles:
+        candidate_papers = filter_candidate_papers_by_excluded_titles(
+            candidate_papers,
+            excluded_titles=excluded_titles,
+        )
+    effective_contract = contract
+    if not candidate_papers and contract.continuation_mode == "followup" and active_targets:
+        fallback_contract = contract.model_copy(update={"targets": list(active_targets)})
+        candidate_papers = search_papers(
+            paper_query_text(fallback_contract),
+            fallback_contract,
+            paper_limit,
+        )
+        if excluded_titles:
+            candidate_papers = filter_candidate_papers_by_excluded_titles(
+                candidate_papers,
+                excluded_titles=excluded_titles,
+            )
+        effective_contract = fallback_contract
+    candidate_papers = prefer_selected_clarification_paper(
+        candidate_papers,
+        contract=effective_contract,
+        paper_lookup=paper_lookup,
+    )
+    return AgentCandidatePaperSearchResult(contract=effective_contract, candidate_papers=candidate_papers)
 
 
 def claim_focus_titles(

@@ -42,6 +42,7 @@ from app.services.agent_runtime_helpers import (
     filter_evidence_by_excluded_titles,
     prefer_selected_clarification_paper,
     screen_agent_papers,
+    search_agent_candidate_papers,
     search_agent_evidence,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
@@ -851,32 +852,23 @@ class ResearchAssistantAgentV4(
                 "modalities": contract.required_modalities,
             },
         )
-        candidate_papers = self.retriever.search_papers(query=paper_query, contract=contract, limit=plan.paper_limit)
-        if excluded_titles:
-            candidate_papers = self._filter_candidate_papers_by_excluded_titles(
-                candidate_papers,
-                excluded_titles=excluded_titles,
-            )
         active = session.effective_active_research()
-        if not candidate_papers and contract.continuation_mode == "followup" and active.targets:
-            fallback_contract = contract.model_copy(update={"targets": list(active.targets)})
-            candidate_papers = self.retriever.search_papers(
-                query=paper_query_text(fallback_contract),
-                contract=fallback_contract,
-                limit=plan.paper_limit,
-            )
-            if excluded_titles:
-                candidate_papers = self._filter_candidate_papers_by_excluded_titles(
-                    candidate_papers,
-                    excluded_titles=excluded_titles,
-                )
-            state["contract"] = fallback_contract
-            contract = fallback_contract
-        candidate_papers = prefer_selected_clarification_paper(
-            candidate_papers,
+        paper_result = search_agent_candidate_papers(
             contract=contract,
+            paper_query=paper_query,
+            paper_limit=plan.paper_limit,
+            active_targets=list(active.targets),
+            excluded_titles=excluded_titles,
+            search_papers=lambda query, search_contract, limit: self.retriever.search_papers(
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
             paper_lookup=self._candidate_from_paper_id,
         )
+        state["contract"] = paper_result.contract
+        contract = paper_result.contract
+        candidate_papers = paper_result.candidate_papers
         screened_papers, precomputed_evidence = self._screen_agent_papers(
             contract=contract,
             plan=plan,

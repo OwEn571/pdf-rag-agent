@@ -27,6 +27,7 @@ from app.services.agent_runtime_helpers import (
     research_runtime_actions,
     research_runtime_state,
     screen_agent_papers,
+    search_agent_candidate_papers,
     search_agent_evidence,
     tool_loop_ready_tool,
     verification_execution_step,
@@ -245,6 +246,51 @@ def test_runtime_helpers_search_agent_evidence_uses_precomputed_when_available()
     assert result.query == "custom DPO"
     assert result.limit == 3
     assert calls == []
+
+
+def test_runtime_helpers_search_agent_candidate_papers_filters_and_falls_back_to_active_targets() -> None:
+    old = CandidatePaper(paper_id="old", title="Old Focus")
+    fallback = CandidatePaper(paper_id="p2", title="Active Target Paper")
+    calls: list[tuple[str, QueryContract, int]] = []
+
+    def search(query: str, contract: QueryContract, limit: int) -> list[CandidatePaper]:
+        calls.append((query, contract, limit))
+        if len(calls) == 1:
+            return [old]
+        return [fallback]
+
+    result = search_agent_candidate_papers(
+        contract=QueryContract(clean_query="继续", continuation_mode="followup", targets=[]),
+        paper_query="继续",
+        paper_limit=5,
+        active_targets=["Active Target"],
+        excluded_titles={"old focus"},
+        search_papers=search,
+        paper_lookup=lambda _: None,
+    )
+
+    assert result.contract.targets == ["Active Target"]
+    assert result.candidate_papers == [fallback]
+    assert len(calls) == 2
+    assert calls[1][1].targets == ["Active Target"]
+    assert calls[1][2] == 5
+
+
+def test_runtime_helpers_search_agent_candidate_papers_prefers_selected_lookup() -> None:
+    selected = CandidatePaper(paper_id="p2", title="Selected")
+
+    result = search_agent_candidate_papers(
+        contract=QueryContract(clean_query="选第二个", notes=["selected_paper_id=p2"]),
+        paper_query="query",
+        paper_limit=5,
+        active_targets=[],
+        excluded_titles=set(),
+        search_papers=lambda *_: [],
+        paper_lookup=lambda paper_id: selected if paper_id == "p2" else None,
+    )
+
+    assert result.contract.notes == ["selected_paper_id=p2"]
+    assert result.candidate_papers == [selected]
 
 
 def test_runtime_helpers_search_agent_evidence_concept_fallback_filters_selection_and_excluded() -> None:
