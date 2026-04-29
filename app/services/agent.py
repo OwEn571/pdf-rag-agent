@@ -71,6 +71,10 @@ from app.services.contract_normalization import (
     normalize_lookup_text,
     normalize_modalities,
 )
+from app.services.contextual_contract_helpers import (
+    active_paper_reference_notes,
+    promote_contextual_metric_contract,
+)
 from app.services.conversation_memory_contract import (
     active_memory_bindings,
     apply_conversation_memory_to_contract,
@@ -83,7 +87,6 @@ from app.services.followup_intents import (
     is_memory_synthesis_query,
     is_negative_correction_query,
     looks_like_active_paper_reference,
-    looks_like_contextual_metric_query,
     looks_like_formula_answer_correction,
     looks_like_formula_location_correction,
     looks_like_paper_scope_correction,
@@ -2413,7 +2416,7 @@ class ResearchAssistantAgentV4(
         if paper is None:
             return contract
         inherited_query = active.clean_query or contract.clean_query
-        notes = self._active_paper_reference_notes(
+        notes = active_paper_reference_notes(
             notes=contract.notes,
             paper=paper,
             marker="paper_scope_correction",
@@ -2433,7 +2436,7 @@ class ResearchAssistantAgentV4(
             allow_web_search=contract.allow_web_search,
             notes=notes,
         )
-        return self._promote_contextual_metric_contract(scoped)
+        return promote_contextual_metric_contract(scoped)
 
     def _resolve_contextual_active_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
@@ -2448,7 +2451,7 @@ class ResearchAssistantAgentV4(
         paper = self._paper_from_query_hint(" ".join(active.titles))
         if paper is None:
             return contract
-        notes = self._active_paper_reference_notes(
+        notes = active_paper_reference_notes(
             notes=contract.notes,
             paper=paper,
             marker="active_paper_reference",
@@ -2463,46 +2466,7 @@ class ResearchAssistantAgentV4(
                 "notes": notes,
             }
         )
-        return self._promote_contextual_metric_contract(scoped)
-
-    @staticmethod
-    def _active_paper_reference_notes(*, notes: list[str], paper: CandidatePaper, marker: str) -> list[str]:
-        return list(
-            dict.fromkeys(
-                [
-                    *notes,
-                    marker,
-                    "resolved_from_conversation_memory",
-                    f"selected_paper_id={paper.paper_id}",
-                    "memory_title=" + paper.title,
-                ]
-            )
-        )
-
-    def _promote_contextual_metric_contract(self, contract: QueryContract) -> QueryContract:
-        if contract.relation == "metric_value_lookup":
-            return contract
-        if not looks_like_contextual_metric_query(
-            contract.clean_query,
-            targets=list(contract.targets),
-            is_short_acronym=is_short_acronym,
-        ):
-            return contract
-        requested_fields = list(dict.fromkeys([*contract.requested_fields, "metric_value", "setting", "evidence"]))
-        required_modalities = list(dict.fromkeys([*contract.required_modalities, "table", "caption", "page_text"]))
-        answer_slots = list(dict.fromkeys([*contract.answer_slots, "metric_value"]))
-        notes = list(dict.fromkeys([*contract.notes, "contextual_metric_query", "answer_slot=metric_value"]))
-        return contract.model_copy(
-            update={
-                "relation": "metric_value_lookup",
-                "answer_slots": answer_slots,
-                "requested_fields": requested_fields,
-                "required_modalities": required_modalities,
-                "answer_shape": "narrative",
-                "precision_requirement": "exact",
-                "notes": notes,
-            }
-        )
+        return promote_contextual_metric_contract(scoped)
 
     def _formula_query_allows_active_paper_context(
         self,
