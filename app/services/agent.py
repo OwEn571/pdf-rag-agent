@@ -5,7 +5,6 @@ import base64
 import hashlib
 import json
 import logging
-import re
 import subprocess
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -80,6 +79,7 @@ from app.services.citation_ranking import (
     extract_citation_count_from_evidence,
     format_citation_ranking_answer,
     parse_citation_count,
+    select_citation_ranking_candidates,
     title_token_overlap,
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
@@ -161,7 +161,6 @@ from app.services.library_intents import (
     is_library_status_query,
     is_scoped_library_recommendation_query,
     library_recommendation_contract,
-    library_query_prefers_previous_candidates,
     library_status_contract,
 )
 from app.services.memory_artifact_helpers import answer_from_recent_tool_artifact_reference
@@ -1100,57 +1099,13 @@ class ResearchAssistantAgentV4(
         query: str,
         limit: int,
     ) -> list[dict[str, str]]:
-        docs: list[dict[str, object]] = []
-        seen_paper_ids: set[str] = set()
-        by_title: dict[str, dict[str, object]] = {}
-        for doc in self.retriever.paper_documents():
-            meta = dict(doc.metadata or {})
-            paper_id = str(meta.get("paper_id", "")).strip()
-            title = str(meta.get("title", "") or "").strip()
-            if not paper_id or paper_id in seen_paper_ids or not title:
-                continue
-            seen_paper_ids.add(paper_id)
-            docs.append(meta)
-            by_title[normalize_lookup_text(title)] = meta
-
-        selected: list[dict[str, str]] = []
-        selected_keys: set[str] = set()
-
-        def add_candidate(*, title: str, year: str = "", reason: str = "") -> None:
-            clean_title = " ".join(str(title or "").split()).strip()
-            if not clean_title:
-                return
-            key = normalize_lookup_text(clean_title)
-            if not key or key in selected_keys:
-                return
-            meta = by_title.get(key)
-            selected_keys.add(key)
-            selected.append(
-                {
-                    "title": str(meta.get("title", clean_title) if meta else clean_title),
-                    "year": str(meta.get("year", year) if meta else year),
-                    "paper_id": str(meta.get("paper_id", "") if meta else ""),
-                    "reason": reason or str(meta.get("generated_summary", "") if meta else ""),
-                }
-            )
-
-        if library_query_prefers_previous_candidates(query):
-            for turn in reversed(session.turns[-4:]):
-                if turn.relation not in {"library_recommendation", "compound_query", "library_citation_ranking"}:
-                    continue
-                for title, year in re.findall(r"《([^》]{2,220})》(?:（(\d{4})）)?", turn.answer):
-                    add_candidate(title=title, year=year)
-                    if len(selected) >= limit:
-                        break
-                if selected:
-                    break
-
-        if not selected:
-            for item in self._rank_library_papers_for_recommendation(docs=docs, query=query, limit=limit):
-                add_candidate(title=item["title"], year=item.get("year", ""), reason=item.get("reason", ""))
-                if len(selected) >= limit:
-                    break
-        return selected[:limit]
+        return select_citation_ranking_candidates(
+            paper_documents=list(self.retriever.paper_documents()),
+            session=session,
+            query=query,
+            limit=limit,
+            rank_library_papers_for_recommendation=self._rank_library_papers_for_recommendation,
+        )
 
     def _lookup_candidate_citation_counts(
         self,

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
 
-from app.domain.models import EvidenceBlock
+from app.domain.models import EvidenceBlock, SessionContext
+from app.services.contract_normalization import normalize_lookup_text
+from app.services.library_intents import library_query_prefers_previous_candidates
 
 
 CITATION_COUNT_PATTERNS = [
@@ -13,6 +15,8 @@ CITATION_COUNT_PATTERNS = [
     r"([0-9][0-9,]*)\s+citations?",
     r"被引\s*[:：]?\s*([0-9][0-9,]*)",
 ]
+
+RankLibraryPapersFn = Callable[..., list[dict[str, Any]]]
 
 
 def parse_citation_count(value: str) -> int | None:
@@ -68,6 +72,67 @@ def extract_citation_count_from_evidence(*, title: str, evidence: list[EvidenceB
                         "source_snippet": item.snippet[:260],
                     }
     return best
+
+
+def select_citation_ranking_candidates(
+    *,
+    paper_documents: list[Any],
+    session: SessionContext,
+    query: str,
+    limit: int,
+    rank_library_papers_for_recommendation: RankLibraryPapersFn,
+) -> list[dict[str, str]]:
+    docs: list[dict[str, object]] = []
+    seen_paper_ids: set[str] = set()
+    by_title: dict[str, dict[str, object]] = {}
+    for doc in paper_documents:
+        meta = dict(doc.metadata or {})
+        paper_id = str(meta.get("paper_id", "")).strip()
+        title = str(meta.get("title", "") or "").strip()
+        if not paper_id or paper_id in seen_paper_ids or not title:
+            continue
+        seen_paper_ids.add(paper_id)
+        docs.append(meta)
+        by_title[normalize_lookup_text(title)] = meta
+
+    selected: list[dict[str, str]] = []
+    selected_keys: set[str] = set()
+
+    def add_candidate(*, title: str, year: str = "", reason: str = "") -> None:
+        clean_title = " ".join(str(title or "").split()).strip()
+        if not clean_title:
+            return
+        key = normalize_lookup_text(clean_title)
+        if not key or key in selected_keys:
+            return
+        meta = by_title.get(key)
+        selected_keys.add(key)
+        selected.append(
+            {
+                "title": str(meta.get("title", clean_title) if meta else clean_title),
+                "year": str(meta.get("year", year) if meta else year),
+                "paper_id": str(meta.get("paper_id", "") if meta else ""),
+                "reason": reason or str(meta.get("generated_summary", "") if meta else ""),
+            }
+        )
+
+    if library_query_prefers_previous_candidates(query):
+        for turn in reversed(session.turns[-4:]):
+            if turn.relation not in {"library_recommendation", "compound_query", "library_citation_ranking"}:
+                continue
+            for title, year in re.findall(r"《([^》]{2,220})》(?:（(\d{4})）)?", turn.answer):
+                add_candidate(title=title, year=year)
+                if len(selected) >= limit:
+                    break
+            if selected:
+                break
+
+    if not selected:
+        for item in rank_library_papers_for_recommendation(docs=docs, query=query, limit=limit):
+            add_candidate(title=item["title"], year=item.get("year", ""), reason=item.get("reason", ""))
+            if len(selected) >= limit:
+                break
+    return selected[:limit]
 
 
 def format_citation_ranking_answer(
