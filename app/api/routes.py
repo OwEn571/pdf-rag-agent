@@ -20,6 +20,7 @@ from app.schemas.api import (
     PaperPreviewResponse,
 )
 from app.services.agent import ResearchAssistantAgentV4
+from app.services.agent_events import normalize_agent_event
 from app.services.indexing import V4IngestionService
 from app.services.library import LibraryBrowserService
 
@@ -29,6 +30,14 @@ router = APIRouter()
 
 def _format_sse(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _stream_error_events(exc: Exception) -> list[tuple[str, dict[str, object]]]:
+    message = str(exc)
+    return [
+        ("error", normalize_agent_event("error", {"message": message})),
+        ("final", normalize_agent_event("final", {"answer": "", "error": message})),
+    ]
 
 
 @router.get("/v4/health", response_model=HealthResponse)
@@ -145,8 +154,8 @@ async def agent_chat_v4_stream(
                 yield _format_sse(str(item.get("event", "message")), item.get("data", {}))
         except Exception as exc:  # noqa: BLE001
             logger.exception("v4 stream failed")
-            yield _format_sse("error", {"message": str(exc)})
-            yield _format_sse("final", {"answer": "", "error": str(exc)})
+            for event, data in _stream_error_events(exc):
+                yield _format_sse(event, data)
 
     return StreamingResponse(
         event_stream(),

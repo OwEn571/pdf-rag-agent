@@ -319,3 +319,4 @@
 - 2026-04-30 继续按 review §4.2/M1 收敛 SSE 事件协议：`agent_events.py` 将 `todo_update` 纳入 canonical event type，并复用 todo item normalizer 输出稳定 `{id,text,status}` items，前端可直接按协议渲染 `todo_write` 的可见任务列表。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 562 个测试。
 - 2026-04-30 继续按 review §10/M3 收敛 trace diff 可观测性：`agent_trace_diff.py` 将 `todo_update` 的 todo items 纳入稳定签名，trace 回归现在能捕捉可见任务列表的文本/状态变化。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 563 个测试。
 - 2026-04-30 继续按 review §4.2/M1 收敛最终 SSE 事件协议：`agent_events.py` 为 `final` 事件补齐 `type=final`、`answer`、`citations`、`usage` 默认字段，`astream_chat_events` 的最终 payload 现在也走统一归一化层。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 564 个测试。
+- 2026-04-30 继续按 review §4.2/M1 收敛异常 SSE 事件协议：`routes.py` 的 stream exception 分支改为通过 `_stream_error_events` 统一输出 normalized `error` 与 `final` payload，避免异常路径绕过 canonical event schema；新增 API route 单测覆盖 SSE JSON 格式与 error/final 默认字段。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 566 个测试。
