@@ -103,7 +103,6 @@ from app.services.followup_relationship_contracts import (
 from app.services.followup_relationship_intents import (
     followup_relevance_score,
     has_followup_domain_signal,
-    has_followup_seed_intro_signal,
     has_followup_soft_relation_signal,
     has_followup_support_relation_signal,
     target_relation_cue_near_text,
@@ -124,10 +123,14 @@ from app.services.followup_candidate_helpers import (
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
+    followup_seed_score,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
     infer_followup_relation_type,
     merge_followup_rankings,
+    paper_anchor_text,
+    paper_author_tokens,
+    paper_keyword_set,
     selected_followup_candidate_title,
 )
 from app.services.figure_intents import figure_signal_score
@@ -3558,7 +3561,15 @@ class ResearchAssistantAgentV4(
                     return selected[:2]
         ranked = sorted(
             candidates,
-            key=lambda item: (-self._followup_seed_score(contract=contract, paper=item, session=session), item.title),
+            key=lambda item: (
+                -followup_seed_score(
+                    contract=contract,
+                    paper=item,
+                    active_titles=session.effective_active_research().titles,
+                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                ),
+                item.title,
+            ),
         )
         return ranked[:1]
 
@@ -3572,7 +3583,7 @@ class ResearchAssistantAgentV4(
         pool = {item.paper_id: item for item in initial_candidates}
         query_parts = [contract.clean_query, *contract.targets]
         for paper in seed_papers[:2]:
-            query_parts.append(self._paper_anchor_text(paper))
+            query_parts.append(paper_anchor_text(paper))
             query_parts.append(
                 followup_expansion_terms(
                     paper=paper,
@@ -3762,8 +3773,11 @@ class ResearchAssistantAgentV4(
         seed_papers: list[CandidatePaper],
         candidates: list[CandidatePaper],
     ) -> list[dict[str, Any]]:
-        seed_keywords = self._paper_keyword_set(seed_papers)
-        seed_author_tokens = self._paper_author_tokens(seed_papers)
+        seed_keywords = paper_keyword_set(
+            seed_papers,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
+        seed_author_tokens = paper_author_tokens(seed_papers)
         target_text = " ".join(contract.targets)
         seed_year = min((safe_year(item.year) for item in seed_papers), default=9999)
         seed_ids = {item.paper_id for item in seed_papers}
@@ -3784,10 +3798,13 @@ class ResearchAssistantAgentV4(
                 year = safe_year(paper.year)
                 if year >= seed_year:
                     score += 0.4 + min(0.5, max(0, year - seed_year) * 0.1)
-            overlap = len(seed_keywords & self._paper_keyword_set([paper]))
+            overlap = len(
+                seed_keywords
+                & paper_keyword_set([paper], paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id))
+            )
             if overlap:
                 score += min(1.2, overlap * 0.18)
-            author_overlap = len(seed_author_tokens & self._paper_author_tokens([paper]))
+            author_overlap = len(seed_author_tokens & paper_author_tokens([paper]))
             if author_overlap:
                 score += min(0.8, author_overlap * 0.25)
             if has_followup_soft_relation_signal(haystack):
@@ -3825,15 +3842,21 @@ class ResearchAssistantAgentV4(
         target_aliases = followup_target_aliases(
             contract=contract,
             seed_papers=seed_papers,
-            paper_anchor_text=lambda paper: self._paper_anchor_text(paper),
+            paper_anchor_text=paper_anchor_text,
         )
-        seed_keywords = self._paper_keyword_set(seed_papers)
-        candidate_keywords = self._paper_keyword_set([paper])
+        seed_keywords = paper_keyword_set(
+            seed_papers,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
+        candidate_keywords = paper_keyword_set(
+            [paper],
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
         seed_phrases: set[str] = set()
         for seed in seed_papers:
             seed_text = f"{seed.title}\n{self._paper_summary_text(seed.paper_id)}\n{seed.metadata.get('paper_card_text', '')}"
             seed_phrases.update(extract_followup_keyphrases(seed_text))
-        seed_author_tokens = self._paper_author_tokens(seed_papers)
+        seed_author_tokens = paper_author_tokens(seed_papers)
         summary = self._paper_summary_text(paper.paper_id)
         haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}\n{paper.metadata.get('abstract_note', '')}"
         lowered = haystack.lower()
@@ -3885,7 +3908,7 @@ class ResearchAssistantAgentV4(
         if topical_overlap and not phrase_overlap:
             score += min(1.0, len(topical_overlap) * 0.16)
             support_signals.append("共享部分主题词：" + "、".join(sorted(topical_overlap)[:4]))
-        author_overlap = seed_author_tokens & self._paper_author_tokens([paper])
+        author_overlap = seed_author_tokens & paper_author_tokens([paper])
         if author_overlap:
             score += min(1.0, len(author_overlap) * 0.35)
             support_signals.append("存在作者重合")
@@ -3929,38 +3952,6 @@ class ResearchAssistantAgentV4(
             "confidence": confidence,
         }
 
-    def _followup_seed_score(
-        self,
-        *,
-        contract: QueryContract,
-        paper: CandidatePaper,
-        session: SessionContext,
-    ) -> float:
-        score = paper.score
-        summary = self._paper_summary_text(paper.paper_id)
-        haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}".lower()
-        if paper.title in session.effective_active_research().titles:
-            score += 2.5
-        for target in contract.targets:
-            if target and matches_target(haystack, target.lower()):
-                score += 1.1
-        if has_followup_seed_intro_signal(haystack):
-            score += 1.2
-        year = safe_year(paper.year)
-        if year < 9999:
-            score += max(0.0, (2100 - year) / 1000.0)
-        return score
-
-    @staticmethod
-    def _paper_anchor_text(paper: CandidatePaper) -> str:
-        title = str(paper.title or "").strip()
-        if not title:
-            return ""
-        for separator in [":", " - ", " — ", " – "]:
-            if separator in title:
-                return title.split(separator, 1)[0].strip()
-        return title
-
     def _paper_brief(self, paper: CandidatePaper) -> dict[str, Any]:
         return {
             "paper_id": paper.paper_id,
@@ -3970,61 +3961,6 @@ class ResearchAssistantAgentV4(
             "aliases": str(paper.metadata.get("aliases", "")),
             "summary": self._paper_summary_text(paper.paper_id),
         }
-
-    def _paper_keyword_set(self, papers: list[CandidatePaper]) -> set[str]:
-        keywords: set[str] = set()
-        stopwords = {
-            "that",
-            "with",
-            "from",
-            "this",
-            "their",
-            "into",
-            "through",
-            "using",
-            "large",
-            "language",
-            "models",
-            "model",
-            "paper",
-            "across",
-            "approach",
-            "approaches",
-            "average",
-            "different",
-            "diverse",
-            "demonstrate",
-            "demonstrates",
-            "method",
-            "methods",
-            "task",
-            "tasks",
-            "result",
-            "results",
-            "performance",
-            "application",
-            "applications",
-        }
-        for paper in papers:
-            text = f"{paper.title} {self._paper_summary_text(paper.paper_id)}"
-            for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{3,}", text.lower()):
-                if token.endswith("ies") and len(token) > 5:
-                    token = token[:-3] + "y"
-                elif token.endswith("s") and len(token) > 6:
-                    token = token[:-1]
-                if token not in stopwords:
-                    keywords.add(token)
-        return keywords
-
-    @staticmethod
-    def _paper_author_tokens(papers: list[CandidatePaper]) -> set[str]:
-        tokens: set[str] = set()
-        for paper in papers:
-            authors = str(paper.metadata.get("authors", ""))
-            for token in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", authors.lower()):
-                if token not in {"and", "et", "al"}:
-                    tokens.add(token)
-        return tokens
 
     def _paper_summary_text(self, paper_id: str) -> str:
         doc = self.retriever.paper_doc_by_id(paper_id)

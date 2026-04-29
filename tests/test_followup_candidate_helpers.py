@@ -12,10 +12,14 @@ from app.services.followup_candidate_helpers import (
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_reason_fallback,
+    followup_seed_score,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
     infer_followup_relation_type,
     merge_followup_rankings,
+    paper_anchor_text,
+    paper_author_tokens,
+    paper_keyword_set,
     paper_relationship_brief,
     relationship_evidence_ids_from_payload,
     selected_followup_candidate_title,
@@ -60,6 +64,11 @@ def test_candidate_title_matches_title_or_alias() -> None:
 
     assert candidate_title_matches(paper, "candidate paper")
     assert not candidate_title_matches(paper, "Other Paper")
+
+
+def test_paper_anchor_text_uses_short_title_prefix() -> None:
+    assert paper_anchor_text(CandidatePaper(paper_id="p1", title="AlignX: Scaling Preferences")) == "AlignX"
+    assert paper_anchor_text(CandidatePaper(paper_id="p2", title="Plain Title")) == "Plain Title"
 
 
 def test_followup_target_aliases_combines_targets_seed_aliases_and_anchor() -> None:
@@ -169,6 +178,47 @@ def test_infer_followup_relation_type_uses_summary_and_strict_flag() -> None:
         )
         == "transfer extension"
     )
+
+
+def test_paper_keyword_set_normalizes_tokens_and_filters_stopwords() -> None:
+    paper = CandidatePaper(
+        paper_id="p1",
+        title="Personalized Preferences with Large Language Models",
+    )
+
+    keywords = paper_keyword_set([paper], paper_summary_text=lambda _: "Applications across user studies and profiles")
+
+    assert "personalized" in keywords
+    assert "preference" in keywords
+    assert "study" in keywords
+    assert "large" not in keywords
+    assert "application" not in keywords
+
+
+def test_paper_author_tokens_excludes_connector_tokens() -> None:
+    paper = CandidatePaper(paper_id="p1", title="Paper", metadata={"authors": "Ada Lovelace and Alan Turing et al"})
+
+    assert paper_author_tokens([paper]) == {"ada", "lovelace", "alan", "turing"}
+
+
+def test_followup_seed_score_boosts_active_target_intro_and_older_year() -> None:
+    contract = QueryContract(clean_query="AlignX 后续工作", targets=["AlignX"])
+    paper = CandidatePaper(
+        paper_id="alignx",
+        title="AlignX",
+        year="2025",
+        score=1.0,
+        metadata={"paper_card_text": "We introduce the AlignX benchmark dataset."},
+    )
+
+    score = followup_seed_score(
+        contract=contract,
+        paper=paper,
+        active_titles=["AlignX"],
+        paper_summary_text=lambda _: "This paper introduces AlignX for personalized preference inference.",
+    )
+
+    assert score > 5.0
 
 
 def test_merge_followup_rankings_deduplicates_by_paper_id() -> None:

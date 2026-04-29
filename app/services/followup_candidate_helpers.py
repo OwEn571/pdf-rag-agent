@@ -7,7 +7,9 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.contract_normalization import normalize_lookup_text
-from app.services.followup_relationship_intents import has_followup_domain_signal
+from app.services.evidence_presentation import safe_year
+from app.services.followup_relationship_intents import has_followup_domain_signal, has_followup_seed_intro_signal
+from app.services.query_shaping import matches_target
 
 PaperText = Callable[[str], str]
 PaperAnchor = Callable[[CandidatePaper], str]
@@ -30,6 +32,16 @@ def candidate_title_matches(paper: CandidatePaper, selected_title: str) -> bool:
     title_key = normalize_lookup_text(paper.title)
     aliases = normalize_lookup_text(str(paper.metadata.get("aliases", "")))
     return selected_key in title_key or title_key in selected_key or selected_key in aliases
+
+
+def paper_anchor_text(paper: CandidatePaper) -> str:
+    title = str(paper.title or "").strip()
+    if not title:
+        return ""
+    for separator in [":", " - ", " — ", " – "]:
+        if separator in title:
+            return title.split(separator, 1)[0].strip()
+    return title
 
 
 def followup_target_aliases(
@@ -165,6 +177,89 @@ def infer_followup_relation_type(
     if any(token in summary for token in ["reasoning", "behavioral", "preference inference"]):
         return "method/model extension"
     return "related continuation"
+
+
+def paper_keyword_set(
+    papers: list[CandidatePaper],
+    *,
+    paper_summary_text: PaperText,
+) -> set[str]:
+    keywords: set[str] = set()
+    stopwords = {
+        "that",
+        "with",
+        "from",
+        "this",
+        "their",
+        "into",
+        "through",
+        "using",
+        "large",
+        "language",
+        "models",
+        "model",
+        "paper",
+        "across",
+        "approach",
+        "approaches",
+        "average",
+        "different",
+        "diverse",
+        "demonstrate",
+        "demonstrates",
+        "method",
+        "methods",
+        "task",
+        "tasks",
+        "result",
+        "results",
+        "performance",
+        "application",
+        "applications",
+    }
+    for paper in papers:
+        text = f"{paper.title} {paper_summary_text(paper.paper_id)}"
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{3,}", text.lower()):
+            if token.endswith("ies") and len(token) > 5:
+                token = token[:-3] + "y"
+            elif token.endswith("s") and len(token) > 6:
+                token = token[:-1]
+            if token not in stopwords:
+                keywords.add(token)
+    return keywords
+
+
+def paper_author_tokens(papers: list[CandidatePaper]) -> set[str]:
+    tokens: set[str] = set()
+    for paper in papers:
+        authors = str(paper.metadata.get("authors", ""))
+        for token in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", authors.lower()):
+            if token not in {"and", "et", "al"}:
+                tokens.add(token)
+    return tokens
+
+
+def followup_seed_score(
+    *,
+    contract: QueryContract,
+    paper: CandidatePaper,
+    active_titles: list[str],
+    paper_summary_text: PaperText,
+) -> float:
+    score = paper.score
+    summary = paper_summary_text(paper.paper_id)
+    haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}".lower()
+    if paper.title in active_titles:
+        score += 2.5
+    for target in contract.targets:
+        if target and matches_target(haystack, target.lower()):
+            score += 1.1
+    if has_followup_seed_intro_signal(haystack):
+        score += 1.2
+    year = safe_year(paper.year)
+    if year < 9999:
+        score += max(0.0, (2100 - year) / 1000.0)
+    return score
 
 
 def merge_followup_rankings(
