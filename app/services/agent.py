@@ -41,7 +41,10 @@ from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_options_from_notes,
+    clarification_option_description,
+    clarification_option_id,
     clarification_option_public_payload,
+    clarification_string_list,
     looks_like_clarification_choice_text,
     pending_clarification_selection_index,
 )
@@ -3674,8 +3677,8 @@ class ResearchAssistantAgentV4(
             "snippet": self._truncate_context_text(str(option.get("snippet", "") or ""), limit=420),
             "match_reason": str(option.get("match_reason", "") or (paper.match_reason if paper is not None else "") or "").strip(),
             "evidence_relation": str(option.get("source_relation", "") or option.get("source", "") or "").strip(),
-            "source_requested_fields": self._string_list(option.get("source_requested_fields")),
-            "source_answer_slots": self._string_list(option.get("source_answer_slots")),
+            "source_requested_fields": clarification_string_list(option.get("source_requested_fields")),
+            "source_answer_slots": clarification_string_list(option.get("source_answer_slots")),
             "paper_aliases": self._truncate_context_text(str(metadata.get("aliases", "") or ""), limit=220),
             "paper_summary": self._truncate_context_text(
                 str(
@@ -4236,7 +4239,7 @@ class ResearchAssistantAgentV4(
         label = str(payload.get("label", "") or meaning or title or resolved_target or f"option {index + 1}").strip()
         description = str(payload.get("description", "") or "").strip()
         if not description:
-            description = self._clarification_option_description(payload, title=title, year=year)
+            description = clarification_option_description(payload, title=title, year=year)
         payload["schema_version"] = CLARIFICATION_OPTION_SCHEMA_VERSION
         payload["index"] = index
         payload["kind"] = resolved_kind
@@ -4256,13 +4259,13 @@ class ResearchAssistantAgentV4(
                 payload.pop("disambiguation_confidence", None)
         payload.setdefault("source", source)
         payload["source_relation"] = str(payload.get("source_relation", "") or contract.relation)
-        payload["source_requested_fields"] = self._string_list(payload.get("source_requested_fields") or contract.requested_fields)
-        payload["source_required_modalities"] = self._string_list(payload.get("source_required_modalities") or contract.required_modalities)
-        payload["source_answer_slots"] = self._string_list(payload.get("source_answer_slots") or contract.answer_slots)
-        payload["paper_ids"] = self._string_list(payload.get("paper_ids"))
-        payload["titles"] = self._string_list(payload.get("titles"))
-        payload["evidence_ids"] = self._string_list(payload.get("evidence_ids"))
-        payload["option_id"] = str(payload.get("option_id", "") or "").strip() or self._clarification_option_id(
+        payload["source_requested_fields"] = clarification_string_list(payload.get("source_requested_fields") or contract.requested_fields)
+        payload["source_required_modalities"] = clarification_string_list(payload.get("source_required_modalities") or contract.required_modalities)
+        payload["source_answer_slots"] = clarification_string_list(payload.get("source_answer_slots") or contract.answer_slots)
+        payload["paper_ids"] = clarification_string_list(payload.get("paper_ids"))
+        payload["titles"] = clarification_string_list(payload.get("titles"))
+        payload["evidence_ids"] = clarification_string_list(payload.get("evidence_ids"))
+        payload["option_id"] = str(payload.get("option_id", "") or "").strip() or clarification_option_id(
             kind=resolved_kind,
             target=resolved_target,
             label=label,
@@ -4271,48 +4274,6 @@ class ResearchAssistantAgentV4(
             index=index,
         )
         return payload
-
-    @staticmethod
-    def _string_list(value: Any) -> list[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, tuple | set):
-            return [str(item).strip() for item in value if str(item).strip()]
-        text = str(value or "").strip()
-        return [text] if text else []
-
-    @staticmethod
-    def _clarification_option_description(option: dict[str, Any], *, title: str, year: str) -> str:
-        meta = " · ".join(item for item in [title, year] if item)
-        context = str(option.get("context_text", "") or option.get("snippet", "") or "").strip()
-        context = " ".join(context.split())
-        return context or meta
-
-    @staticmethod
-    def _clarification_option_id(
-        *,
-        kind: str,
-        target: str,
-        label: str,
-        paper_id: str,
-        title: str,
-        index: int,
-    ) -> str:
-        seed = json.dumps(
-            {
-                "kind": kind,
-                "target": target,
-                "label": label,
-                "paper_id": paper_id,
-                "title": title,
-                "index": index,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
-        prefix = re.sub(r"[^a-z0-9]+", "-", f"{kind}-{target}".lower()).strip("-") or "clarification"
-        return f"{prefix}-{digest}"
 
     def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
         options = self._clarification_options(contract)

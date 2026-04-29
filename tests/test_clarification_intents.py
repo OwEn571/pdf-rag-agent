@@ -5,7 +5,10 @@ import json
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_options_from_notes,
+    clarification_option_description,
+    clarification_option_id,
     clarification_option_public_payload,
+    clarification_string_list,
     looks_like_clarification_choice_text,
     pending_clarification_selection_index,
 )
@@ -41,6 +44,37 @@ def test_clarification_option_public_payload_preserves_protocol_fields() -> None
     assert payload["display_reason"] == "best match"
     assert payload["judge_recommended"] is True
     assert "debug_only" not in payload
+
+
+def test_clarification_string_list_coerces_common_shapes() -> None:
+    assert clarification_string_list([" A ", "", "B"]) == ["A", "B"]
+    assert sorted(clarification_string_list({"B", "A"})) == ["A", "B"]
+    assert clarification_string_list(" value ") == ["value"]
+    assert clarification_string_list(None) == []
+
+
+def test_clarification_option_description_and_id_are_stable() -> None:
+    assert clarification_option_description({"snippet": "  alpha   beta "}, title="T", year="2026") == "alpha beta"
+    assert clarification_option_description({}, title="T", year="2026") == "T · 2026"
+
+    first = clarification_option_id(
+        kind="acronym_meaning",
+        target="DPO",
+        label="Direct Preference Optimization",
+        paper_id="p1",
+        title="Paper",
+        index=0,
+    )
+    second = clarification_option_id(
+        kind="acronym_meaning",
+        target="DPO",
+        label="Direct Preference Optimization",
+        paper_id="p1",
+        title="Paper",
+        index=0,
+    )
+    assert first == second
+    assert first.startswith("acronym-meaning-dpo-")
 
 
 def test_ambiguity_options_from_notes_reads_valid_payloads_only() -> None:

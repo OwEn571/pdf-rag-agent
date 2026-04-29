@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any
@@ -85,6 +86,48 @@ def clarification_option_public_payload(option: dict[str, Any]) -> dict[str, Any
         if key in option:
             payload[key] = option.get(key)
     return payload
+
+
+def clarification_string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple | set):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def clarification_option_description(option: dict[str, Any], *, title: str, year: str) -> str:
+    meta = " · ".join(item for item in [title, year] if item)
+    context = str(option.get("context_text", "") or option.get("snippet", "") or "").strip()
+    context = " ".join(context.split())
+    return context or meta
+
+
+def clarification_option_id(
+    *,
+    kind: str,
+    target: str,
+    label: str,
+    paper_id: str,
+    title: str,
+    index: int,
+) -> str:
+    seed = json.dumps(
+        {
+            "kind": kind,
+            "target": target,
+            "label": label,
+            "paper_id": paper_id,
+            "title": title,
+            "index": index,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:12]
+    prefix = re.sub(r"[^a-z0-9]+", "-", f"{kind}-{target}".lower()).strip("-") or "clarification"
+    return f"{prefix}-{digest}"
 
 
 def ambiguity_options_from_notes(notes: list[str]) -> list[dict[str, Any]]:
