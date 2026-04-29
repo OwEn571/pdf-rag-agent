@@ -20,6 +20,7 @@ from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     clear_pending_clarification,
+    contract_from_pending_clarification,
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
     disambiguation_missing_fields,
@@ -340,3 +341,29 @@ def test_pending_clarification_helpers_store_and_clear_session_state() -> None:
     assert session.pending_clarification_type == ""
     assert session.pending_clarification_target == ""
     assert session.pending_clarification_options == []
+
+
+def test_contract_from_pending_clarification_resolves_choice_payload_and_text() -> None:
+    session = SessionContext(
+        session_id="s1",
+        pending_clarification_type="ambiguity",
+        pending_clarification_target="PBA",
+        pending_clarification_options=[
+            {"option_id": "first", "target": "PBA", "meaning": "First Meaning", "paper_id": "p1"},
+            {"option_id": "second", "target": "PBA", "meaning": "Second Meaning", "paper_id": "p2"},
+        ],
+    )
+
+    by_payload = contract_from_pending_clarification(
+        clean_query="选择第二个",
+        session=session,
+        clarification_choice={"option_id": "second"},
+    )
+    by_text = contract_from_pending_clarification(clean_query="我说第二个", session=session)
+
+    assert by_payload is not None
+    assert by_payload.targets == ["PBA"]
+    assert "selected_paper_id=p2" in by_payload.notes
+    assert by_text is not None
+    assert "selected_paper_id=p2" in by_text.notes
+    assert contract_from_pending_clarification(clean_query="没有明确选择", session=session) is None

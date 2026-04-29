@@ -7,7 +7,7 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
 from app.services.contract_normalization import normalize_lookup_text
-from app.services.query_shaping import matches_target
+from app.services.query_shaping import extract_targets, matches_target
 from app.services.session_context_helpers import truncate_context_text
 
 
@@ -567,6 +567,32 @@ def clear_pending_clarification(session: SessionContext) -> None:
     session.pending_clarification_type = ""
     session.pending_clarification_target = ""
     session.pending_clarification_options = []
+
+
+def contract_from_pending_clarification(
+    *,
+    clean_query: str,
+    session: SessionContext,
+    clarification_choice: dict[str, Any] | None = None,
+) -> QueryContract | None:
+    if session.pending_clarification_type != "ambiguity" or not session.pending_clarification_options:
+        return None
+    selected = option_from_clarification_choice(clarification_choice, session.pending_clarification_options)
+    if selected is None:
+        selected = select_pending_clarification_option(
+            clean_query=clean_query,
+            options=session.pending_clarification_options,
+        )
+    if selected is None:
+        return None
+    target = session.pending_clarification_target or str(selected.get("target", "") or "").strip()
+    if not target:
+        target = " ".join(extract_targets(clean_query)[:1])
+    return contract_from_selected_clarification_option(
+        clean_query=clean_query,
+        target=target,
+        selected=selected,
+    )
 
 
 def selected_clarification_paper_id(contract: QueryContract) -> str:

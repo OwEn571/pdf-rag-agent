@@ -47,6 +47,7 @@ from app.services.clarification_intents import (
     clarification_option_public_payload,
     clarification_options_from_contract_notes,
     clear_pending_clarification,
+    contract_from_pending_clarification,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     disambiguation_goal_markers,
@@ -57,10 +58,8 @@ from app.services.clarification_intents import (
     normalize_acronym_meaning,
     normalize_clarification_options,
     next_clarification_attempt,
-    option_from_clarification_choice,
     remember_clarification_attempt,
     reset_clarification_tracking,
-    select_pending_clarification_option,
     selected_option_from_judge_decision,
     selected_clarification_paper_id,
     store_pending_clarification,
@@ -2037,7 +2036,7 @@ class ResearchAssistantAgentV4(
         clarification_choice: dict[str, Any] | None = None,
     ) -> QueryContract:
         clean_query = " ".join(query.strip().split())
-        clarified_contract = self._contract_from_pending_clarification(
+        clarified_contract = contract_from_pending_clarification(
             clean_query=clean_query,
             session=session,
             clarification_choice=clarification_choice,
@@ -2345,32 +2344,6 @@ class ResearchAssistantAgentV4(
             query,
             paper_documents=self.retriever.paper_documents(),
             candidate_lookup=self._candidate_from_paper_id,
-        )
-
-    def _contract_from_pending_clarification(
-        self,
-        *,
-        clean_query: str,
-        session: SessionContext,
-        clarification_choice: dict[str, Any] | None = None,
-    ) -> QueryContract | None:
-        if session.pending_clarification_type != "ambiguity" or not session.pending_clarification_options:
-            return None
-        selected = option_from_clarification_choice(clarification_choice, session.pending_clarification_options)
-        if selected is None:
-            selected = select_pending_clarification_option(
-                clean_query=clean_query,
-                options=session.pending_clarification_options,
-            )
-        if selected is None:
-            return None
-        target = session.pending_clarification_target or str(selected.get("target", "") or "").strip()
-        if not target:
-            target = " ".join(extract_targets(clean_query)[:1])
-        return contract_from_selected_clarification_option(
-            clean_query=clean_query,
-            target=target,
-            selected=selected,
         )
 
     @staticmethod
