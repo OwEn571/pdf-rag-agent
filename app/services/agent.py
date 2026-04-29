@@ -95,7 +95,6 @@ from app.services.evidence_presentation import (
     citations_from_doc_ids,
     claim_evidence_ids,
     evidence_ids_for_paper,
-    extract_topology_terms,
     figure_fallback_summary,
     formula_terms,
     join_unique_text,
@@ -5474,10 +5473,6 @@ class ResearchAssistantAgentV4(
     def _paper_recommendation_reason(self, paper: CandidatePaper) -> str:
         summary = self._paper_summary_text(paper.paper_id)
         return paper_recommendation_reason(summary)
-
-    @staticmethod
-    def _extract_topology_terms(evidence: list[EvidenceBlock]) -> list[str]:
-        return extract_topology_terms(evidence)
 
     @staticmethod
     def _formula_terms(text: str) -> list[str]:

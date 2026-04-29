@@ -10,6 +10,7 @@ from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
+from app.services.evidence_presentation import extract_topology_terms
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
@@ -222,7 +223,7 @@ class SolverPipelineMixin:
         evidence: list[EvidenceBlock],
         session: SessionContext,
     ) -> list[Claim]:
-        topology_terms = self._extract_topology_terms(evidence)
+        topology_terms = extract_topology_terms(evidence)
         claim = topology_discovery_claim(
             papers=papers,
             topology_terms=topology_terms,
@@ -238,7 +239,7 @@ class SolverPipelineMixin:
         evidence: list[EvidenceBlock],
         session: SessionContext,
     ) -> list[Claim]:
-        topology_terms = self._extract_topology_terms(evidence)
+        topology_terms = extract_topology_terms(evidence)
         if not topology_terms and not evidence:
             return []
         recommendation = self._derive_topology_recommendation(evidence=evidence, topology_terms=topology_terms)

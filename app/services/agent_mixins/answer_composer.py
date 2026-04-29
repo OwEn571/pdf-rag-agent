@@ -17,6 +17,7 @@ from app.domain.models import (
     SessionContext,
     VerificationReport,
 )
+from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.zotero_sqlite import ZoteroSQLiteReader
 
@@ -761,8 +762,8 @@ class AnswerComposerMixin:
         claim = claims[0]
         structured = dict(claim.structured_data or {})
         terms = [str(item) for item in structured.get("topology_terms", []) if str(item).strip()]
-        if not terms and hasattr(self, "_extract_topology_terms"):
-            terms = self._extract_topology_terms(evidence)
+        if not terms:
+            terms = extract_topology_terms(evidence)
         terms_text = "、".join(terms or ["DAG", "irregular/random", "chain", "tree", "mesh"])
         summary = self._clean_topology_public_text(str(claim.value or structured.get("summary", "") or "").strip())
         rationale = self._clean_topology_public_text(str(structured.get("rationale", "") or "").strip())

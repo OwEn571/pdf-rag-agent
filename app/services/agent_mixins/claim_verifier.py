@@ -5,6 +5,7 @@ import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
 from app.services import origin_selection_helpers as origin_helpers
+from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 
 
@@ -321,8 +322,8 @@ class ClaimVerifierMixin:
             )
         structured = dict(claim.structured_data or {})
         topology_terms = [str(item).strip() for item in structured.get("topology_terms", []) if str(item).strip()]
-        if not topology_terms and hasattr(self, "_extract_topology_terms"):
-            topology_terms = self._extract_topology_terms(evidence)
+        if not topology_terms:
+            topology_terms = extract_topology_terms(evidence)
         if not claim.evidence_ids and not topology_terms:
             return VerificationReport(
                 status="retry",
