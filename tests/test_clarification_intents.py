@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.clarification_intents import (
+    CLARIFICATION_INTENT_MARKERS,
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
@@ -51,12 +52,14 @@ from app.services.clarification_intents import (
     selected_clarification_paper_id,
     store_pending_clarification,
 )
+from app.services.intent_marker_matching import query_matches_any
 
 
 def test_clarification_choice_text_detects_selection_cues() -> None:
     assert looks_like_clarification_choice_text("我说的是第二个选项")
     assert looks_like_clarification_choice_text("choose the one about alignx")
     assert not looks_like_clarification_choice_text("alignx paper")
+    assert query_matches_any("select", "", CLARIFICATION_INTENT_MARKERS["choice"])
 
 
 def test_pending_clarification_selection_index_detects_digits_and_ordinals() -> None:

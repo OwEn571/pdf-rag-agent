@@ -9,6 +9,7 @@ from typing import Any, Callable
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.contract_context import contract_answer_slots
 from app.services.contract_normalization import normalize_lookup_text
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.query_shaping import extract_targets, is_short_acronym, matches_target
 from app.services.research_planning import research_plan_goals
 from app.services.session_context_helpers import truncate_context_text
@@ -16,7 +17,7 @@ from app.services.session_context_helpers import truncate_context_text
 
 CLARIFICATION_OPTION_SCHEMA_VERSION = "clarification_option.v1"
 
-CLARIFICATION_CHOICE_MARKERS = [
+CLARIFICATION_CHOICE_MARKERS: MarkerProfile = (
     "我说",
     "选",
     "选择",
@@ -26,26 +27,30 @@ CLARIFICATION_CHOICE_MARKERS = [
     "the one",
     "choose",
     "select",
-]
+)
 
-CLARIFICATION_ORDINAL_PATTERNS = [
+CLARIFICATION_ORDINAL_PATTERNS: tuple[tuple[int, MarkerProfile], ...] = (
     (
         0,
-        ["第一个", "第一项", "第1个", "第 1 个", "第1项", "第 1 项", "first", "the first"],
+        ("第一个", "第一项", "第1个", "第 1 个", "第1项", "第 1 项", "first", "the first"),
     ),
     (
         1,
-        ["第二个", "第二项", "第2个", "第 2 个", "第2项", "第 2 项", "second", "the second"],
+        ("第二个", "第二项", "第2个", "第 2 个", "第2项", "第 2 项", "second", "the second"),
     ),
     (
         2,
-        ["第三个", "第三项", "第3个", "第 3 个", "第3项", "第 3 项", "third", "the third"],
+        ("第三个", "第三项", "第3个", "第 3 个", "第3项", "第 3 项", "third", "the third"),
     ),
     (
         3,
-        ["第四个", "第四项", "第4个", "第 4 个", "第4项", "第 4 项", "fourth", "the fourth"],
+        ("第四个", "第四项", "第4个", "第 4 个", "第4项", "第 4 项", "fourth", "the fourth"),
     ),
-]
+)
+
+CLARIFICATION_INTENT_MARKERS: dict[str, MarkerProfile] = {
+    "choice": CLARIFICATION_CHOICE_MARKERS,
+}
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,7 @@ class DisambiguationResolutionDecision:
 
 
 def looks_like_clarification_choice_text(normalized_query: str) -> bool:
-    return any(marker in normalized_query for marker in CLARIFICATION_CHOICE_MARKERS)
+    return query_matches_any(normalized_query, "", CLARIFICATION_INTENT_MARKERS["choice"])
 
 
 def pending_clarification_selection_index(query: str) -> int | None:
@@ -72,7 +77,7 @@ def pending_clarification_selection_index(query: str) -> int | None:
     if digit_match:
         return int(digit_match.group(1)) - 1
     for index, markers in CLARIFICATION_ORDINAL_PATTERNS:
-        if any(marker in compact for marker in markers):
+        if query_matches_any(compact, "", markers):
             return index
     return None
 
