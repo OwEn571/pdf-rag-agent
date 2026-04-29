@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
-from app.services.clarification_intents import selected_clarification_paper_id
+from app.services.clarification_intents import contract_from_selected_clarification_option, selected_clarification_paper_id
 from app.services.confidence import (
     confidence_from_contract,
     confidence_from_verification_report,
@@ -71,6 +71,14 @@ class SelectedAmbiguityRefresh:
     selected_papers: list[CandidatePaper]
     evidence: list[EvidenceBlock]
     evidence_refreshed: bool
+
+
+@dataclass(frozen=True)
+class ClarificationLimitDecision:
+    forced_contract: QueryContract
+    forced_plan: dict[str, Any]
+    summary: str
+    observation_payload: dict[str, Any]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -542,6 +550,78 @@ def clarify_retry_verification_if_needed(*, contract: QueryContract, verificatio
             recommended_action="clarify_target",
         )
     return verification
+
+
+def clarification_limit_decision(
+    *,
+    contract: QueryContract,
+    verification: Any,
+    next_attempt: int,
+    max_attempts: int,
+    options: list[dict[str, Any]],
+) -> ClarificationLimitDecision | None:
+    if not isinstance(verification, VerificationReport) or verification.status != "clarify":
+        return None
+    if next_attempt < max_attempts:
+        return None
+    if options:
+        selected = options[0]
+        forced_contract = contract_from_selected_clarification_option(
+            clean_query=contract.clean_query,
+            target=contract.targets[0] if contract.targets else str(selected.get("target", "") or ""),
+            selected=selected,
+            notes_extra=["clarification_limit_reached", "assumed_most_likely_intent"],
+        )
+        summary = f"selected={selected.get('meaning') or selected.get('title') or 'first_option'}"
+    else:
+        notes = list(dict.fromkeys([*contract.notes, "clarification_limit_reached", "best_effort_answer"]))
+        forced_contract = contract.model_copy(update={"notes": notes})
+        summary = verification.recommended_action or "best_effort_answer"
+    return ClarificationLimitDecision(
+        forced_contract=forced_contract,
+        forced_plan={
+            "thought": "Clarification limit reached; proceed with the most likely intent and provide a grounded best-effort answer.",
+            "actions": ["search_corpus", "compose"],
+            "stop_conditions": ["best_effort_answer"],
+        },
+        summary=summary,
+        observation_payload={
+            "max_attempts": max_attempts,
+            "attempt": next_attempt,
+            "assumption": summary,
+        },
+    )
+
+
+def promote_best_effort_state_after_clarification_limit(state: dict[str, Any]) -> dict[str, Any]:
+    verification = state.get("verification")
+    if not (
+        isinstance(verification, VerificationReport)
+        and verification.status == "clarify"
+        and state.get("claims")
+    ):
+        return state
+    promoted = dict(state)
+    promoted["verification"] = VerificationReport(
+        status="pass",
+        recommended_action="best_effort_after_clarification_limit",
+    )
+    contract = promoted.get("contract")
+    if isinstance(contract, QueryContract):
+        promoted["contract"] = contract.model_copy(
+            update={
+                "notes": list(
+                    dict.fromkeys(
+                        [
+                            *contract.notes,
+                            "clarification_limit_reached",
+                            "best_effort_after_clarification_limit",
+                        ]
+                    )
+                )
+            }
+        )
+    return promoted
 
 
 def verification_execution_step(verification: VerificationReport) -> dict[str, str]:

@@ -17,6 +17,7 @@ from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     agent_loop_execution_step,
     claim_focus_titles,
+    clarification_limit_decision,
     clarify_retry_verification_if_needed,
     configured_max_steps,
     contract_needs_human_clarification,
@@ -33,6 +34,7 @@ from app.services.agent_runtime_helpers import (
     next_conversation_action,
     next_research_action,
     prepare_retry_research_materials,
+    promote_best_effort_state_after_clarification_limit,
     record_tool_loop_ready,
     planner_next_action,
     prefer_selected_clarification_paper,
@@ -479,6 +481,99 @@ def test_runtime_helpers_clarify_retry_verification_for_targeted_research_goals(
         contract=QueryContract(clean_query="继续", targets=[]),
         verification=retry,
     ) is retry
+
+
+def test_runtime_helpers_clarification_limit_decision_uses_first_option() -> None:
+    contract = QueryContract(
+        clean_query="PBA是什么",
+        targets=["PBA"],
+        notes=["ambiguity_option=1"],
+    )
+    verification = VerificationReport(status="clarify", recommended_action="clarify_ambiguous_entity")
+
+    decision = clarification_limit_decision(
+        contract=contract,
+        verification=verification,
+        next_attempt=2,
+        max_attempts=2,
+        options=[
+            {
+                "target": "PBA",
+                "paper_id": "p1",
+                "title": "AlignX",
+                "meaning": "Preference Bridged Alignment",
+            }
+        ],
+    )
+
+    assert decision is not None
+    assert decision.summary == "selected=Preference Bridged Alignment"
+    assert decision.forced_plan["actions"] == ["search_corpus", "compose"]
+    assert "clarification_limit_reached" in decision.forced_contract.notes
+    assert "assumed_most_likely_intent" in decision.forced_contract.notes
+    assert decision.observation_payload == {
+        "max_attempts": 2,
+        "attempt": 2,
+        "assumption": "selected=Preference Bridged Alignment",
+    }
+
+
+def test_runtime_helpers_clarification_limit_decision_requires_limit() -> None:
+    contract = QueryContract(clean_query="PBA是什么", targets=["PBA"])
+    verification = VerificationReport(status="clarify", recommended_action="clarify_ambiguous_entity")
+
+    assert clarification_limit_decision(
+        contract=contract,
+        verification=verification,
+        next_attempt=1,
+        max_attempts=2,
+        options=[],
+    ) is None
+    assert clarification_limit_decision(
+        contract=contract,
+        verification=VerificationReport(status="pass"),
+        next_attempt=2,
+        max_attempts=2,
+        options=[],
+    ) is None
+
+
+def test_runtime_helpers_clarification_limit_decision_without_options_marks_best_effort() -> None:
+    contract = QueryContract(clean_query="PBA是什么", targets=["PBA"], notes=["existing"])
+    verification = VerificationReport(status="clarify", recommended_action="clarify_target")
+
+    decision = clarification_limit_decision(
+        contract=contract,
+        verification=verification,
+        next_attempt=3,
+        max_attempts=2,
+        options=[],
+    )
+
+    assert decision is not None
+    assert decision.summary == "clarify_target"
+    assert decision.forced_contract.notes == ["existing", "clarification_limit_reached", "best_effort_answer"]
+
+
+def test_runtime_helpers_promote_best_effort_state_after_clarification_limit() -> None:
+    contract = QueryContract(clean_query="PBA是什么", notes=["clarification_limit_reached"])
+    state = {
+        "contract": contract,
+        "verification": VerificationReport(status="clarify", recommended_action="clarify_target"),
+        "claims": [Claim(claim_type="definition", text="PBA is a method.")],
+    }
+
+    promoted = promote_best_effort_state_after_clarification_limit(state)
+
+    assert promoted is not state
+    assert promoted["verification"].status == "pass"
+    assert promoted["verification"].recommended_action == "best_effort_after_clarification_limit"
+    assert promoted["contract"].notes == [
+        "clarification_limit_reached",
+        "best_effort_after_clarification_limit",
+    ]
+    unchanged = {"verification": VerificationReport(status="clarify")}
+    assert promote_best_effort_state_after_clarification_limit(unchanged) is unchanged
 
 
 def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:

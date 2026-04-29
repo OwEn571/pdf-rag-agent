@@ -41,7 +41,9 @@ from app.services.agent_runtime_helpers import (
     excluded_focus_titles,
     filter_candidate_papers_by_excluded_titles,
     filter_evidence_by_excluded_titles,
+    clarification_limit_decision,
     prepare_retry_research_materials,
+    promote_best_effort_state_after_clarification_limit,
     retry_research_limits,
     refresh_selected_ambiguity_materials,
     screen_agent_papers,
@@ -702,79 +704,36 @@ class ResearchAssistantAgentV4(
     ) -> dict[str, Any] | None:
         contract: QueryContract = state["contract"]
         verification = state.get("verification")
-        if not isinstance(verification, VerificationReport) or verification.status != "clarify":
-            return None
         next_attempt = self._next_clarification_attempt(session=session, contract=contract, verification=verification)
-        if next_attempt < self.agent_settings.max_clarification_attempts:
+        decision = clarification_limit_decision(
+            contract=contract,
+            verification=verification,
+            next_attempt=next_attempt,
+            max_attempts=self.agent_settings.max_clarification_attempts,
+            options=self._clarification_options(contract),
+        )
+        if decision is None:
             return None
-
-        options = self._clarification_options(contract)
-        forced_contract = contract
-        if options:
-            selected = options[0]
-            forced_contract = contract_from_selected_clarification_option(
-                clean_query=contract.clean_query,
-                target=contract.targets[0] if contract.targets else str(selected.get("target", "") or ""),
-                selected=selected,
-                notes_extra=["clarification_limit_reached", "assumed_most_likely_intent"],
-            )
-            summary = f"selected={selected.get('meaning') or selected.get('title') or 'first_option'}"
-        else:
-            notes = list(dict.fromkeys([*contract.notes, "clarification_limit_reached", "best_effort_answer"]))
-            forced_contract = contract.model_copy(update={"notes": notes})
-            summary = verification.recommended_action or "best_effort_answer"
 
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="clarification_limit",
-            summary=summary,
-            payload={
-                "max_attempts": self.agent_settings.max_clarification_attempts,
-                "attempt": next_attempt,
-                "assumption": summary,
-            },
+            summary=decision.summary,
+            payload=decision.observation_payload,
         )
 
-        forced_plan = {
-            "thought": "Clarification limit reached; proceed with the most likely intent and provide a grounded best-effort answer.",
-            "actions": ["search_corpus", "compose"],
-            "stop_conditions": ["best_effort_answer"],
-        }
         forced_state = self.runtime.run_research_agent_loop(
-            contract=forced_contract,
+            contract=decision.forced_contract,
             session=session,
-            agent_plan=forced_plan,
+            agent_plan=decision.forced_plan,
             web_enabled=web_enabled,
             explicit_web_search=explicit_web_search,
             max_web_results=max_web_results,
             emit=emit,
             execution_steps=execution_steps,
         )
-        forced_verification = forced_state.get("verification")
-        if (
-            isinstance(forced_verification, VerificationReport)
-            and forced_verification.status == "clarify"
-            and forced_state.get("claims")
-        ):
-            forced_state["verification"] = VerificationReport(
-                status="pass",
-                recommended_action="best_effort_after_clarification_limit",
-            )
-            forced_state["contract"] = forced_state["contract"].model_copy(
-                update={
-                    "notes": list(
-                        dict.fromkeys(
-                            [
-                                *forced_state["contract"].notes,
-                                "clarification_limit_reached",
-                                "best_effort_after_clarification_limit",
-                            ]
-                        )
-                    )
-                }
-            )
-        return forced_state
+        return promote_best_effort_state_after_clarification_limit(forced_state)
 
     def _record_agent_observation(
         self,
