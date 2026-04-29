@@ -49,6 +49,8 @@ from app.services.agent_runtime_helpers import (
     screen_agent_papers,
     search_agent_evidence,
     solve_agent_state_claims,
+    verification_observation_payload,
+    verify_grounding_tool_call_arguments,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
@@ -1049,7 +1051,7 @@ class ResearchAssistantAgentV4(
                 execution_steps=execution_steps,
                 tool="verify_claim",
                 summary=verification.status,
-                payload={"stage": "verify_grounding", **verification.model_dump()},
+                payload=verification_observation_payload(verification),
             )
             return
         contract: QueryContract = state["contract"]
@@ -1060,7 +1062,7 @@ class ResearchAssistantAgentV4(
         self._emit_agent_tool_call(
             emit=emit,
             tool="verify_claim",
-            arguments={"stage": "verify_grounding", "claim_count": len(claims), "required_claims": plan.required_claims},
+            arguments=verify_grounding_tool_call_arguments(plan=plan, claims=claims),
         )
         verification = self._verify_claims(
             contract=contract,
@@ -1087,7 +1089,7 @@ class ResearchAssistantAgentV4(
             execution_steps=execution_steps,
             tool="verify_claim",
             summary=verification.status,
-            payload={"stage": "verify_grounding", **verification.model_dump()},
+            payload=verification_observation_payload(verification),
         )
 
     def _agent_retry_after_verification(

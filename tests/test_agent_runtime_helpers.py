@@ -52,6 +52,8 @@ from app.services.agent_runtime_helpers import (
     solve_agent_state_claims,
     tool_loop_ready_tool,
     verification_execution_step,
+    verification_observation_payload,
+    verify_grounding_tool_call_arguments,
 )
 
 
@@ -633,6 +635,22 @@ def test_runtime_helpers_clarify_retry_verification_for_targeted_research_goals(
         contract=QueryContract(clean_query="继续", targets=[]),
         verification=retry,
     ) is retry
+
+
+def test_runtime_helpers_verify_grounding_event_payloads() -> None:
+    claims = [Claim(claim_type="answer", text="A")]
+    plan = ResearchPlan(required_claims=["answer"])
+    verification = VerificationReport(status="retry", missing_fields=["evidence"], recommended_action="expand")
+
+    assert verify_grounding_tool_call_arguments(plan=plan, claims=claims) == {
+        "stage": "verify_grounding",
+        "claim_count": 1,
+        "required_claims": ["answer"],
+    }
+    assert verification_observation_payload(verification) == {
+        "stage": "verify_grounding",
+        **verification.model_dump(),
+    }
 
 
 def test_runtime_helpers_clarification_limit_decision_uses_first_option() -> None:

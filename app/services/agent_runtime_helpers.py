@@ -722,6 +722,18 @@ def clarify_retry_verification_if_needed(*, contract: QueryContract, verificatio
     return verification
 
 
+def verify_grounding_tool_call_arguments(*, plan: ResearchPlan, claims: list[Claim]) -> dict[str, Any]:
+    return {
+        "stage": "verify_grounding",
+        "claim_count": len(claims),
+        "required_claims": plan.required_claims,
+    }
+
+
+def verification_observation_payload(verification: VerificationReport) -> dict[str, Any]:
+    return {"stage": "verify_grounding", **verification.model_dump()}
+
+
 def clarification_limit_decision(
     *,
     contract: QueryContract,
