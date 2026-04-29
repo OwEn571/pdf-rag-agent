@@ -34,10 +34,14 @@ from app.services.agent_loop import finish_agent_turn, run_compound_turn_if_need
 from app.services.agent_task import run_task_subagent
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
+from app.services.agent_emit import (
+    emit_agent_step as emit_agent_step_event,
+    emit_agent_tool_call as emit_agent_tool_call_event,
+    record_agent_observation as record_agent_observation_event,
+)
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_runtime_summary import build_runtime_summary
-from app.services.agent_step_messages import agent_step_message
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     ambiguity_option_context_text,
@@ -75,7 +79,6 @@ from app.services.compound_intents import should_try_compound_decomposition_heur
 from app.services.compound_task_helpers import compound_task_label, compound_task_result_from_task_payload
 from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
-    canonical_agent_tool,
     canonical_tools,
     contract_answer_slots,
     note_value,
@@ -1378,16 +1381,13 @@ class ResearchAssistantAgentV4(
         summary: str,
         payload: dict[str, Any],
     ) -> None:
-        canonical_tool = canonical_agent_tool(
+        record_agent_observation_event(
+            emit=emit,
+            execution_steps=execution_steps,
             tool=tool,
-            aliases=LEGACY_TOOL_NAME_ALIASES,
-            canonical_names=all_agent_tool_names(),
+            summary=summary,
+            payload=payload,
         )
-        event_payload = dict(payload)
-        if canonical_tool != tool:
-            event_payload.setdefault("raw_tool", tool)
-        emit("observation", {"tool": canonical_tool, "summary": summary, "payload": event_payload})
-        execution_steps.append({"node": f"agent_tool:{canonical_tool}", "summary": summary})
 
     def _emit_agent_tool_call(
         self,
@@ -1396,15 +1396,7 @@ class ResearchAssistantAgentV4(
         tool: str,
         arguments: dict[str, Any],
     ) -> None:
-        canonical_tool = canonical_agent_tool(
-            tool=tool,
-            aliases=LEGACY_TOOL_NAME_ALIASES,
-            canonical_names=all_agent_tool_names(),
-        )
-        event_arguments = dict(arguments)
-        if canonical_tool != tool:
-            event_arguments.setdefault("raw_tool", tool)
-        emit("tool_call", {"tool": canonical_tool, "arguments": event_arguments})
+        emit_agent_tool_call_event(emit=emit, tool=tool, arguments=arguments)
 
     def _emit_agent_step(
         self,
@@ -1416,14 +1408,12 @@ class ResearchAssistantAgentV4(
         state: dict[str, Any],
         arguments: dict[str, Any] | None = None,
     ) -> None:
-        emit(
-            "agent_step",
-            {
-                "index": index,
-                "action": action,
-                "arguments": dict(arguments or {}),
-                "message": agent_step_message(action=action, contract=contract),
-            },
+        emit_agent_step_event(
+            emit=emit,
+            index=index,
+            action=action,
+            contract=contract,
+            arguments=arguments,
         )
 
     def _agent_search_papers(
