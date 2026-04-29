@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.domain.models import QueryContract
+from app.domain.models import QueryContract, ResearchPlan
 from app.services.agent_runtime_helpers import (
+    agent_loop_summary,
     configured_max_steps,
     contract_needs_human_clarification,
+    conversation_runtime_state,
     next_conversation_action,
     next_research_action,
+    research_runtime_state,
+    tool_loop_ready_tool,
 )
 
 
@@ -16,6 +20,35 @@ def test_runtime_helpers_configure_max_steps() -> None:
     assert configured_max_steps(SimpleNamespace(max_agent_steps="3"), fallback=8) == 3
     assert configured_max_steps(SimpleNamespace(max_agent_steps="bad"), fallback=8) == 8
     assert configured_max_steps(SimpleNamespace(max_agent_steps=0), fallback=8) == 1
+
+
+def test_runtime_helpers_build_initial_conversation_and_research_state() -> None:
+    contract = QueryContract(clean_query="x")
+    agent_plan = {"tool_call_args": [{"name": "fetch_url", "args": {"url": "https://example.com"}}]}
+    plan = ResearchPlan(solver_sequence=["origin_lookup"])
+
+    conversation_state = conversation_runtime_state(contract=contract, agent_plan=agent_plan)
+    research_state = research_runtime_state(
+        contract=contract,
+        plan=plan,
+        excluded_titles={"A"},
+        agent_plan=agent_plan,
+    )
+
+    assert conversation_state["contract"] == contract
+    assert conversation_state["answer"] == ""
+    assert conversation_state["verification_report"] == {
+        "status": "pass",
+        "recommended_action": "conversation_tool_answer",
+    }
+    assert conversation_state["tool_inputs"] == {"fetch_url": {"url": "https://example.com"}}
+    assert research_state["plan"] == plan
+    assert research_state["excluded_titles"] == {"A"}
+    assert research_state["tool_inputs"] == {"fetch_url": {"url": "https://example.com"}}
+    assert research_state["verification"] is None
+    assert agent_loop_summary(["read_memory", "compose"]) == "read_memory -> compose"
+    assert tool_loop_ready_tool(["search_corpus", "compose"]) == "search_corpus"
+    assert tool_loop_ready_tool(["compose"]) == "compose"
 
 
 def test_runtime_helpers_detect_clarification_need_from_contract_confidence() -> None:

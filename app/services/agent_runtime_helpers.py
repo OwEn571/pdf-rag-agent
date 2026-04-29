@@ -4,6 +4,52 @@ from typing import Any
 
 from app.domain.models import QueryContract
 from app.services.confidence import confidence_from_contract, should_ask_human
+from app.services.tool_registry_helpers import tool_inputs_by_name
+
+
+def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract": contract,
+        "answer": "",
+        "citations": [],
+        "verification_report": {"status": "pass", "recommended_action": "conversation_tool_answer"},
+        "citation_candidates": [],
+        "citation_lookup": {},
+        "tool_inputs": tool_inputs_by_name(agent_plan),
+        "current_tool_input": {},
+    }
+
+
+def research_runtime_state(
+    *,
+    contract: QueryContract,
+    plan: Any,
+    excluded_titles: set[str],
+    agent_plan: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "contract": contract,
+        "plan": plan,
+        "candidate_papers": [],
+        "screened_papers": [],
+        "precomputed_evidence": None,
+        "evidence": [],
+        "web_evidence": [],
+        "claims": [],
+        "verification": None,
+        "reflection": {},
+        "excluded_titles": excluded_titles,
+        "tool_inputs": tool_inputs_by_name(agent_plan),
+        "current_tool_input": {},
+    }
+
+
+def agent_loop_summary(actions: list[str]) -> str:
+    return " -> ".join(actions)
+
+
+def tool_loop_ready_tool(actions: list[str]) -> str:
+    return "search_corpus" if "search_corpus" in actions else "compose"
 
 
 def configured_max_steps(agent_settings: Any, *, fallback: int) -> int:

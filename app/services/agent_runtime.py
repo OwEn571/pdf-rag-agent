@@ -15,9 +15,13 @@ from app.services.agent_tools import (
     research_tool_sequence,
 )
 from app.services.agent_runtime_helpers import (
+    agent_loop_summary,
     configured_max_steps,
+    conversation_runtime_state,
     next_conversation_action,
     next_research_action,
+    research_runtime_state,
+    tool_loop_ready_tool,
 )
 from app.services.confidence import (
     confidence_from_verification_report,
@@ -25,7 +29,6 @@ from app.services.confidence import (
 )
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
-    tool_inputs_by_name,
     tool_loop_ready_observation,
 )
 
@@ -49,21 +52,12 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         planned_actions = [str(item) for item in list(agent_plan.get("actions", []) or [])]
         actions = conversation_tool_sequence(relation=contract.relation, planned_actions=planned_actions)
-        state: dict[str, Any] = {
-            "contract": contract,
-            "answer": "",
-            "citations": [],
-            "verification_report": {"status": "pass", "recommended_action": "conversation_tool_answer"},
-            "citation_candidates": [],
-            "citation_lookup": {},
-            "tool_inputs": tool_inputs_by_name(agent_plan),
-            "current_tool_input": {},
-        }
+        state = conversation_runtime_state(contract=contract, agent_plan=agent_plan)
         emit(
             "observation",
             tool_loop_ready_observation(tool="compose", actions=actions, tool_inputs=state["tool_inputs"]),
         )
-        execution_steps.append({"node": "agent_loop", "summary": " -> ".join(actions)})
+        execution_steps.append({"node": "agent_loop", "summary": agent_loop_summary(actions)})
         tools = build_conversation_tool_registry(
             agent=self.agent,
             state=state,
@@ -109,21 +103,12 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         plan = self.agent._build_research_plan(contract)
         excluded_titles = self.agent._excluded_focus_titles(session=session, contract=contract)
-        state: dict[str, Any] = {
-            "contract": contract,
-            "plan": plan,
-            "candidate_papers": [],
-            "screened_papers": [],
-            "precomputed_evidence": None,
-            "evidence": [],
-            "web_evidence": [],
-            "claims": [],
-            "verification": None,
-            "reflection": {},
-            "excluded_titles": excluded_titles,
-            "tool_inputs": tool_inputs_by_name(agent_plan),
-            "current_tool_input": {},
-        }
+        state = research_runtime_state(
+            contract=contract,
+            plan=plan,
+            excluded_titles=excluded_titles,
+            agent_plan=agent_plan,
+        )
         emit("plan", plan.model_dump())
         execution_steps.append({"node": "agent_tool:build_research_plan", "summary": ",".join(plan.solver_sequence)})
 
@@ -134,12 +119,15 @@ class AgentRuntime:
             needs_reflection="exclude_previous_focus" in contract.notes
             or self.agent._is_negative_correction_query(contract.clean_query),
         )
-        ready_tool = "search_corpus" if "search_corpus" in actions else "compose"
         emit(
             "observation",
-            tool_loop_ready_observation(tool=ready_tool, actions=actions, tool_inputs=state["tool_inputs"]),
+            tool_loop_ready_observation(
+                tool=tool_loop_ready_tool(actions),
+                actions=actions,
+                tool_inputs=state["tool_inputs"],
+            ),
         )
-        execution_steps.append({"node": "agent_loop", "summary": " -> ".join(actions)})
+        execution_steps.append({"node": "agent_loop", "summary": agent_loop_summary(actions)})
 
         tools = build_research_tool_registry(
             agent=self.agent,
