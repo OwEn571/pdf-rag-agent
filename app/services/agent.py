@@ -40,14 +40,11 @@ from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_step_messages import agent_step_message
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
-    CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
     ambiguity_options_from_notes,
-    clarification_option_description,
-    clarification_option_id,
     clarification_option_public_payload,
-    clarification_string_list,
+    clarification_options_from_contract_notes,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     disambiguation_goal_markers,
@@ -56,6 +53,7 @@ from app.services.clarification_intents import (
     disambiguation_missing_fields,
     extract_acronym_expansion_from_text,
     normalize_acronym_meaning,
+    normalize_clarification_options,
     option_from_clarification_choice,
     select_pending_clarification_option,
     selected_option_from_judge_decision,
@@ -2486,7 +2484,7 @@ class ResearchAssistantAgentV4(
             options = matched
         if "exclude_previous_focus" in contract.notes and len(options) <= 1:
             return []
-        return self._normalize_clarification_options(
+        return normalize_clarification_options(
             options[:4],
             contract=contract,
             target=target,
@@ -2816,93 +2814,7 @@ class ResearchAssistantAgentV4(
         return contract_with_ambiguity_options(contract=contract, options=options)
 
     def _clarification_options(self, contract: QueryContract) -> list[dict[str, Any]]:
-        options = ambiguity_options_from_notes(contract.notes)
-        target = contract.targets[0] if contract.targets else ""
-        return self._normalize_clarification_options(
-            options,
-            contract=contract,
-            target=target,
-            kind="acronym_meaning",
-            source="contract_notes",
-        )
-
-    def _normalize_clarification_options(
-        self,
-        options: list[dict[str, Any]],
-        *,
-        contract: QueryContract,
-        target: str = "",
-        kind: str = "paper_choice",
-        source: str = "clarification",
-    ) -> list[dict[str, Any]]:
-        normalized: list[dict[str, Any]] = []
-        for index, option in enumerate(options):
-            normalized.append(
-                self._normalize_clarification_option(
-                    option,
-                    index=index,
-                    contract=contract,
-                    target=target,
-                    kind=kind,
-                    source=source,
-                )
-            )
-        return normalized
-
-    def _normalize_clarification_option(
-        self,
-        option: dict[str, Any],
-        *,
-        index: int,
-        contract: QueryContract,
-        target: str = "",
-        kind: str = "paper_choice",
-        source: str = "clarification",
-    ) -> dict[str, Any]:
-        payload = dict(option)
-        resolved_target = str(payload.get("target", "") or target or (contract.targets[0] if contract.targets else "") or "").strip()
-        resolved_kind = str(payload.get("kind", "") or kind or "paper_choice").strip()
-        meaning = str(payload.get("meaning", "") or "").strip()
-        title = str(payload.get("title", "") or "").strip()
-        year = str(payload.get("year", "") or "").strip()
-        label = str(payload.get("label", "") or meaning or title or resolved_target or f"option {index + 1}").strip()
-        description = str(payload.get("description", "") or "").strip()
-        if not description:
-            description = clarification_option_description(payload, title=title, year=year)
-        payload["schema_version"] = CLARIFICATION_OPTION_SCHEMA_VERSION
-        payload["index"] = index
-        payload["kind"] = resolved_kind
-        payload["target"] = resolved_target
-        payload["label"] = label
-        payload["description"] = truncate_context_text(description, limit=260) if description else ""
-        payload.setdefault("meaning", meaning or label)
-        payload.setdefault("title", title)
-        payload.setdefault("year", year)
-        payload["display_title"] = str(payload.get("display_title", "") or title).strip()
-        payload["display_label"] = str(payload.get("display_label", "") or "").strip()
-        payload["display_reason"] = truncate_context_text(str(payload.get("display_reason", "") or ""), limit=220)
-        if "disambiguation_confidence" in payload:
-            try:
-                payload["disambiguation_confidence"] = round(float(payload.get("disambiguation_confidence") or 0.0), 3)
-            except (TypeError, ValueError):
-                payload.pop("disambiguation_confidence", None)
-        payload.setdefault("source", source)
-        payload["source_relation"] = str(payload.get("source_relation", "") or contract.relation)
-        payload["source_requested_fields"] = clarification_string_list(payload.get("source_requested_fields") or contract.requested_fields)
-        payload["source_required_modalities"] = clarification_string_list(payload.get("source_required_modalities") or contract.required_modalities)
-        payload["source_answer_slots"] = clarification_string_list(payload.get("source_answer_slots") or contract.answer_slots)
-        payload["paper_ids"] = clarification_string_list(payload.get("paper_ids"))
-        payload["titles"] = clarification_string_list(payload.get("titles"))
-        payload["evidence_ids"] = clarification_string_list(payload.get("evidence_ids"))
-        payload["option_id"] = str(payload.get("option_id", "") or "").strip() or clarification_option_id(
-            kind=resolved_kind,
-            target=resolved_target,
-            label=label,
-            paper_id=str(payload.get("paper_id", "") or ""),
-            title=title,
-            index=index,
-        )
-        return payload
+        return clarification_options_from_contract_notes(contract)
 
     def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
         options = self._clarification_options(contract)
@@ -3459,7 +3371,7 @@ class ResearchAssistantAgentV4(
             ambiguity_options = list(session.pending_clarification_options)
         if ambiguity_options:
             target = contract.targets[0] if contract.targets else "这个缩写"
-            ambiguity_options = self._normalize_clarification_options(
+            ambiguity_options = normalize_clarification_options(
                 ambiguity_options,
                 contract=contract,
                 target=target,

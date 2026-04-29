@@ -14,6 +14,7 @@ from app.services.clarification_intents import (
     clarification_option_description,
     clarification_option_id,
     clarification_option_public_payload,
+    clarification_options_from_contract_notes,
     clarification_string_list,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
@@ -23,6 +24,7 @@ from app.services.clarification_intents import (
     extract_acronym_expansion_from_text,
     looks_like_clarification_choice_text,
     normalize_acronym_meaning,
+    normalize_clarification_options,
     option_from_clarification_choice,
     pending_clarification_selection_index,
     select_pending_clarification_option,
@@ -155,6 +157,45 @@ def test_contract_with_ambiguity_options_replaces_old_option_notes() -> None:
     payload = json.loads(updated.notes[1].split("=", 1)[1])
     assert payload["title"] == "New"
     assert "debug" not in payload
+
+
+def test_normalize_clarification_options_fills_protocol_fields() -> None:
+    contract = QueryContract(
+        clean_query="PBA是什么",
+        relation="entity_definition",
+        targets=["PBA"],
+        requested_fields=["definition"],
+        required_modalities=["page_text"],
+        answer_slots=["definition"],
+    )
+    options = normalize_clarification_options(
+        [{"paper_id": "p1", "title": "AlignX", "year": "2025", "meaning": "Preference Bridged Alignment"}],
+        contract=contract,
+        kind="acronym_meaning",
+        source="unit_test",
+    )
+
+    assert options[0]["schema_version"] == CLARIFICATION_OPTION_SCHEMA_VERSION
+    assert options[0]["target"] == "PBA"
+    assert options[0]["label"] == "Preference Bridged Alignment"
+    assert options[0]["source"] == "unit_test"
+    assert options[0]["source_requested_fields"] == ["definition"]
+    assert options[0]["source_required_modalities"] == ["page_text"]
+    assert options[0]["source_answer_slots"] == ["definition"]
+    assert options[0]["option_id"].startswith("acronym-meaning-pba-")
+
+
+def test_clarification_options_from_contract_notes_normalizes_payloads() -> None:
+    contract = contract_with_ambiguity_options(
+        contract=QueryContract(clean_query="PBA是什么", relation="entity_definition", targets=["PBA"]),
+        options=[{"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"}],
+    )
+
+    options = clarification_options_from_contract_notes(contract)
+
+    assert options[0]["kind"] == "acronym_meaning"
+    assert "source" in options[0]
+    assert options[0]["target"] == "PBA"
 
 
 def test_contract_from_selected_clarification_option_preserves_formula_slots() -> None:

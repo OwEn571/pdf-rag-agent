@@ -425,6 +425,93 @@ def ambiguity_option_matches_context(*, option: dict[str, Any], context_targets:
     return any(matches_target(text, str(target)) for target in context_targets if str(target).strip())
 
 
+def normalize_clarification_option(
+    option: dict[str, Any],
+    *,
+    index: int,
+    contract: QueryContract,
+    target: str = "",
+    kind: str = "paper_choice",
+    source: str = "clarification",
+) -> dict[str, Any]:
+    payload = dict(option)
+    resolved_target = str(payload.get("target", "") or target or (contract.targets[0] if contract.targets else "") or "").strip()
+    resolved_kind = str(payload.get("kind", "") or kind or "paper_choice").strip()
+    meaning = str(payload.get("meaning", "") or "").strip()
+    title = str(payload.get("title", "") or "").strip()
+    year = str(payload.get("year", "") or "").strip()
+    label = str(payload.get("label", "") or meaning or title or resolved_target or f"option {index + 1}").strip()
+    description = str(payload.get("description", "") or "").strip()
+    if not description:
+        description = clarification_option_description(payload, title=title, year=year)
+    payload["schema_version"] = CLARIFICATION_OPTION_SCHEMA_VERSION
+    payload["index"] = index
+    payload["kind"] = resolved_kind
+    payload["target"] = resolved_target
+    payload["label"] = label
+    payload["description"] = truncate_context_text(description, limit=260) if description else ""
+    payload.setdefault("meaning", meaning or label)
+    payload.setdefault("title", title)
+    payload.setdefault("year", year)
+    payload["display_title"] = str(payload.get("display_title", "") or title).strip()
+    payload["display_label"] = str(payload.get("display_label", "") or "").strip()
+    payload["display_reason"] = truncate_context_text(str(payload.get("display_reason", "") or ""), limit=220)
+    if "disambiguation_confidence" in payload:
+        try:
+            payload["disambiguation_confidence"] = round(float(payload.get("disambiguation_confidence") or 0.0), 3)
+        except (TypeError, ValueError):
+            payload.pop("disambiguation_confidence", None)
+    payload.setdefault("source", source)
+    payload["source_relation"] = str(payload.get("source_relation", "") or contract.relation)
+    payload["source_requested_fields"] = clarification_string_list(payload.get("source_requested_fields") or contract.requested_fields)
+    payload["source_required_modalities"] = clarification_string_list(payload.get("source_required_modalities") or contract.required_modalities)
+    payload["source_answer_slots"] = clarification_string_list(payload.get("source_answer_slots") or contract.answer_slots)
+    payload["paper_ids"] = clarification_string_list(payload.get("paper_ids"))
+    payload["titles"] = clarification_string_list(payload.get("titles"))
+    payload["evidence_ids"] = clarification_string_list(payload.get("evidence_ids"))
+    payload["option_id"] = str(payload.get("option_id", "") or "").strip() or clarification_option_id(
+        kind=resolved_kind,
+        target=resolved_target,
+        label=label,
+        paper_id=str(payload.get("paper_id", "") or ""),
+        title=title,
+        index=index,
+    )
+    return payload
+
+
+def normalize_clarification_options(
+    options: list[dict[str, Any]],
+    *,
+    contract: QueryContract,
+    target: str = "",
+    kind: str = "paper_choice",
+    source: str = "clarification",
+) -> list[dict[str, Any]]:
+    return [
+        normalize_clarification_option(
+            option,
+            index=index,
+            contract=contract,
+            target=target,
+            kind=kind,
+            source=source,
+        )
+        for index, option in enumerate(options)
+    ]
+
+
+def clarification_options_from_contract_notes(contract: QueryContract) -> list[dict[str, Any]]:
+    target = contract.targets[0] if contract.targets else ""
+    return normalize_clarification_options(
+        ambiguity_options_from_notes(contract.notes),
+        contract=contract,
+        target=target,
+        kind="acronym_meaning",
+        source="contract_notes",
+    )
+
+
 def selected_clarification_paper_id(contract: QueryContract) -> str:
     for note in contract.notes:
         raw = str(note or "")
