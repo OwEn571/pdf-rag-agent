@@ -177,19 +177,7 @@ class SolverPipelineMixin:
         if selected is None:
             return []
         supporting_ids = self._evidence_ids_for_paper(evidence, selected.paper_id, limit=2)
-        if not supporting_ids and selected.doc_ids:
-            supporting_ids = list(selected.doc_ids[:1])
-        return [
-            Claim(
-                claim_type="origin",
-                entity=self._origin_display_entity(contract=contract, paper=selected),
-                value=selected.title,
-                structured_data={"year": selected.year, "paper_title": selected.title},
-                evidence_ids=supporting_ids,
-                paper_ids=[selected.paper_id],
-                confidence=0.94,
-            )
-        ]
+        return [origin_helpers.origin_lookup_claim(contract=contract, paper=selected, evidence_ids=supporting_ids)]
 
     def _solve_entity_definition_text(
         self,
@@ -510,9 +498,6 @@ class SolverPipelineMixin:
     @staticmethod
     def _origin_target_aliases(targets: list[str]) -> list[str]:
         return origin_helpers.origin_target_aliases(targets)
-
-    def _origin_display_entity(self, *, contract: QueryContract, paper: CandidatePaper) -> str:
-        return origin_helpers.origin_display_entity(targets=contract.targets, paper=paper)
 
     def _origin_target_intro_score(self, text: str, aliases: list[str]) -> float:
         return origin_helpers.origin_target_intro_score(text, aliases)

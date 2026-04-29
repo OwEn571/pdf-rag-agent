@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from app.domain.models import CandidatePaper
+from app.domain.models import CandidatePaper, Claim, QueryContract
 
 
 def origin_paper_text(paper: CandidatePaper) -> str:
@@ -67,6 +67,18 @@ def origin_display_entity(*, targets: list[str], paper: CandidatePaper) -> str:
         if match:
             return " ".join(match.group(0).split())
     return fallback
+
+
+def origin_lookup_claim(*, contract: QueryContract, paper: CandidatePaper, evidence_ids: list[str]) -> Claim:
+    return Claim(
+        claim_type="origin",
+        entity=origin_display_entity(targets=contract.targets, paper=paper),
+        value=paper.title,
+        structured_data={"year": paper.year, "paper_title": paper.title},
+        evidence_ids=list(evidence_ids) or list(paper.doc_ids[:1]),
+        paper_ids=[paper.paper_id],
+        confidence=0.94,
+    )
 
 
 def origin_target_intro_score(text: str, aliases: list[str]) -> float:
