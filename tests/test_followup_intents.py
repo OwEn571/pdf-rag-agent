@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.followup_intents import (
+    FOLLOWUP_INTENT_MARKERS,
     formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
@@ -12,6 +13,17 @@ from app.services.followup_intents import (
     looks_like_formula_location_correction,
     looks_like_paper_scope_correction,
 )
+from app.services.intent_marker_matching import query_matches_any
+
+
+def test_followup_intent_markers_use_centralized_profiles() -> None:
+    assert query_matches_any("不对", "不对", FOLLOWUP_INTENT_MARKERS["negative_correction"])
+    assert query_matches_any(
+        "怎么理解",
+        "怎么理解",
+        FOLLOWUP_INTENT_MARKERS["formula_interpretation"],
+    )
+    assert not query_matches_any("随便聊聊", "随便聊聊", FOLLOWUP_INTENT_MARKERS["language_research"])
 
 
 def test_followup_intents_detect_corrections_and_context() -> None:
