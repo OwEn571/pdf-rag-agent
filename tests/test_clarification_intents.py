@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 
-from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
     ambiguity_options_from_notes,
+    clarification_tracking_key,
     candidate_origin_signal_score,
     candidate_title_alignment_score,
     candidate_usage_signal_score,
@@ -18,6 +19,7 @@ from app.services.clarification_intents import (
     clarification_string_list,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
+    clear_pending_clarification,
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
     disambiguation_missing_fields,
@@ -25,11 +27,15 @@ from app.services.clarification_intents import (
     looks_like_clarification_choice_text,
     normalize_acronym_meaning,
     normalize_clarification_options,
+    next_clarification_attempt,
     option_from_clarification_choice,
     pending_clarification_selection_index,
+    remember_clarification_attempt,
+    reset_clarification_tracking,
     select_pending_clarification_option,
     selected_option_from_judge_decision,
     selected_clarification_paper_id,
+    store_pending_clarification,
 )
 
 
@@ -296,3 +302,41 @@ def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
 
     assert disambiguation_missing_fields(contract) == ["target"]
     assert disambiguation_missing_fields(QueryContract(clean_query="PBA是什么")) == ["disambiguation"]
+
+
+def test_clarification_tracking_helpers_manage_attempts() -> None:
+    session = SessionContext(session_id="s1")
+    contract = QueryContract(clean_query="PBA是什么", relation="entity_definition", targets=["PBA"])
+    verification = VerificationReport(status="clarify", missing_fields=["target"], recommended_action="clarify_ambiguous_entity")
+    key = clarification_tracking_key(
+        contract=contract,
+        verification=verification,
+        options=[{"option_id": "pba-alignx"}],
+    )
+
+    assert next_clarification_attempt(session=session, key=key) == 1
+    remember_clarification_attempt(session=session, key=key)
+    assert session.last_clarification_key == key
+    assert session.clarification_attempts == 1
+    assert next_clarification_attempt(session=session, key=key) == 2
+    remember_clarification_attempt(session=session, key=key)
+    assert session.clarification_attempts == 2
+    reset_clarification_tracking(session)
+    assert session.last_clarification_key == ""
+    assert session.clarification_attempts == 0
+
+
+def test_pending_clarification_helpers_store_and_clear_session_state() -> None:
+    session = SessionContext(session_id="s1")
+    contract = QueryContract(clean_query="PBA是什么", targets=["PBA"])
+    options = [{"option_id": "pba-alignx", "title": "AlignX"}]
+
+    store_pending_clarification(session=session, contract=contract, options=options)
+    assert session.pending_clarification_type == "ambiguity"
+    assert session.pending_clarification_target == "PBA"
+    assert session.pending_clarification_options == options
+
+    clear_pending_clarification(session)
+    assert session.pending_clarification_type == ""
+    assert session.pending_clarification_target == ""
+    assert session.pending_clarification_options == []

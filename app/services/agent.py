@@ -43,8 +43,10 @@ from app.services.clarification_intents import (
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
     ambiguity_options_from_notes,
+    clarification_tracking_key,
     clarification_option_public_payload,
     clarification_options_from_contract_notes,
+    clear_pending_clarification,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     disambiguation_goal_markers,
@@ -54,10 +56,14 @@ from app.services.clarification_intents import (
     extract_acronym_expansion_from_text,
     normalize_acronym_meaning,
     normalize_clarification_options,
+    next_clarification_attempt,
     option_from_clarification_choice,
+    remember_clarification_attempt,
+    reset_clarification_tracking,
     select_pending_clarification_option,
     selected_option_from_judge_decision,
     selected_clarification_paper_id,
+    store_pending_clarification,
 )
 from app.services.citation_ranking import (
     extract_citation_count_from_evidence,
@@ -2394,9 +2400,7 @@ class ResearchAssistantAgentV4(
         verification: VerificationReport,
     ) -> int:
         key = self._clarification_key(contract=contract, verification=verification)
-        if key and key == session.last_clarification_key:
-            return session.clarification_attempts + 1
-        return 1
+        return next_clarification_attempt(session=session, key=key)
 
     def _remember_clarification_attempt(
         self,
@@ -2406,33 +2410,17 @@ class ResearchAssistantAgentV4(
         verification: VerificationReport,
     ) -> None:
         key = self._clarification_key(contract=contract, verification=verification)
-        if key and key == session.last_clarification_key:
-            session.clarification_attempts += 1
-        else:
-            session.last_clarification_key = key
-            session.clarification_attempts = 1
+        remember_clarification_attempt(session=session, key=key)
 
     @staticmethod
     def _reset_clarification_tracking(session: SessionContext) -> None:
-        session.last_clarification_key = ""
-        session.clarification_attempts = 0
+        reset_clarification_tracking(session)
 
     def _clarification_key(self, *, contract: QueryContract, verification: VerificationReport) -> str:
-        options = self._clarification_options(contract)
-        option_key = "|".join(
-            str(option.get("option_id") or option.get("paper_id") or option.get("meaning") or option.get("title") or "")
-            for option in options[:4]
-        )
-        target_key = ",".join(normalize_lookup_text(item) for item in contract.targets if item)
-        missing_key = ",".join(str(item) for item in verification.missing_fields)
-        return "|".join(
-            [
-                contract.relation,
-                target_key,
-                verification.recommended_action,
-                missing_key,
-                option_key,
-            ]
+        return clarification_tracking_key(
+            contract=contract,
+            verification=verification,
+            options=self._clarification_options(contract),
         )
 
     def _disambiguation_options_from_evidence(
@@ -2818,18 +2806,11 @@ class ResearchAssistantAgentV4(
 
     def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
         options = self._clarification_options(contract)
-        if options:
-            session.pending_clarification_type = "ambiguity"
-            session.pending_clarification_target = contract.targets[0] if contract.targets else ""
-            session.pending_clarification_options = options
-        else:
-            self._clear_pending_clarification(session)
+        store_pending_clarification(session=session, contract=contract, options=options)
 
     @staticmethod
     def _clear_pending_clarification(session: SessionContext) -> None:
-        session.pending_clarification_type = ""
-        session.pending_clarification_target = ""
-        session.pending_clarification_options = []
+        clear_pending_clarification(session)
 
     @staticmethod
     def _make_active_research(

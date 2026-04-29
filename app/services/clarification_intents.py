@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any
 
-from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.query_shaping import matches_target
 from app.services.session_context_helpers import truncate_context_text
@@ -510,6 +510,63 @@ def clarification_options_from_contract_notes(contract: QueryContract) -> list[d
         kind="acronym_meaning",
         source="contract_notes",
     )
+
+
+def clarification_tracking_key(
+    *,
+    contract: QueryContract,
+    verification: VerificationReport,
+    options: list[dict[str, Any]],
+) -> str:
+    option_key = "|".join(
+        str(option.get("option_id") or option.get("paper_id") or option.get("meaning") or option.get("title") or "")
+        for option in options[:4]
+    )
+    target_key = ",".join(normalize_lookup_text(item) for item in contract.targets if item)
+    missing_key = ",".join(str(item) for item in verification.missing_fields)
+    return "|".join(
+        [
+            contract.relation,
+            target_key,
+            verification.recommended_action,
+            missing_key,
+            option_key,
+        ]
+    )
+
+
+def next_clarification_attempt(*, session: SessionContext, key: str) -> int:
+    if key and key == session.last_clarification_key:
+        return session.clarification_attempts + 1
+    return 1
+
+
+def remember_clarification_attempt(*, session: SessionContext, key: str) -> None:
+    if key and key == session.last_clarification_key:
+        session.clarification_attempts += 1
+    else:
+        session.last_clarification_key = key
+        session.clarification_attempts = 1
+
+
+def reset_clarification_tracking(session: SessionContext) -> None:
+    session.last_clarification_key = ""
+    session.clarification_attempts = 0
+
+
+def store_pending_clarification(*, session: SessionContext, contract: QueryContract, options: list[dict[str, Any]]) -> None:
+    if options:
+        session.pending_clarification_type = "ambiguity"
+        session.pending_clarification_target = contract.targets[0] if contract.targets else ""
+        session.pending_clarification_options = options
+    else:
+        clear_pending_clarification(session)
+
+
+def clear_pending_clarification(session: SessionContext) -> None:
+    session.pending_clarification_type = ""
+    session.pending_clarification_target = ""
+    session.pending_clarification_options = []
 
 
 def selected_clarification_paper_id(contract: QueryContract) -> str:
