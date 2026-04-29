@@ -37,7 +37,7 @@ from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
-from app.services.agent_tools import agent_tool_manifest
+from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_options_from_notes,
@@ -162,30 +162,6 @@ CANONICAL_TOOL_ALIASES = {
     "clarification_limit": "ask_human",
     "retry_research": "search_corpus",
 }
-CANONICAL_TOOL_NAMES = {
-    "read_memory",
-    "search_corpus",
-    "bm25_search",
-    "vector_search",
-    "hybrid_search",
-    "rerank",
-    "read_pdf_page",
-    "grep_corpus",
-    "query_rewrite",
-    "summarize",
-    "verify_claim",
-    "web_search",
-    "fetch_url",
-    "query_library_metadata",
-    "compose",
-    "todo_write",
-    "remember",
-    "propose_tool",
-    "Task",
-    "ask_human",
-}
-
-
 def _subprocess_command_allowed(command: list[str]) -> bool:
     if not command:
         return False
@@ -449,6 +425,7 @@ class ResearchAssistantAgentV4(
                 continue
             source = str(dict(claim.structured_data or {}).get("source") or "legacy_solver")
             claim_source_counts[source] = claim_source_counts.get(source, 0) + 1
+        canonical_tool_names = all_agent_tool_names()
         summary = {
             "intent": {
                 "kind": self._note_value(notes=notes, prefix="intent_kind=") or self._intent_kind_from_contract(contract),
@@ -472,7 +449,7 @@ class ResearchAssistantAgentV4(
                 "raw_planned_tools": [str(item) for item in planned_raw],
                 "raw_observed_tools": observed_raw,
                 "legacy_tools": [
-                    tool for tool in observed_raw if tool not in CANONICAL_TOOL_NAMES and tool not in {"agent_loop", "conversation_agent_loop"}
+                    tool for tool in observed_raw if tool not in canonical_tool_names and tool not in {"agent_loop", "conversation_agent_loop"}
                 ],
             },
             "grounding": {
@@ -522,7 +499,7 @@ class ResearchAssistantAgentV4(
         return canonical_tools(
             raw_tools=raw_tools,
             aliases=CANONICAL_TOOL_ALIASES,
-            canonical_names=CANONICAL_TOOL_NAMES,
+            canonical_names=all_agent_tool_names(),
         )
 
     @staticmethod
@@ -1733,7 +1710,7 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _canonical_agent_tool(tool: str) -> str:
-        if tool in CANONICAL_TOOL_NAMES:
+        if tool in all_agent_tool_names():
             return tool
         return CANONICAL_TOOL_ALIASES.get(tool, "compose")
 
