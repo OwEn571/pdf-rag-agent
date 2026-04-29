@@ -4,6 +4,7 @@ from app.domain.models import SessionContext
 from app.services.memory_artifact_helpers import (
     answer_from_recent_tool_artifact_reference,
     chinese_ordinal_value,
+    conversation_tool_result_artifact,
     latest_list_tool_artifact,
     referenced_list_item_index,
 )
@@ -72,3 +73,31 @@ def test_answer_from_recent_tool_artifact_reference_reports_out_of_range() -> No
     )
 
     assert "找不到第 3 条" in answer_from_recent_tool_artifact_reference(query="第三条", session=session)
+
+
+def test_conversation_tool_result_artifact_compacts_tabular_sql_rows() -> None:
+    artifact = conversation_tool_result_artifact(
+        tool="query_library_metadata",
+        result={
+            "sql": "select title, year from papers order by year desc",
+            "columns": ["title", "year", "score"],
+            "row_count": 2,
+            "rows": [
+                {"paper_id": "p1", "title": "First Paper", "year": "2025", "score": 0.9},
+                {"paper_id": "p2", "title": "Second " * 200, "year_int": 2024, "score": None},
+            ],
+        },
+    )
+
+    assert artifact["type"] == "tabular_sql_result"
+    assert artifact["row_count"] == 2
+    assert artifact["columns"] == ["title", "year", "score"]
+    assert artifact["items"][0]["ordinal"] == 1
+    assert artifact["items"][0]["paper_id"] == "p1"
+    assert artifact["items"][0]["row"]["score"] == 0.9
+    assert artifact["items"][1]["year_int"] == 2024
+    assert len(artifact["items"][1]["row"]["title"]) <= 900
+
+
+def test_conversation_tool_result_artifact_ignores_other_tools() -> None:
+    assert conversation_tool_result_artifact(tool="read_memory", result={"rows": [{"title": "Nope"}]}) == {}

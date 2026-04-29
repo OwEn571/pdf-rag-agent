@@ -7,6 +7,7 @@ from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.citation_ranking import format_citation_ranking_answer
 from app.services.evidence_presentation import dedupe_citations
+from app.services.memory_artifact_helpers import conversation_tool_result_artifact
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
@@ -130,7 +131,7 @@ def build_conversation_tool_registry(
         state["library_metadata_result"] = result
         answer = str(result.get("answer", "") or "").strip()
         if answer:
-            artifact = agent._conversation_tool_result_artifact(tool="query_library_metadata", result=result)
+            artifact = conversation_tool_result_artifact(tool="query_library_metadata", result=result)
             store_conversation_answer_result(
                 agent=agent, state=state, session=session, contract=contract, emit=emit,
                 tool="query_library_metadata", query=query, answer=answer, artifact=artifact,

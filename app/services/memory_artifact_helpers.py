@@ -4,6 +4,38 @@ import re
 from typing import Any
 
 from app.domain.models import SessionContext
+from app.services.session_context_helpers import truncate_context_text
+
+
+def conversation_tool_result_artifact(*, tool: str, result: dict[str, Any]) -> dict[str, Any]:
+    if tool != "query_library_metadata" or not isinstance(result, dict):
+        return {}
+    rows = [dict(item) for item in list(result.get("rows", []) or []) if isinstance(item, dict)]
+    items: list[dict[str, Any]] = []
+    for index, row in enumerate(rows[:80], start=1):
+        compact_row: dict[str, Any] = {}
+        for key, value in row.items():
+            if value is None or isinstance(value, (int, float)):
+                compact_row[str(key)] = value
+                continue
+            compact_row[str(key)] = truncate_context_text(str(value), limit=900)
+        item = {
+            "ordinal": index,
+            "row": compact_row,
+        }
+        for key in ["paper_id", "title", "year", "year_int", "authors", "author"]:
+            if key in compact_row:
+                item[key] = compact_row[key]
+        items.append(item)
+    return {
+        "type": "tabular_sql_result",
+        "tool": tool,
+        "sql": truncate_context_text(str(result.get("sql", "") or ""), limit=1200),
+        "columns": [str(item) for item in list(result.get("columns", []) or [])],
+        "row_count": int(result.get("row_count", len(rows)) or 0),
+        "truncated": bool(result.get("truncated", False)),
+        "items": items,
+    }
 
 
 def answer_from_recent_tool_artifact_reference(*, query: str, session: SessionContext) -> str:
