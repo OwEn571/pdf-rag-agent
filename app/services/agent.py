@@ -835,7 +835,7 @@ class ResearchAssistantAgentV4(
         memory = dict((session.working_memory if session is not None else {}) or {})
         bindings = dict(memory.get("target_bindings", {}) or {})
         has_memory_context = bool(bindings or (session is not None and session.effective_active_research().targets))
-        target_count = len({target.lower() for target in self._extract_targets(clean_query)})
+        target_count = len({target.lower() for target in extract_targets(clean_query)})
         return should_try_compound_decomposition_heuristic(
             clean_query,
             normalized_query=normalized,
@@ -1760,7 +1760,7 @@ class ResearchAssistantAgentV4(
         if paper_limit != plan.paper_limit:
             plan = plan.model_copy(update={"paper_limit": paper_limit})
         excluded_titles: set[str] = state["excluded_titles"]
-        paper_query = str(tool_input.get("query", "") or "").strip() or self._paper_query_text(contract)
+        paper_query = str(tool_input.get("query", "") or "").strip() or paper_query_text(contract)
         self._emit_agent_tool_call(
             emit=emit,
             tool="search_corpus",
@@ -1782,7 +1782,7 @@ class ResearchAssistantAgentV4(
         if not candidate_papers and contract.continuation_mode == "followup" and active.targets:
             fallback_contract = contract.model_copy(update={"targets": list(active.targets)})
             candidate_papers = self.retriever.search_papers(
-                query=self._paper_query_text(fallback_contract),
+                query=paper_query_text(fallback_contract),
                 contract=fallback_contract,
                 limit=plan.paper_limit,
             )
@@ -1857,7 +1857,7 @@ class ResearchAssistantAgentV4(
                 excluded_titles=excluded_titles,
             )
             precomputed_evidence = self.retriever.search_entity_evidence(
-                query=self._evidence_query_text(contract),
+                query=evidence_query_text(contract),
                 contract=contract,
                 limit=entity_evidence_limit,
             )
@@ -1892,7 +1892,7 @@ class ResearchAssistantAgentV4(
             plan = plan.model_copy(update={"evidence_limit": evidence_limit})
         screened_papers: list[CandidatePaper] = state["screened_papers"]
         excluded_titles: set[str] = state["excluded_titles"]
-        evidence_query = str(tool_input.get("query", "") or "").strip() or self._evidence_query_text(contract)
+        evidence_query = str(tool_input.get("query", "") or "").strip() or evidence_query_text(contract)
         self._emit_agent_tool_call(
             emit=emit,
             tool="search_corpus",
@@ -1905,7 +1905,7 @@ class ResearchAssistantAgentV4(
             },
         )
         precomputed_evidence = state.get("precomputed_evidence")
-        if self._should_use_concept_evidence(contract):
+        if should_use_concept_evidence(contract):
             evidence = self.retriever.search_concept_evidence(
                 query=evidence_query,
                 contract=contract,
@@ -2194,7 +2194,7 @@ class ResearchAssistantAgentV4(
             },
         )
         broader_candidates = self.retriever.search_papers(
-            query=self._paper_query_text(contract),
+            query=paper_query_text(contract),
             contract=contract,
             limit=max(plan.paper_limit + 4, 10),
         )
@@ -2212,16 +2212,16 @@ class ResearchAssistantAgentV4(
             if selected:
                 broader_candidates = selected
         goals = research_plan_goals(contract)
-        if self._should_use_concept_evidence(contract):
+        if should_use_concept_evidence(contract):
             broader_evidence = self.retriever.search_concept_evidence(
-                query=self._evidence_query_text(contract),
+                query=evidence_query_text(contract),
                 contract=contract,
                 paper_ids=[item.paper_id for item in broader_candidates],
                 limit=max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
             )
         elif goals & {"entity_type", "role_in_context"}:
             broader_evidence = self.retriever.search_entity_evidence(
-                query=self._evidence_query_text(contract),
+                query=evidence_query_text(contract),
                 contract=contract,
                 limit=max(
                     self._entity_evidence_limit(contract=contract, plan=plan, excluded_titles=excluded_titles),
@@ -2242,7 +2242,7 @@ class ResearchAssistantAgentV4(
         else:
             broader_evidence = self.retriever.expand_evidence(
                 paper_ids=[item.paper_id for item in broader_candidates],
-                query=self._evidence_query_text(contract),
+                query=evidence_query_text(contract),
                 contract=contract,
                 limit=max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
             )
@@ -2344,7 +2344,7 @@ class ResearchAssistantAgentV4(
         )
         if clarified_contract is not None:
             return clarified_contract
-        targets = self._extract_targets(clean_query)
+        targets = extract_targets(clean_query)
         contract = self.intent_router.contract_for_query(
             clean_query=clean_query,
             session=session,
@@ -3165,7 +3165,7 @@ class ResearchAssistantAgentV4(
         if not looks_like_contextual_metric_query(
             contract.clean_query,
             targets=list(contract.targets),
-            is_short_acronym=self._is_short_acronym,
+            is_short_acronym=is_short_acronym,
         ):
             return contract
         requested_fields = list(dict.fromkeys([*contract.requested_fields, "metric_value", "setting", "evidence"]))
@@ -3231,7 +3231,7 @@ class ResearchAssistantAgentV4(
                 continue
             if self._normalize_entity_key(candidate) in paper_name_keys:
                 continue
-            if self._is_short_acronym(candidate) or self._normalize_lookup_text(candidate) in active_keys:
+            if is_short_acronym(candidate) or self._normalize_lookup_text(candidate) in active_keys:
                 return candidate
         return str(active.targets[0] or "").strip()
 
@@ -3327,7 +3327,7 @@ class ResearchAssistantAgentV4(
             return None
         target = session.pending_clarification_target or str(selected.get("target", "") or "").strip()
         if not target:
-            target = " ".join(self._extract_targets(clean_query)[:1])
+            target = " ".join(extract_targets(clean_query)[:1])
         return self._contract_from_selected_clarification_option(
             clean_query=clean_query,
             target=target,
@@ -3966,8 +3966,8 @@ class ResearchAssistantAgentV4(
             emit("screened_papers", {"count": len(state["screened_papers"]), "items": [item.model_dump() for item in state["screened_papers"]]})
         evidence = [item for item in list(state.get("evidence") or []) if item.paper_id == paper_id]
         if not evidence:
-            evidence_query = self._evidence_query_text(contract)
-            if self._should_use_concept_evidence(contract):
+            evidence_query = evidence_query_text(contract)
+            if should_use_concept_evidence(contract):
                 evidence = self.retriever.search_concept_evidence(
                     query=evidence_query,
                     contract=contract,
@@ -4004,7 +4004,7 @@ class ResearchAssistantAgentV4(
         if not contract.targets:
             return False
         target = str(contract.targets[0] or "").strip()
-        if not self._is_short_acronym(target):
+        if not is_short_acronym(target):
             return False
         if note_values(notes=contract.notes, prefix="ambiguous_slot="):
             return True
@@ -4389,7 +4389,7 @@ class ResearchAssistantAgentV4(
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
         goals = research_plan_goals(contract)
-        if goals & {"entity_type", "role_in_context"} and contract.targets and self._is_short_acronym(contract.targets[0]):
+        if goals & {"entity_type", "role_in_context"} and contract.targets and is_short_acronym(contract.targets[0]):
             return max(plan.evidence_limit, 96 if excluded_titles else 72)
         return plan.evidence_limit
 
@@ -4513,26 +4513,6 @@ class ResearchAssistantAgentV4(
             session.summary = compressed
         session.turns = session.turns[-retained_turns:]
         self.sessions.upsert(session)
-
-    @staticmethod
-    def _extract_targets(query: str) -> list[str]:
-        return extract_targets(query)
-
-    @staticmethod
-    def _paper_query_text(contract: QueryContract) -> str:
-        return paper_query_text(contract)
-
-    @staticmethod
-    def _evidence_query_text(contract: QueryContract) -> str:
-        return evidence_query_text(contract)
-
-    @staticmethod
-    def _should_use_concept_evidence(contract: QueryContract) -> bool:
-        return should_use_concept_evidence(contract)
-
-    @staticmethod
-    def _is_short_acronym(text: str) -> bool:
-        return is_short_acronym(text)
 
     def _should_use_web_search(self, *, use_web_search: bool, contract: QueryContract) -> bool:
         return should_use_web_search(use_web_search=use_web_search, contract=contract)

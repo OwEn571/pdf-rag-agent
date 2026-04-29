@@ -7,6 +7,7 @@ from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContrac
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
+from app.services.query_shaping import is_short_acronym
 
 
 class ClaimVerifierMixin:
@@ -560,7 +561,7 @@ class ClaimVerifierMixin:
                 return True
             if self._formula_evidence_supports_target(target=target, evidence=claim_evidence):
                 return True
-            if not self._is_short_acronym(target) and self._matches_target(normalized_context, target):
+            if not is_short_acronym(target) and self._matches_target(normalized_context, target):
                 return True
         return False
 
