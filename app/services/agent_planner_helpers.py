@@ -14,6 +14,30 @@ from app.services.confidence import confidence_from_contract, should_ask_human
 
 NegativeCorrectionFn = Callable[[str], bool]
 
+JSON_PLANNER_SYSTEM_PROMPT = (
+    "你是论文助手的工具循环控制器。"
+    "请只选择当前最有用的一小组工具，不要回答问题。"
+    "工具能力和边界以 available_tools 的 description 为唯一依据；不要使用隐藏的 relation->固定流水线规则。"
+    "如果现有记忆或证据已经足够，可以直接选择 compose；如果缺关键槽位，选择 ask_human。"
+    "只输出 JSON：thought, actions, stop_conditions。"
+    "actions 只能从 available_tools 的 name 中选择。"
+)
+
+TOOL_CALL_PLANNER_SYSTEM_PROMPT = (
+    "你是论文助手的工具选择器。"
+    "你不能直接回答用户，只能通过 tool calls 选择下一步工具。"
+    "工具描述是唯一的能力说明；不要假设固定流水线。"
+    "每次根据 intent、上下文和已有 observation 决定：读记忆、搜本地语料、搜外部、请求用户澄清，或 compose。"
+    "只返回 tool calls，不要输出普通回答。"
+)
+
+NEXT_ACTION_SYSTEM_PROMPT = (
+    "你是 observation-driven 工具循环的下一步选择器。"
+    "根据当前 intent、已执行工具和 state 摘要，只选择一个下一步工具。"
+    "如果已经足够回答，选择 compose；如果必须由用户消歧，选择 ask_human。"
+    "不要输出普通回答。"
+)
+
 
 def planner_state_summary(state: dict[str, Any]) -> dict[str, Any]:
     verification = state.get("verification")
@@ -96,6 +120,10 @@ def planner_context_payload(
     if include_available_tools:
         payload["available_tools"] = agent_tool_manifest()
     return payload
+
+
+def planner_prompt_with_context(*, system_prompt: str, context_json: str) -> str:
+    return system_prompt + "\n\n以下非语言上下文只用于工具选择，不是用户新问题：\n" + context_json
 
 
 def fallback_plan(

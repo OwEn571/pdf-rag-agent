@@ -627,6 +627,10 @@ def agent_tool_manifest() -> list[dict[str, Any]]:
     return [spec.manifest_payload() for spec in AGENT_TOOL_SPECS]
 
 
+def agent_tool_manifest_for_names(names: set[str]) -> list[dict[str, Any]]:
+    return [tool for tool in agent_tool_manifest() if str(tool.get("name")) in names]
+
+
 def all_agent_tool_names() -> set[str]:
     return {spec.name for spec in AGENT_TOOL_SPECS}
 

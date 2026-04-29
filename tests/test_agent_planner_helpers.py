@@ -4,10 +4,14 @@ from types import SimpleNamespace
 
 from app.domain.models import QueryContract, VerificationReport
 from app.services.agent_planner_helpers import (
+    JSON_PLANNER_SYSTEM_PROMPT,
+    NEXT_ACTION_SYSTEM_PROMPT,
+    TOOL_CALL_PLANNER_SYSTEM_PROMPT,
     fallback_plan,
     normalize_plan_payload,
     planner_context_payload,
     planner_intent_payload,
+    planner_prompt_with_context,
     planner_state_summary,
     should_fallback_to_human,
 )
@@ -114,3 +118,16 @@ def test_planner_normalize_plan_payload_filters_unknown_actions_and_preserves_to
     }
     assert normalize_plan_payload(payload={"actions": ["not_a_tool"]}, fallback=fallback) is None
     assert normalize_plan_payload(payload="bad", fallback=fallback) is None
+
+
+def test_planner_prompts_keep_tool_loop_contract_and_context_suffix() -> None:
+    prompt = planner_prompt_with_context(
+        system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
+        context_json='{"web_enabled": false}',
+    )
+
+    assert "工具循环控制器" in JSON_PLANNER_SYSTEM_PROMPT
+    assert "tool calls" in TOOL_CALL_PLANNER_SYSTEM_PROMPT
+    assert "下一步工具" in NEXT_ACTION_SYSTEM_PROMPT
+    assert "以下非语言上下文只用于工具选择" in prompt
+    assert '{"web_enabled": false}' in prompt

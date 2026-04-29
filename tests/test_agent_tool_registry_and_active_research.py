@@ -18,6 +18,7 @@ from app.services.session_store import InMemorySessionStore
 from app.services.agent_tools import (
     AgentToolExecutor,
     agent_tool_manifest,
+    agent_tool_manifest_for_names,
     all_agent_tool_names,
     conversation_tool_sequence,
     normalize_plan_actions,
@@ -239,6 +240,7 @@ def test_agent_tool_manifest_and_allowed_sets_share_one_registry() -> None:
     assert task_schema["required"] == ["description", "prompt"]
     fetch_schema = next(item["input_schema"] for item in agent_tool_manifest() if item["name"] == "fetch_url")
     assert fetch_schema["required"] == ["url"]
+    assert [tool["name"] for tool in agent_tool_manifest_for_names({"compose", "not_a_tool"})] == ["compose"]
     assert "search_corpus" in research_execution_tool_names()
     assert all_agent_tool_names() == manifest_names
     assert research_execution_tool_names() <= all_agent_tool_names()

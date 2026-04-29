@@ -4,12 +4,20 @@ import json
 from typing import Any, Callable
 
 from app.domain.models import QueryContract, SessionContext
-from app.services.agent_tools import agent_tool_manifest, normalize_plan_actions
+from app.services.agent_tools import (
+    agent_tool_manifest,
+    agent_tool_manifest_for_names,
+    normalize_plan_actions,
+)
 from app.services.agent_planner_helpers import (
+    JSON_PLANNER_SYSTEM_PROMPT,
+    NEXT_ACTION_SYSTEM_PROMPT,
+    TOOL_CALL_PLANNER_SYSTEM_PROMPT,
     fallback_plan,
     normalize_plan_payload,
     planner_context_payload,
     planner_intent_payload,
+    planner_prompt_with_context,
     planner_state_summary,
 )
 
@@ -66,22 +74,13 @@ class AgentPlanner:
             use_web_search=use_web_search,
             include_available_tools=True,
         )
-        system_prompt = (
-                "你是论文助手的工具循环控制器。"
-                "请只选择当前最有用的一小组工具，不要回答问题。"
-                "工具能力和边界以 available_tools 的 description 为唯一依据；不要使用隐藏的 relation->固定流水线规则。"
-                "如果现有记忆或证据已经足够，可以直接选择 compose；如果缺关键槽位，选择 ask_human。"
-                "只输出 JSON：thought, actions, stop_conditions。"
-                "actions 只能从 available_tools 的 name 中选择。"
-        )
         context_json = json.dumps(context_payload, ensure_ascii=False)
         invoke_json_messages = getattr(self.clients, "invoke_json_messages", None)
         if callable(invoke_json_messages):
             payload = invoke_json_messages(
-                system_prompt=(
-                    system_prompt
-                    + "\n\n以下非语言上下文只用于工具选择，不是用户新问题：\n"
-                    + context_json
+                system_prompt=planner_prompt_with_context(
+                    system_prompt=JSON_PLANNER_SYSTEM_PROMPT,
+                    context_json=context_json,
                 ),
                 messages=[
                     *self.conversation_messages(session),
@@ -91,7 +90,7 @@ class AgentPlanner:
             )
         else:
             payload = self.clients.invoke_json(
-                system_prompt=system_prompt,
+                system_prompt=JSON_PLANNER_SYSTEM_PROMPT,
                 human_prompt=json.dumps(
                     {
                         "query": contract.clean_query,
@@ -127,19 +126,11 @@ class AgentPlanner:
             use_web_search=use_web_search,
             include_available_tools=False,
         )
-        system_prompt = (
-                "你是论文助手的工具选择器。"
-                "你不能直接回答用户，只能通过 tool calls 选择下一步工具。"
-                "工具描述是唯一的能力说明；不要假设固定流水线。"
-                "每次根据 intent、上下文和已有 observation 决定：读记忆、搜本地语料、搜外部、请求用户澄清，或 compose。"
-                "只返回 tool calls，不要输出普通回答。"
-        )
         if callable(planner_messages):
             return planner_messages(
-                system_prompt=(
-                    system_prompt
-                    + "\n\n以下非语言上下文只用于工具选择，不是用户新问题：\n"
-                    + json.dumps(context_payload, ensure_ascii=False)
+                system_prompt=planner_prompt_with_context(
+                    system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
+                    context_json=json.dumps(context_payload, ensure_ascii=False),
                 ),
                 messages=[
                     *self.conversation_messages(session),
@@ -149,7 +140,7 @@ class AgentPlanner:
                 fallback={},
             )
         return planner(
-            system_prompt=system_prompt,
+            system_prompt=TOOL_CALL_PLANNER_SYSTEM_PROMPT,
             human_prompt=json.dumps(
                 {
                     "query": contract.clean_query,
@@ -174,16 +165,11 @@ class AgentPlanner:
         planner = getattr(self.clients, "invoke_tool_plan", None)
         if self.clients.chat is None or not callable(planner):
             return None
-        available_tools = [tool for tool in agent_tool_manifest() if str(tool.get("name")) in allowed_tools]
+        available_tools = agent_tool_manifest_for_names(allowed_tools)
         if not available_tools:
             return None
         payload = planner(
-            system_prompt=(
-                "你是 observation-driven 工具循环的下一步选择器。"
-                "根据当前 intent、已执行工具和 state 摘要，只选择一个下一步工具。"
-                "如果已经足够回答，选择 compose；如果必须由用户消歧，选择 ask_human。"
-                "不要输出普通回答。"
-            ),
+            system_prompt=NEXT_ACTION_SYSTEM_PROMPT,
             human_prompt=json.dumps(
                 {
                     "query": contract.clean_query,
