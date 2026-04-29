@@ -9,6 +9,7 @@ from app.services.clarification_intents import (
     ambiguity_option_matches_context,
     ambiguity_clarification_question,
     ambiguity_options_from_notes,
+    apply_disambiguation_judge_recommendation,
     clarification_tracking_key,
     candidate_origin_signal_score,
     candidate_title_alignment_score,
@@ -19,6 +20,7 @@ from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clarification_string_list,
     contract_from_selected_clarification_option,
+    contract_with_auto_resolved_ambiguity,
     contract_with_ambiguity_options,
     clear_pending_clarification,
     contract_from_pending_clarification,
@@ -26,6 +28,7 @@ from app.services.clarification_intents import (
     disambiguation_judge_summary,
     disambiguation_missing_fields,
     extract_acronym_expansion_from_text,
+    judge_allows_auto_resolve,
     looks_like_clarification_choice_text,
     normalize_acronym_meaning,
     normalize_clarification_options,
@@ -279,6 +282,50 @@ def test_selected_option_and_judge_summary_are_stable() -> None:
     assert selected_option_from_judge_decision(decision=decision, options=options) == options[1]
     assert disambiguation_judge_summary(options=options, judge_decision=decision) == "options=2, judge=ask_human, confidence=0.72"
     assert disambiguation_judge_summary(options=options, judge_decision=None) == "options=2, judge=unavailable"
+
+
+def test_disambiguation_judge_recommendation_and_auto_contract_notes() -> None:
+    options = [
+        {"option_id": "a", "paper_id": "p1", "title": "First", "index": 1},
+        {"option_id": "b", "paper_id": "p2", "title": "Second", "index": 0},
+    ]
+    decision = DisambiguationJudgeDecision(
+        decision="auto_resolve",
+        selected_option_id="b",
+        selected_paper_id="p2",
+        confidence=0.91,
+        reason="Second has direct title alignment.",
+        rejected_options=[{"option_id": "a", "reason": "Only a related usage."}],
+    )
+
+    annotated = apply_disambiguation_judge_recommendation(
+        options=options,
+        decision=decision,
+        recommend_threshold=0.7,
+    )
+    updated = contract_with_auto_resolved_ambiguity(
+        contract=QueryContract(
+            clean_query="PBA是什么",
+            notes=[
+                "keep",
+                "ambiguity_option=old",
+                "selected_paper_id=old",
+                "disambiguation_judge_confidence=0.100",
+            ],
+        ),
+        selected=annotated[0],
+        decision=decision,
+    )
+
+    assert judge_allows_auto_resolve(decision, threshold=0.9)
+    assert annotated[0]["option_id"] == "b"
+    assert annotated[0]["judge_recommended"] is True
+    assert annotated[1]["display_reason"] == "Only a related usage."
+    assert "keep" in updated.notes
+    assert "auto_resolved_by_llm_judge" in updated.notes
+    assert "selected_paper_id=p2" in updated.notes
+    assert "disambiguation_judge_confidence=0.910" in updated.notes
+    assert not any(note.startswith("ambiguity_option=old") for note in updated.notes)
 
 
 def test_acronym_helpers_extract_normalize_and_match_context() -> None:

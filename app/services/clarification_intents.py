@@ -345,6 +345,84 @@ def selected_option_from_judge_decision(
     return None
 
 
+def judge_allows_auto_resolve(
+    decision: DisambiguationJudgeDecision | None,
+    *,
+    threshold: float,
+) -> bool:
+    return (
+        decision is not None
+        and decision.decision == "auto_resolve"
+        and float(decision.confidence) >= threshold
+    )
+
+
+def apply_disambiguation_judge_recommendation(
+    *,
+    options: list[dict[str, Any]],
+    decision: DisambiguationJudgeDecision | None,
+    recommend_threshold: float,
+) -> list[dict[str, Any]]:
+    selected = selected_option_from_judge_decision(decision=decision, options=options)
+    if selected is None or decision is None or float(decision.confidence) < recommend_threshold:
+        return options
+    rejected_reasons = {
+        str(item.option_id or "").strip(): str(item.reason or "").strip()
+        for item in decision.rejected_options
+        if str(item.option_id or "").strip()
+    }
+    selected_id = str(selected.get("option_id", "") or "").strip()
+    annotated: list[dict[str, Any]] = []
+    for option in options:
+        payload = dict(option)
+        option_id = str(payload.get("option_id", "") or "").strip()
+        payload["display_title"] = str(payload.get("display_title", "") or payload.get("title", "") or "").strip()
+        if option_id == selected_id:
+            payload["display_label"] = str(payload.get("display_label", "") or "推荐候选").strip()
+            payload["display_reason"] = truncate_context_text(str(decision.reason or ""), limit=180)
+            payload["judge_recommended"] = True
+            payload["disambiguation_confidence"] = round(float(decision.confidence), 3)
+        elif option_id in rejected_reasons:
+            payload["display_reason"] = truncate_context_text(rejected_reasons[option_id], limit=180)
+        annotated.append(payload)
+    annotated.sort(
+        key=lambda item: (
+            str(item.get("option_id", "") or "") != selected_id,
+            int(item.get("index", 9999) if isinstance(item.get("index"), int) else 9999),
+        )
+    )
+    return annotated
+
+
+def contract_with_auto_resolved_ambiguity(
+    *,
+    contract: QueryContract,
+    selected: dict[str, Any],
+    decision: DisambiguationJudgeDecision | None,
+) -> QueryContract:
+    notes = [
+        str(note).strip()
+        for note in contract.notes
+        if str(note).strip()
+        and not str(note).startswith("ambiguity_option=")
+        and not str(note).startswith("selected_ambiguity_option=")
+        and not str(note).startswith("selected_paper_id=")
+        and not str(note).startswith("disambiguation_judge_")
+    ]
+    selected_payload = clarification_option_public_payload(selected)
+    notes.append("auto_resolved_by_llm_judge")
+    notes.append("selected_ambiguity_option=" + json.dumps(selected_payload, ensure_ascii=False))
+    paper_id = str(selected.get("paper_id", "") or "").strip()
+    if paper_id:
+        notes.append(f"selected_paper_id={paper_id}")
+    if decision is not None:
+        notes.append(f"disambiguation_judge_confidence={float(decision.confidence):.3f}")
+        reason = truncate_context_text(str(decision.reason or ""), limit=220)
+        if reason:
+            notes.append(f"disambiguation_judge_reason={reason}")
+    return contract.model_copy(update={"notes": list(dict.fromkeys(notes))})
+
+
 def disambiguation_judge_summary(
     *,
     options: list[dict[str, Any]],
