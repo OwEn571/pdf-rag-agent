@@ -22,6 +22,35 @@ def target_binding_from_memory(*, session: SessionContext, target: str) -> dict[
     return dict(binding) if isinstance(binding, dict) else None
 
 
+def active_memory_bindings(session: SessionContext) -> list[dict[str, Any]]:
+    bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
+    selected: list[dict[str, Any]] = []
+    for target in session.effective_active_research().targets:
+        binding = bindings.get(normalize_lookup_text(target))
+        if isinstance(binding, dict):
+            selected.append(dict(binding))
+    if len(selected) >= 2:
+        return selected
+    for binding in bindings.values():
+        if isinstance(binding, dict) and binding not in selected:
+            selected.append(dict(binding))
+        if len(selected) >= 4:
+            break
+    return selected
+
+
+def memory_binding_doc_ids(bindings: list[dict[str, Any]]) -> list[str]:
+    doc_ids: list[str] = []
+    for binding in bindings:
+        for doc_id in list(binding.get("evidence_ids", []) or [])[:2]:
+            if str(doc_id).strip():
+                doc_ids.append(str(doc_id).strip())
+        paper_id = str(binding.get("paper_id", "") or "").strip()
+        if paper_id:
+            doc_ids.append(f"paper::{paper_id}")
+    return list(dict.fromkeys(doc_ids))
+
+
 def apply_conversation_memory_to_contract(
     *,
     contract: QueryContract,

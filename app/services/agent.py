@@ -72,6 +72,7 @@ from app.services.contract_normalization import (
     normalize_modalities,
 )
 from app.services.conversation_memory_contract import (
+    active_memory_bindings,
     apply_conversation_memory_to_contract,
     target_binding_from_memory,
 )
@@ -100,7 +101,6 @@ from app.services.evidence_presentation import (
     build_figure_contexts,
     chunk_text,
     citations_from_doc_ids,
-    dedupe_citations,
     paper_recommendation_reason,
     safe_year,
 )
@@ -617,33 +617,6 @@ class ResearchAssistantAgentV4(
         )
         return is_formula_interpretation_followup_query(clean_query, had_formula_context=had_formula_context)
 
-    def _active_memory_bindings(self, session: SessionContext) -> list[dict[str, Any]]:
-        bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
-        selected: list[dict[str, Any]] = []
-        for target in session.effective_active_research().targets:
-            binding = bindings.get(normalize_lookup_text(target))
-            if isinstance(binding, dict):
-                selected.append(dict(binding))
-        if len(selected) >= 2:
-            return selected
-        for binding in bindings.values():
-            if isinstance(binding, dict) and binding not in selected:
-                selected.append(dict(binding))
-            if len(selected) >= 4:
-                break
-        return selected
-
-    def _citations_from_memory_bindings(self, bindings: list[dict[str, Any]]) -> list[AssistantCitation]:
-        doc_ids: list[str] = []
-        for binding in bindings:
-            for doc_id in list(binding.get("evidence_ids", []) or [])[:2]:
-                if str(doc_id).strip():
-                    doc_ids.append(str(doc_id).strip())
-            paper_id = str(binding.get("paper_id", "") or "").strip()
-            if paper_id:
-                doc_ids.append(f"paper::{paper_id}")
-        return dedupe_citations(self._citations_from_doc_ids(list(dict.fromkeys(doc_ids)), []))
-
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
         normalized = normalize_lookup_text(clean_query)
         memory = dict((session.working_memory if session is not None else {}) or {})
@@ -1033,7 +1006,10 @@ class ResearchAssistantAgentV4(
         if not requested_targets:
             requested_targets = list(
                 dict.fromkeys(
-                    [*session.effective_active_research().targets, *[item.get("target", "") for item in self._active_memory_bindings(session)]]
+                    [
+                        *session.effective_active_research().targets,
+                        *[item.get("target", "") for item in active_memory_bindings(session)],
+                    ]
                 )
             )
         bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
@@ -2108,7 +2084,7 @@ class ResearchAssistantAgentV4(
                 notes=["agent_tool", "answer_language_preference"],
             )
         if is_memory_synthesis_query(clean_query) and (
-            len(self._active_memory_bindings(session)) >= 2
+            len(active_memory_bindings(session)) >= 2
             or len(list(dict((session.working_memory or {}).get("last_compound_query", {}) or {}).get("subtasks", []) or [])) >= 2
         ):
             targets = list(dict.fromkeys(session.effective_active_research().targets))

@@ -6,6 +6,7 @@ from app.domain.models import EvidenceBlock, QueryContract, SessionContext, Veri
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.citation_ranking import format_citation_ranking_answer
+from app.services.conversation_memory_contract import active_memory_bindings, memory_binding_doc_ids
 from app.services.evidence_presentation import dedupe_citations
 from app.services.memory_artifact_helpers import conversation_tool_result_artifact
 from app.services.query_rewrite import rewrite_query
@@ -272,8 +273,8 @@ def build_conversation_tool_registry(
     def synthesize_previous_results() -> None:
         agent._emit_agent_tool_call(emit=emit, tool="synthesize_previous_results", arguments={"targets": contract.targets})
         answer = agent._compose_memory_synthesis_answer(query=query, session=session, contract=contract)
-        bindings = agent._active_memory_bindings(session)
-        state["citations"] = agent._citations_from_memory_bindings(bindings)
+        bindings = active_memory_bindings(session)
+        state["citations"] = dedupe_citations(agent._citations_from_doc_ids(memory_binding_doc_ids(bindings), []))
         payload = store_conversation_answer_result(
             agent=agent, state=state, session=session, contract=contract, emit=emit,
             tool="synthesize_previous_results", query=query, answer=answer,

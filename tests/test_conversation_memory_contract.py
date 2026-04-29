@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from app.domain.models import QueryContract, SessionContext
 from app.services.conversation_memory_contract import (
+    active_memory_bindings,
     apply_conversation_memory_to_contract,
+    memory_binding_doc_ids,
     target_binding_from_memory,
 )
 
@@ -27,6 +29,36 @@ def test_target_binding_from_memory_normalizes_target_key() -> None:
 
     assert binding is not None
     assert binding["paper_id"] == "ALIGNX"
+
+
+def test_active_memory_bindings_prioritizes_active_targets_then_recent_bindings() -> None:
+    session = _session_with_pba_binding()
+    session.set_active_research(
+        relation="metric_value_lookup",
+        targets=["PBA"],
+        titles=["AlignX"],
+        requested_fields=["metric_value"],
+        required_modalities=["table"],
+        answer_shape="table",
+        precision_requirement="exact",
+        clean_query="PBA result",
+    )
+    session.working_memory["target_bindings"]["ica"] = {"target": "ICA", "paper_id": "ICA"}
+
+    bindings = active_memory_bindings(session)
+
+    assert [binding["target"] for binding in bindings] == ["PBA", "ICA"]
+
+
+def test_memory_binding_doc_ids_deduplicates_evidence_and_paper_ids() -> None:
+    doc_ids = memory_binding_doc_ids(
+        [
+            {"evidence_ids": ["b1", "b2", "b3"], "paper_id": "P1"},
+            {"evidence_ids": ["b1", ""], "paper_id": "P1"},
+        ]
+    )
+
+    assert doc_ids == ["b1", "b2", "paper::P1"]
 
 
 def test_apply_conversation_memory_to_contract_adds_selected_paper_notes() -> None:
