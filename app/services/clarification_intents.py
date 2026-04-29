@@ -716,6 +716,41 @@ def finalize_acronym_disambiguation_options(
     )
 
 
+def evidence_disambiguation_options(
+    *,
+    contract: QueryContract,
+    target_binding_exists: bool,
+    is_negative_correction: bool,
+    initial_options: Callable[[], list[dict[str, Any]]],
+    broad_options: Callable[[], list[dict[str, Any]]],
+    corpus_options: Callable[[], list[dict[str, Any]]],
+    excluded_titles: set[str],
+) -> list[dict[str, Any]]:
+    if not contract_needs_evidence_disambiguation(contract):
+        return []
+    if "resolved_human_choice" in contract.notes or selected_clarification_paper_id(contract):
+        return []
+    target = str(contract.targets[0] or "").strip()
+    if not is_negative_correction and "exclude_previous_focus" not in contract.notes and target_binding_exists:
+        return []
+    options = initial_options()
+    goals = research_plan_goals(contract)
+    if len(options) < 2 and "formula" in goals:
+        candidates = broad_options()
+        if len(candidates) > len(options):
+            options = candidates
+    if len(options) < 2 and "formula" in goals:
+        candidates = corpus_options()
+        if len(candidates) > len(options):
+            options = candidates
+    return finalize_acronym_disambiguation_options(
+        options=options,
+        contract=contract,
+        target=target,
+        excluded_titles=excluded_titles,
+    )
+
+
 def normalize_clarification_option(
     option: dict[str, Any],
     *,

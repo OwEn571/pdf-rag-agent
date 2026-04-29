@@ -63,12 +63,12 @@ from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
     disambiguation_goal_markers,
+    evidence_disambiguation_options,
     disambiguation_judge_human_prompt,
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
     disambiguation_judge_system_prompt,
     disambiguation_missing_fields,
-    finalize_acronym_disambiguation_options,
     judge_allows_auto_resolve,
     next_clarification_attempt,
     remember_clarification_attempt,
@@ -1637,36 +1637,28 @@ class ResearchAssistantAgentV4(
         papers: list[CandidatePaper],
         evidence: list[EvidenceBlock],
     ) -> list[dict[str, Any]]:
-        if not contract_needs_evidence_disambiguation(contract):
-            return []
-        if "resolved_human_choice" in contract.notes or selected_clarification_paper_id(contract):
-            return []
-        target = str(contract.targets[0] or "").strip()
-        if not is_negative_correction_query(contract.clean_query) and "exclude_previous_focus" not in contract.notes:
-            if target_binding_from_memory(session=session, target=target):
-                return []
-        options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
-        goals = research_plan_goals(contract)
-        if len(options) < 2 and "formula" in goals:
-            broad_evidence = self.retriever.search_concept_evidence(
-                query=target,
-                contract=contract,
-                limit=max(self.settings.evidence_limit_default, 96),
-            )
-            broad_options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=broad_evidence)
-            if len(broad_options) > len(options):
-                options = broad_options
-        if len(options) < 2 and "formula" in goals:
-            corpus_evidence = self._acronym_evidence_from_corpus(target=target, limit=160)
-            corpus_options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=corpus_evidence)
-            if len(corpus_options) > len(options):
-                options = corpus_options
-        excluded_titles = self._excluded_focus_titles(session=session, contract=contract)
-        return finalize_acronym_disambiguation_options(
-            options=options,
+        target = str(contract.targets[0] or "").strip() if contract.targets else ""
+        target_binding_exists = bool(target and target_binding_from_memory(session=session, target=target))
+        return evidence_disambiguation_options(
             contract=contract,
-            target=target,
-            excluded_titles=excluded_titles,
+            target_binding_exists=target_binding_exists,
+            is_negative_correction=is_negative_correction_query(contract.clean_query),
+            initial_options=lambda: self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence),
+            broad_options=lambda: self._acronym_options_from_evidence(
+                target=target,
+                papers=papers,
+                evidence=self.retriever.search_concept_evidence(
+                    query=target,
+                    contract=contract,
+                    limit=max(self.settings.evidence_limit_default, 96),
+                ),
+            ),
+            corpus_options=lambda: self._acronym_options_from_evidence(
+                target=target,
+                papers=papers,
+                evidence=self._acronym_evidence_from_corpus(target=target, limit=160),
+            ),
+            excluded_titles=self._excluded_focus_titles(session=session, contract=contract),
         )
 
     def _judge_disambiguation_options(

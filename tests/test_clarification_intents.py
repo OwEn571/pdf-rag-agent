@@ -33,6 +33,7 @@ from app.services.clarification_intents import (
     disambiguation_judge_summary,
     disambiguation_judge_system_prompt,
     disambiguation_missing_fields,
+    evidence_disambiguation_options,
     extract_acronym_expansion_from_text,
     finalize_acronym_disambiguation_options,
     judge_allows_auto_resolve,
@@ -488,6 +489,111 @@ def test_contract_needs_evidence_disambiguation_for_acronym_goals_and_notes() ->
         QueryContract(clean_query="AlignX是什么", targets=["AlignX"], requested_fields=["definition"])
     )
     assert not contract_needs_evidence_disambiguation(QueryContract(clean_query="PBA?", targets=[]))
+
+
+def test_evidence_disambiguation_options_skips_resolved_contract_without_loading_sources() -> None:
+    contract = QueryContract(
+        clean_query="PBA是什么",
+        targets=["PBA"],
+        requested_fields=["definition"],
+        notes=["resolved_human_choice"],
+    )
+
+    def fail() -> list[dict[str, object]]:
+        raise AssertionError("source callback should not be called")
+
+    assert evidence_disambiguation_options(
+        contract=contract,
+        target_binding_exists=False,
+        is_negative_correction=False,
+        initial_options=fail,
+        broad_options=fail,
+        corpus_options=fail,
+        excluded_titles=set(),
+    ) == []
+
+
+def test_evidence_disambiguation_options_respects_existing_target_binding() -> None:
+    contract = QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"])
+
+    def fail() -> list[dict[str, object]]:
+        raise AssertionError("source callback should not be called")
+
+    assert evidence_disambiguation_options(
+        contract=contract,
+        target_binding_exists=True,
+        is_negative_correction=False,
+        initial_options=fail,
+        broad_options=fail,
+        corpus_options=fail,
+        excluded_titles=set(),
+    ) == []
+
+
+def test_evidence_disambiguation_options_prefers_broader_formula_options() -> None:
+    calls: list[str] = []
+    contract = QueryContract(clean_query="PBA公式是什么", targets=["PBA"], requested_fields=["formula"])
+
+    def initial() -> list[dict[str, object]]:
+        calls.append("initial")
+        return [{"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"}]
+
+    def broad() -> list[dict[str, object]]:
+        calls.append("broad")
+        return [
+            {"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"},
+            {"paper_id": "p2", "title": "Policy Gradient Notes", "meaning": "Policy Based Alignment"},
+        ]
+
+    def corpus() -> list[dict[str, object]]:
+        raise AssertionError("corpus fallback should not be needed")
+
+    options = evidence_disambiguation_options(
+        contract=contract,
+        target_binding_exists=False,
+        is_negative_correction=False,
+        initial_options=initial,
+        broad_options=broad,
+        corpus_options=corpus,
+        excluded_titles=set(),
+    )
+
+    assert calls == ["initial", "broad"]
+    assert [item["paper_id"] for item in options] == ["p1", "p2"]
+    assert {item["source"] for item in options} == {"evidence_disambiguation"}
+
+
+def test_evidence_disambiguation_options_uses_corpus_formula_fallback() -> None:
+    calls: list[str] = []
+    contract = QueryContract(clean_query="PBA公式是什么", targets=["PBA"], requested_fields=["formula"])
+
+    def initial() -> list[dict[str, object]]:
+        calls.append("initial")
+        return [{"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"}]
+
+    def broad() -> list[dict[str, object]]:
+        calls.append("broad")
+        return [{"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"}]
+
+    def corpus() -> list[dict[str, object]]:
+        calls.append("corpus")
+        return [
+            {"paper_id": "p1", "title": "AlignX", "meaning": "Preference Bridged Alignment"},
+            {"paper_id": "p2", "title": "Policy Gradient Notes", "meaning": "Policy Based Alignment"},
+        ]
+
+    options = evidence_disambiguation_options(
+        contract=contract,
+        target_binding_exists=False,
+        is_negative_correction=False,
+        initial_options=initial,
+        broad_options=broad,
+        corpus_options=corpus,
+        excluded_titles={"policy gradient notes"},
+    )
+
+    assert calls == ["initial", "broad", "corpus"]
+    assert options == []
 
 
 def test_clarification_tracking_helpers_manage_attempts() -> None:
