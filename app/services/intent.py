@@ -7,6 +7,7 @@ from typing import Any, Callable, Literal, cast
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.library_intents import (
     is_citation_query,
     is_library_status_query,
@@ -60,6 +61,14 @@ AnswerSlot = Literal[
     "training_component",
     "general_answer",
 ]
+
+INTENT_ROUTER_MARKERS: dict[str, MarkerProfile] = {
+    "contextual_origin_refine": ("最早", "起源", "最初", "首次", "出处", "来源", "不对", "不是", "确定"),
+    "strong_origin_refine": ("最早", "起源"),
+    "self_identity": ("你是谁", "who are you", "你的身份"),
+    "capability": ("你能做什么", "有什么功能", "capability", "abilities"),
+    "previous_rationale": ("为什么选择", "为什么推荐", "推荐理由", "排序依据"),
+}
 
 RESEARCH_SLOT_PROFILES: dict[str, dict[str, Any]] = {
     "origin": {
@@ -574,10 +583,21 @@ class IntentRecognizer:
             slots = ["paper_summary"]
             needs_local_corpus = True
             refers_previous_turn = True
-        if relation in {"clarify_user_intent", "correction_without_context"} and any(
-            marker in query_for_goal for marker in ["最早", "起源", "最初", "首次", "出处", "来源", "不对", "不是", "确定"]
+        if relation in {"clarify_user_intent", "correction_without_context"} and query_matches_any(
+            query_for_goal,
+            query_for_goal,
+            INTENT_ROUTER_MARKERS["contextual_origin_refine"],
         ):
-            slots = ["origin"] if origin_like_goal or "最早" in query_for_goal or "起源" in query_for_goal else ["general_answer"]
+            has_strong_origin_refine = query_matches_any(
+                query_for_goal,
+                query_for_goal,
+                INTENT_ROUTER_MARKERS["strong_origin_refine"],
+            )
+            slots = (
+                ["origin"]
+                if origin_like_goal or has_strong_origin_refine
+                else ["general_answer"]
+            )
             needs_local_corpus = True
             refers_previous_turn = not (origin_like_goal and has_explicit_origin_target)
             notes = [*notes, "needs_contextual_refine"] if refers_previous_turn else notes
@@ -709,7 +729,7 @@ class IntentRecognizer:
                 confidence=0.99,
                 notes=["local_protected_greeting"],
             )
-        if any(marker in lowered for marker in ["你是谁", "who are you", "你的身份"]):
+        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["self_identity"]):
             return Intent(
                 intent_kind="smalltalk",
                 topic_state="new",
@@ -720,7 +740,7 @@ class IntentRecognizer:
                 confidence=0.96,
                 notes=["local_protected_self_identity"],
             )
-        if any(marker in lowered for marker in ["你能做什么", "有什么功能", "capability", "abilities"]):
+        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["capability"]):
             return Intent(
                 intent_kind="smalltalk",
                 topic_state="new",
@@ -874,7 +894,7 @@ class IntentRecognizer:
                 confidence=0.82,
                 notes=["local_intent_memory_synthesis"],
             )
-        if any(marker in lowered for marker in ["为什么选择", "为什么推荐", "推荐理由", "排序依据"]) and session.turns:
+        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["previous_rationale"]) and session.turns:
             return Intent(
                 intent_kind="memory_op",
                 topic_state="continue",
