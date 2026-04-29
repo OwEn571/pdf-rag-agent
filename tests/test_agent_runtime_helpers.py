@@ -23,6 +23,7 @@ from app.services.agent_runtime_helpers import (
     next_research_action,
     record_tool_loop_ready,
     planner_next_action,
+    prefer_selected_clarification_paper,
     research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
@@ -127,6 +128,34 @@ def test_runtime_helpers_filter_excluded_focus_titles_and_limits() -> None:
         plan=ResearchPlan(evidence_limit=14),
         excluded_titles={"old focus paper"},
     ) == 96
+
+
+def test_runtime_helpers_prefer_selected_clarification_paper() -> None:
+    candidates = [
+        CandidatePaper(paper_id="p1", title="First"),
+        CandidatePaper(paper_id="p2", title="Second"),
+    ]
+
+    selected = prefer_selected_clarification_paper(
+        candidates,
+        contract=QueryContract(clean_query="选第二个", notes=["selected_paper_id=p2"]),
+        paper_lookup=lambda _: None,
+    )
+
+    assert [item.paper_id for item in selected] == ["p2"]
+
+    fallback = prefer_selected_clarification_paper(
+        candidates,
+        contract=QueryContract(clean_query="选第三个", notes=["selected_paper_id=p3"]),
+        paper_lookup=lambda paper_id: CandidatePaper(paper_id=paper_id, title="Third"),
+    )
+
+    assert [item.paper_id for item in fallback] == ["p3"]
+    assert prefer_selected_clarification_paper(
+        candidates,
+        contract=QueryContract(clean_query="普通查询"),
+        paper_lookup=lambda _: None,
+    ) == candidates
 
 
 def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates() -> None:

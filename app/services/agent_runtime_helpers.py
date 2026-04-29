@@ -4,6 +4,7 @@ from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
+from app.services.clarification_intents import selected_clarification_paper_id
 from app.services.confidence import (
     confidence_from_contract,
     confidence_from_verification_report,
@@ -24,6 +25,7 @@ EmitFn = Callable[[str, dict[str, Any]], None]
 FallbackNextFn = Callable[[set[str]], str | None]
 StopConditionFn = Callable[[set[str]], bool]
 PaperTitleLookupFn = Callable[[str], str | None]
+PaperLookupFn = Callable[[str], CandidatePaper | None]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -145,6 +147,22 @@ def filter_evidence_by_excluded_titles(
     if not excluded_titles:
         return evidence
     return [item for item in evidence if normalize_lookup_text(item.title) not in excluded_titles]
+
+
+def prefer_selected_clarification_paper(
+    candidates: list[CandidatePaper],
+    *,
+    contract: QueryContract,
+    paper_lookup: PaperLookupFn,
+) -> list[CandidatePaper]:
+    selected_paper_id = selected_clarification_paper_id(contract)
+    if not selected_paper_id:
+        return candidates
+    selected = [item for item in candidates if item.paper_id == selected_paper_id]
+    if not selected:
+        paper = paper_lookup(selected_paper_id)
+        selected = [paper] if paper is not None else []
+    return selected or candidates
 
 
 def entity_evidence_limit(*, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:

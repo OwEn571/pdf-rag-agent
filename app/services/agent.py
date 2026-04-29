@@ -40,6 +40,7 @@ from app.services.agent_runtime_helpers import (
     excluded_focus_titles,
     filter_candidate_papers_by_excluded_titles,
     filter_evidence_by_excluded_titles,
+    prefer_selected_clarification_paper,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
@@ -871,14 +872,11 @@ class ResearchAssistantAgentV4(
                 )
             state["contract"] = fallback_contract
             contract = fallback_contract
-        selected_paper_id = selected_clarification_paper_id(contract)
-        if selected_paper_id:
-            selected = [item for item in candidate_papers if item.paper_id == selected_paper_id]
-            if not selected:
-                paper = self._candidate_from_paper_id(selected_paper_id)
-                selected = [paper] if paper is not None else []
-            if selected:
-                candidate_papers = selected
+        candidate_papers = prefer_selected_clarification_paper(
+            candidate_papers,
+            contract=contract,
+            paper_lookup=self._candidate_from_paper_id,
+        )
         screened_papers, precomputed_evidence = self._screen_agent_papers(
             contract=contract,
             plan=plan,
@@ -912,13 +910,11 @@ class ResearchAssistantAgentV4(
         excluded_titles: set[str],
     ) -> tuple[list[CandidatePaper], list[EvidenceBlock] | None]:
         selected_paper_id = selected_clarification_paper_id(contract)
-        if selected_paper_id:
-            selected = [item for item in candidate_papers if item.paper_id == selected_paper_id]
-            if not selected:
-                paper = self._candidate_from_paper_id(selected_paper_id)
-                selected = [paper] if paper is not None else []
-            if selected:
-                candidate_papers = selected
+        candidate_papers = prefer_selected_clarification_paper(
+            candidate_papers,
+            contract=contract,
+            paper_lookup=self._candidate_from_paper_id,
+        )
         screened_papers = candidate_papers
         precomputed_evidence: list[EvidenceBlock] | None = None
         goals = research_plan_goals(contract)
@@ -1296,13 +1292,11 @@ class ResearchAssistantAgentV4(
                 excluded_titles=excluded_titles,
             )
         selected_paper_id = selected_clarification_paper_id(contract)
-        if selected_paper_id:
-            selected = [item for item in broader_candidates if item.paper_id == selected_paper_id]
-            if not selected:
-                paper = self._candidate_from_paper_id(selected_paper_id)
-                selected = [paper] if paper is not None else []
-            if selected:
-                broader_candidates = selected
+        broader_candidates = prefer_selected_clarification_paper(
+            broader_candidates,
+            contract=contract,
+            paper_lookup=self._candidate_from_paper_id,
+        )
         goals = research_plan_goals(contract)
         if should_use_concept_evidence(contract):
             broader_evidence = self.retriever.search_concept_evidence(
