@@ -60,7 +60,6 @@ from app.services.contract_context import (
     contract_allows_active_context_override,
     contract_answer_slots,
     contract_topic_state,
-    conversation_relation_updates_research_context,
     intent_kind_from_contract,
     note_float,
     note_value,
@@ -351,10 +350,6 @@ class ResearchAssistantAgentV4(
         state["answer"] = answer
         for chunk in chunk_text(str(answer or ""), size=96):
             emit("answer_delta", {"text": chunk})
-
-    @staticmethod
-    def _conversation_relation_updates_research_context(relation: str) -> bool:
-        return conversation_relation_updates_research_context(relation)
 
     def _runtime_summary(
         self,

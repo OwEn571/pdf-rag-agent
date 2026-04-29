@@ -13,6 +13,7 @@ from app.domain.models import (
 from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
+from app.services.contract_context import conversation_relation_updates_research_context
 
 
 def finish_agent_turn(
@@ -131,7 +132,7 @@ def run_conversation_turn(
     session.last_relation = contract.relation
     citation_titles = [item.title for item in citations if item.title]
     active_research = None
-    if agent._conversation_relation_updates_research_context(contract.relation):
+    if conversation_relation_updates_research_context(contract.relation):
         active_research = agent._make_active_research(
             relation=contract.relation,
             targets=list(contract.targets),
