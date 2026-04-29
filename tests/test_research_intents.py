@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from app.services.research_intents import (
+    RESEARCH_SLOT_MARKERS,
     looks_like_metric_value_query,
     looks_like_origin_lookup_query,
     looks_like_summary_results_query,
     normalized_query_needs_external_search,
+    query_matches_any,
     query_needs_external_search,
     research_answer_slots,
 )
@@ -15,6 +17,12 @@ def test_research_intent_classifier_detects_origin_metric_and_summary() -> None:
     assert looks_like_metric_value_query("PPO 的 win rate 具体多少？")
     assert looks_like_summary_results_query("这篇论文的核心结论和实验结果是什么？")
     assert not looks_like_origin_lookup_query("帮我总结一下这篇论文")
+
+
+def test_research_slot_markers_use_centralized_matcher() -> None:
+    assert query_matches_any("agent 拓扑怎么设计", "agent拓扑怎么设计", RESEARCH_SLOT_MARKERS["topology"])
+    assert query_matches_any("loss objective", "lossobjective", RESEARCH_SLOT_MARKERS["formula"])
+    assert not query_matches_any("随便聊聊", "随便聊聊", RESEARCH_SLOT_MARKERS["formula"])
 
 
 def test_research_intent_classifier_detects_external_search_need() -> None:
