@@ -10,6 +10,12 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
+from app.services.compound_task_helpers import (
+    compound_research_progress_markdown,
+    compound_section_heading,
+    demote_markdown_headings,
+    format_compound_section,
+)
 from app.services.evidence_presentation import chunk_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -96,12 +102,12 @@ def run_compound_query_if_needed(
                 session=session,
                 comparison_contract=sub_contract,
             )
-            section = agent._format_compound_section(contract=sub_contract, answer=comparison, index=index)
+            section = format_compound_section(contract=sub_contract, answer=comparison, index=index)
             publish("\n\n" + section)
             subtask_results.append({"contract": sub_contract, "answer": comparison, "citations": [], "claims": []})
             continue
         if sub_contract.interaction_mode == "conversation":
-            heading = agent._compound_section_heading(contract=sub_contract, index=index)
+            heading = compound_section_heading(contract=sub_contract, index=index)
             publish("\n\n" + heading + "\n\n")
             subtask_result = agent._execute_compound_conversation_subtask(
                 contract=sub_contract,
@@ -109,17 +115,17 @@ def run_compound_query_if_needed(
                 emit=emit,
                 execution_steps=execution_steps,
             )
-            answer_parts.append(agent._demote_markdown_headings(str(subtask_result.get("answer", "")).strip()))
+            answer_parts.append(demote_markdown_headings(str(subtask_result.get("answer", "")).strip()))
             subtask_results.append(subtask_result)
             continue
-        publish("\n\n" + agent._compound_research_progress_markdown(contract=sub_contract, index=index) + "\n\n")
+        publish("\n\n" + compound_research_progress_markdown(contract=sub_contract, index=index) + "\n\n")
         subtask_result = agent._execute_compound_research_subtask(
             contract=sub_contract,
             session=session,
             emit=emit,
             execution_steps=execution_steps,
         )
-        sub_answer = agent._demote_markdown_headings(str(subtask_result.get("answer", "")).strip())
+        sub_answer = demote_markdown_headings(str(subtask_result.get("answer", "")).strip())
         publish(sub_answer)
         subtask_results.append(subtask_result)
         sub_verification = subtask_result.get("verification")

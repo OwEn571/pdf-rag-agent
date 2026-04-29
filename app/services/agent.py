@@ -56,6 +56,7 @@ from app.services.citation_ranking import (
     title_token_overlap,
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
+from app.services.compound_task_helpers import compound_task_label, compound_task_result_from_task_payload
 from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
     canonical_agent_tool,
@@ -940,7 +941,7 @@ class ResearchAssistantAgentV4(
         task_result = run_task_subagent(
             agent=self,
             prompt=contract.clean_query,
-            description=self._compound_task_label(contract),
+            description=compound_task_label(contract),
             tools_allowed=[],
             max_steps=8,
             session=session,
@@ -949,7 +950,7 @@ class ResearchAssistantAgentV4(
             execution_steps=execution_steps,
             contract=contract,
         )
-        result = self._compound_task_result_from_task_payload(task_result, fallback_contract=contract)
+        result = compound_task_result_from_task_payload(task_result, fallback_contract=contract)
         result_contract = result.get("contract")
         relation = result_contract.relation if isinstance(result_contract, QueryContract) else contract.relation
         self._record_agent_observation(
@@ -965,41 +966,6 @@ class ResearchAssistantAgentV4(
             },
         )
         return result
-
-    @staticmethod
-    def _compound_task_result_from_task_payload(
-        task_result: dict[str, Any],
-        *,
-        fallback_contract: QueryContract,
-    ) -> dict[str, Any]:
-        contract = task_result.get("contract_obj")
-        if not isinstance(contract, QueryContract):
-            raw_contract = task_result.get("contract")
-            if isinstance(raw_contract, dict):
-                try:
-                    contract = QueryContract.model_validate(raw_contract)
-                except Exception:  # noqa: BLE001
-                    contract = fallback_contract
-            else:
-                contract = fallback_contract
-        verification = task_result.get("verification_obj")
-        if not isinstance(verification, VerificationReport):
-            raw_verification = task_result.get("verification")
-            if isinstance(raw_verification, dict):
-                try:
-                    verification = VerificationReport.model_validate(raw_verification)
-                except Exception:  # noqa: BLE001
-                    verification = VerificationReport(status="pass", recommended_action="task_subagent")
-            else:
-                verification = VerificationReport(status="pass", recommended_action="task_subagent")
-        return {
-            "contract": contract,
-            "answer": str(task_result.get("answer", "") or ""),
-            "citations": list(task_result.get("citations", []) or []),
-            "claims": list(task_result.get("claims", []) or []),
-            "evidence": list(task_result.get("evidence", []) or []),
-            "verification": verification,
-        }
 
     def _compose_compound_comparison_answer(
         self,
@@ -1116,41 +1082,6 @@ class ResearchAssistantAgentV4(
             seen.add(key)
             deduped.append(citation)
         return deduped
-
-    @staticmethod
-    def _compound_section_heading(*, contract: QueryContract, index: int) -> str:
-        return f"## {index}. {ResearchAssistantAgentV4._compound_task_label(contract)}"
-
-    @staticmethod
-    def _compound_research_progress_markdown(*, contract: QueryContract, index: int) -> str:
-        heading = ResearchAssistantAgentV4._compound_section_heading(contract=contract, index=index)
-        if contract.relation == "formula_lookup":
-            target = contract.targets[0] if contract.targets else "目标对象"
-            return f"{heading}\n\n好的，我现在去查询 **{target}** 的公式。"
-        return heading
-
-    @staticmethod
-    def _compound_task_label(contract: QueryContract) -> str:
-        if contract.relation == "library_status":
-            return "查看论文库概览和文章预览"
-        if contract.relation == "library_recommendation":
-            return "从库内给出默认推荐"
-        if contract.relation == "formula_lookup":
-            target = contract.targets[0] if contract.targets else "目标对象"
-            return f"查询 {target} 公式"
-        if contract.relation == "comparison_synthesis":
-            target_text = " 和 ".join(contract.targets) if contract.targets else "前面结果"
-            return f"比较 {target_text}"
-        return contract.clean_query
-
-    @staticmethod
-    def _demote_markdown_headings(answer: str) -> str:
-        return re.sub(r"^(#{1,5})\\s+", lambda match: "#" + match.group(1) + " ", str(answer or "").strip(), flags=re.M)
-
-    @staticmethod
-    def _format_compound_section(*, contract: QueryContract, answer: str, index: int) -> str:
-        normalized = ResearchAssistantAgentV4._demote_markdown_headings(str(answer or "").strip())
-        return f"{ResearchAssistantAgentV4._compound_section_heading(contract=contract, index=index)}\n\n{normalized}".strip()
 
     def _select_citation_ranking_candidates(
         self,
