@@ -61,7 +61,6 @@ from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
     canonical_agent_tool,
     canonical_tools,
-    contract_allows_active_context_override,
     contract_answer_slots,
     note_value,
     note_values,
@@ -97,8 +96,11 @@ from app.services.followup_intents import (
     looks_like_formula_location_correction,
     looks_like_paper_scope_correction,
 )
+from app.services.followup_relationship_contracts import (
+    inherit_followup_relationship_contract,
+    normalize_followup_direction_contract,
+)
 from app.services.followup_relationship_intents import (
-    followup_relationship_recheck_requested,
     followup_relevance_score,
     has_followup_domain_signal,
     has_followup_seed_intro_signal,
@@ -2030,8 +2032,21 @@ class ResearchAssistantAgentV4(
         refined_contract = self._resolve_formula_location_followup_contract(contract=refined_contract, session=session)
         refined_contract = self._resolve_paper_scope_correction_contract(contract=refined_contract, session=session)
         refined_contract = self._resolve_contextual_active_paper_contract(contract=refined_contract, session=session)
-        refined_contract = self._inherit_followup_relationship_contract(contract=refined_contract, session=session)
-        refined_contract = self._normalize_followup_direction_contract(contract=refined_contract)
+        refined_contract = inherit_followup_relationship_contract(
+            contract=refined_contract,
+            session=session,
+            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+                targets=targets,
+                requested_fields=requested_fields,
+            ),
+        )
+        refined_contract = normalize_followup_direction_contract(
+            contract=refined_contract,
+            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+                targets=targets,
+                requested_fields=requested_fields,
+            ),
+        )
         return apply_conversation_memory_to_contract(
             contract=refined_contract,
             session=session,
@@ -2140,87 +2155,6 @@ class ResearchAssistantAgentV4(
                 }
             )
         return contract
-
-    def _normalize_followup_direction_contract(self, *, contract: QueryContract) -> QueryContract:
-        clean_query = " ".join(str(contract.clean_query or "").split())
-        lowered = clean_query.lower()
-        if not clean_query or ("后续" not in clean_query and "follow" not in lowered and "successor" not in lowered):
-            return contract
-        direction_match = re.search(
-            r"^(?P<candidate>.+?)\s*(?:真是|是否是|是不是|是|算是|属于|is|are)\s*(?P<seed>.+?)\s*的?\s*(?:严格)?\s*(?:后续|扩展|继承|follow[- ]?up|successor)",
-            clean_query,
-            flags=re.IGNORECASE,
-        )
-        if direction_match is None:
-            return contract
-        candidate_title = " ".join(str(direction_match.group("candidate") or "").strip(" ，,。？?").split())
-        candidate_title = re.sub(r"(?:真|真的|是否|是不是)\s*$", "", candidate_title).strip()
-        seed_text = " ".join(str(direction_match.group("seed") or "").strip(" ，,。？?").split())
-        seed_targets = self._normalize_contract_targets(targets=[seed_text], requested_fields=contract.requested_fields)
-        if not seed_targets:
-            return contract
-        notes = [note for note in contract.notes if not str(note).startswith("candidate_title=")]
-        if candidate_title:
-            notes.append(f"candidate_title={candidate_title}")
-        notes.append("followup_direction_resolved")
-        requested_fields = list(dict.fromkeys([*contract.requested_fields, "candidate_relationship", "evidence"]))
-        required_modalities = list(dict.fromkeys([*contract.required_modalities, "paper_card", "page_text"]))
-        answer_shape = contract.answer_shape if contract.answer_shape in {"bullets", "table"} else "bullets"
-        return contract.model_copy(
-            update={
-                "interaction_mode": "research",
-                "relation": "followup_research",
-                "targets": seed_targets,
-                "requested_fields": requested_fields,
-                "required_modalities": required_modalities,
-                "answer_shape": answer_shape,
-                "precision_requirement": "high",
-                "notes": list(dict.fromkeys(notes)),
-            }
-        )
-
-    def _inherit_followup_relationship_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        memory = dict(session.working_memory or {})
-        relationship = dict(memory.get("last_followup_relationship", {}) or {})
-        if not relationship:
-            return contract
-        clean_query = str(contract.clean_query or "")
-        normalized_query = normalize_lookup_text(clean_query)
-        if not followup_relationship_recheck_requested(clean_query, normalized_query):
-            return contract
-        if not contract_allows_active_context_override(contract) and contract.relation != "followup_research":
-            return contract
-        goals = research_plan_goals(contract)
-        relation_like = bool(goals & {"followup_papers", "candidate_relationship", "summary", "results", "answer", "general_answer"})
-        if not relation_like and contract.continuation_mode != "followup":
-            return contract
-        seed_target = str(relationship.get("seed_target", "") or "").strip()
-        candidate_title = str(relationship.get("candidate_title", "") or "").strip()
-        if not seed_target or not candidate_title:
-            return contract
-        targets = self._normalize_contract_targets(targets=[seed_target], requested_fields=contract.requested_fields) or [seed_target]
-        notes = [note for note in contract.notes if not str(note).startswith("candidate_title=")]
-        notes.extend(
-            [
-                f"candidate_title={candidate_title}",
-                "inherited_followup_relationship",
-                "strict_followup_validation",
-            ]
-        )
-        return contract.model_copy(
-            update={
-                "clean_query": f"{candidate_title} 是否是 {seed_target} 的严格后续工作？",
-                "interaction_mode": "research",
-                "relation": "followup_research",
-                "targets": targets,
-                "requested_fields": ["candidate_relationship", "strict_followup", "evidence"],
-                "required_modalities": ["paper_card", "page_text"],
-                "answer_shape": "bullets",
-                "precision_requirement": "high",
-                "continuation_mode": "followup",
-                "notes": list(dict.fromkeys(notes)),
-            }
-        )
 
     def _session_conversation_context(self, session: SessionContext, *, max_chars: int = 24000) -> dict[str, Any]:
         """Return the retained conversation as the LLM-facing working memory."""
