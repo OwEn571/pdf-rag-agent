@@ -237,7 +237,7 @@ class ResearchAssistantAgentV4(
                 max_turns=6,
                 answer_limit=900,
             ),
-            is_negative_correction_query=self._is_negative_correction_query,
+            is_negative_correction_query=is_negative_correction_query,
             confidence_floor=self.agent_settings.confidence_floor,
         )
         self.intent_router = IntentRecognizer(
@@ -3048,7 +3048,7 @@ class ResearchAssistantAgentV4(
             and not allow_explicit_target_binding
         ):
             return contract
-        if "exclude_previous_focus" in contract.notes or self._is_negative_correction_query(contract.clean_query):
+        if "exclude_previous_focus" in contract.notes or is_negative_correction_query(contract.clean_query):
             return contract
         if self._selected_clarification_paper_id(contract):
             return contract
@@ -3231,7 +3231,7 @@ class ResearchAssistantAgentV4(
     def _resolve_contextual_active_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
             return contract
-        if "exclude_previous_focus" in contract.notes or self._is_negative_correction_query(contract.clean_query):
+        if "exclude_previous_focus" in contract.notes or is_negative_correction_query(contract.clean_query):
             return contract
         if not looks_like_active_paper_reference(contract.clean_query):
             return contract
@@ -3658,7 +3658,7 @@ class ResearchAssistantAgentV4(
         if "resolved_human_choice" in contract.notes or self._selected_clarification_paper_id(contract):
             return []
         target = str(contract.targets[0] or "").strip()
-        if not self._is_negative_correction_query(contract.clean_query) and "exclude_previous_focus" not in contract.notes:
+        if not is_negative_correction_query(contract.clean_query) and "exclude_previous_focus" not in contract.notes:
             if self._target_binding_from_memory(session=session, target=target):
                 return []
         options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
@@ -4514,7 +4514,7 @@ class ResearchAssistantAgentV4(
         return active
 
     def _excluded_focus_titles(self, *, session: SessionContext, contract: QueryContract) -> set[str]:
-        if "exclude_previous_focus" not in contract.notes and not self._is_negative_correction_query(contract.clean_query):
+        if "exclude_previous_focus" not in contract.notes and not is_negative_correction_query(contract.clean_query):
             return set()
         titles: list[str] = []
         titles.extend(session.effective_active_research().titles)
@@ -4545,10 +4545,6 @@ class ResearchAssistantAgentV4(
     @staticmethod
     def _normalize_title_key(title: str) -> str:
         return " ".join(str(title or "").lower().split())
-
-    @staticmethod
-    def _is_negative_correction_query(query: str) -> bool:
-        return is_negative_correction_query(query)
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
         goals = self._research_plan_goals(contract)
@@ -5687,7 +5683,7 @@ class ResearchAssistantAgentV4(
         requested = {str(item) for item in contract.requested_fields}
         query_lower = str(contract.clean_query or "").lower()
         targets = [str(item).strip() for item in contract.targets if str(item).strip()]
-        if "formula" in requested and self._is_negative_correction_query(query_lower):
+        if "formula" in requested and is_negative_correction_query(query_lower):
             target_text = " / ".join(targets) if targets else "当前目标"
             return (
                 f"你说得对，上一条候选公式不能直接当作 `{target_text}` 的公式。"

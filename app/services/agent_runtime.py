@@ -24,6 +24,7 @@ from app.services.agent_runtime_helpers import (
     research_runtime_state,
     tool_loop_ready_tool,
 )
+from app.services.followup_intents import is_negative_correction_query
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -111,7 +112,7 @@ class AgentRuntime:
             contract=contract,
             agent_plan=agent_plan,
             web_enabled=web_enabled,
-            is_negative_correction_query=self.agent._is_negative_correction_query,
+            is_negative_correction_query=is_negative_correction_query,
         )
         record_tool_loop_ready(
             emit=emit,
