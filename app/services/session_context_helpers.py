@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.domain.models import SessionContext, SessionTurn
+from app.domain.models import ActiveResearch, SessionContext, SessionTurn
 
 
 def session_conversation_context(
@@ -35,6 +35,33 @@ def session_conversation_context(
     payload["turns"] = compact_turns
     payload["context_compression_note"] = "Older answers were shortened because the raw conversation context was near the prompt budget."
     return payload
+
+
+def make_active_research(
+    *,
+    relation: str,
+    targets: list[str],
+    titles: list[str],
+    requested_fields: list[str],
+    required_modalities: list[str],
+    answer_shape: str,
+    precision_requirement: str,
+    clean_query: str,
+) -> ActiveResearch:
+    precision = precision_requirement if precision_requirement in {"exact", "high", "normal"} else "normal"
+    active = ActiveResearch(
+        relation=relation,
+        targets=targets,
+        titles=titles,
+        requested_fields=requested_fields,
+        required_modalities=required_modalities,
+        answer_shape=answer_shape,
+        precision_requirement=precision,  # type: ignore[arg-type]
+        clean_query=clean_query,
+    )
+    if not active.last_topic_signature:
+        active.last_topic_signature = active.topic_signature()
+    return active
 
 
 def turn_context_payload(turn: SessionTurn, *, answer_limit: int) -> dict[str, Any]:

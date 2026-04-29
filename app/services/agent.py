@@ -195,6 +195,7 @@ from app.services.agent_mixins import (
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import SessionStore
 from app.services.session_context_helpers import (
+    make_active_research,
     session_conversation_context,
     session_llm_history_messages,
     truncate_context_text,
@@ -2689,20 +2690,16 @@ class ResearchAssistantAgentV4(
         precision_requirement: str,
         clean_query: str,
     ) -> ActiveResearch:
-        precision = precision_requirement if precision_requirement in {"exact", "high", "normal"} else "normal"
-        active = ActiveResearch(
+        return make_active_research(
             relation=relation,
             targets=targets,
             titles=titles,
             requested_fields=requested_fields,
             required_modalities=required_modalities,
             answer_shape=answer_shape,
-            precision_requirement=precision,  # type: ignore[arg-type]
+            precision_requirement=precision_requirement,
             clean_query=clean_query,
         )
-        if not active.last_topic_signature:
-            active.last_topic_signature = active.topic_signature()
-        return active
 
     def _excluded_focus_titles(self, *, session: SessionContext, contract: QueryContract) -> set[str]:
         return excluded_focus_titles(

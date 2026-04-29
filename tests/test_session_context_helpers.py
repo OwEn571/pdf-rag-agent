@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain.models import ActiveResearch, SessionContext, SessionTurn
 from app.services.session_context_helpers import (
+    make_active_research,
     session_conversation_context,
     session_llm_history_messages,
     truncate_context_text,
@@ -40,6 +41,23 @@ def test_session_conversation_context_renders_active_memory_and_learnings() -> N
     assert payload["persistent_learnings"] == "prefer Chinese"
     assert payload["turns"][0]["assistant_answer"].endswith("...")
     assert payload["turns"][0]["query_contract"]["answer_slots"] == ["formula"]
+
+
+def test_make_active_research_normalizes_precision_and_signature() -> None:
+    active = make_active_research(
+        relation="formula_lookup",
+        targets=["DPO"],
+        titles=["Direct Preference Optimization"],
+        requested_fields=["formula"],
+        required_modalities=["page_text"],
+        answer_shape="bullets",
+        precision_requirement="unsupported",
+        clean_query="DPO公式是什么",
+    )
+
+    assert active.precision_requirement == "normal"
+    assert active.last_topic_signature == active.topic_signature()
+    assert active.targets == ["DPO"]
 
 
 def test_session_conversation_context_compacts_when_prompt_budget_is_small() -> None:
