@@ -97,10 +97,8 @@ from app.services.evidence_presentation import (
     evidence_ids_for_paper,
     figure_fallback_summary,
     formula_terms,
-    join_unique_text,
     paper_recommendation_reason,
     safe_year,
-    top_evidence_ids,
 )
 from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
 from app.services.intent import IntentRecognizer
@@ -5479,10 +5477,6 @@ class ResearchAssistantAgentV4(
         return formula_terms(text)
 
     @staticmethod
-    def _top_evidence_ids(evidence: list[EvidenceBlock], *, limit: int) -> list[str]:
-        return top_evidence_ids(evidence, limit=limit)
-
-    @staticmethod
     def _evidence_ids_for_paper(evidence: list[EvidenceBlock], paper_id: str, *, limit: int) -> list[str]:
         return evidence_ids_for_paper(evidence, paper_id, limit=limit)
 
@@ -5563,10 +5557,6 @@ class ResearchAssistantAgentV4(
         except Exception as exc:  # noqa: BLE001
             logger.warning("failed to render figure page image: file=%s page=%s err=%s", pdf_path, page, exc)
             return ""
-
-    @staticmethod
-    def _join_unique_text(items: list[str], *, limit: int) -> str:
-        return join_unique_text(items, limit=limit)
 
     def _clarification_question(self, contract: QueryContract, session: SessionContext) -> str:
         ambiguity_options = self._ambiguity_options_from_notes(contract.notes)
