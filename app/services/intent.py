@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -25,6 +25,7 @@ from app.services.research_intents import (
     looks_like_origin_lookup_query,
     looks_like_summary_results_query,
     normalized_query_needs_external_search,
+    research_answer_slots,
 )
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
@@ -990,47 +991,12 @@ class IntentRecognizer:
 
     @staticmethod
     def _research_slots(*, clean_query: str, lowered: str, compact: str, session: SessionContext) -> list[AnswerSlot]:
-        if any(marker in lowered or marker in compact for marker in ["后续", "followup", "follow-up", "扩展工作", "继承工作"]):
-            return ["followup_research"]
-        if looks_like_origin_lookup_query(clean_query):
-            return ["origin"]
-        if any(marker in lowered or marker in compact for marker in ["公式", "损失函数", "objective", "loss", "gradient", "梯度"]):
-            return ["formula"]
-        if any(marker in lowered or marker in compact for marker in ["figure", "fig.", "图", "caption", "可视化"]):
-            return ["figure"]
-        if any(marker in lowered or marker in compact for marker in ["结果", "实验", "核心结论", "贡献", "消融", "ablation", "performance"]):
-            return ["paper_summary"]
-        if any(marker in lowered or marker in compact for marker in ["多少", "数值", "准确率", "得分", "score", "accuracy", "metric"]):
-            return ["metric_value"]
-        if any(marker in lowered or marker in compact for marker in ["推荐", "哪些论文", "值得一看", "值得看", "入门", "papers to read"]):
-            return ["paper_recommendation"]
-        if any(marker in lowered or marker in compact for marker in ["拓扑", "topology", "langgraph"]):
-            if any(
-                marker in lowered or marker in compact
-                for marker in [
-                    "哪种最好",
-                    "比较好",
-                    "推荐",
-                    "最应该",
-                    "应该用",
-                    "应该使用",
-                    "怎么组织",
-                    "如何组织",
-                    "怎样组织",
-                    "怎么设计",
-                    "如何设计",
-                    "适合",
-                    "选择",
-                ]
-            ):
-                return ["topology_recommendation"]
-            return ["topology_discovery"]
-        if any(marker in lowered or marker in compact for marker in ["reward model", "奖励模型", "critic", "value model", "价值模型"]):
-            return ["training_component"]
-        if any(marker in clean_query for marker in ["是什么", "什么是", "什么意思", "定义"]) or any(
-            marker in lowered for marker in ["what is", "what are", "definition"]
-        ):
-            return ["definition"]
-        if session.effective_active_research().relation == "formula_lookup" and any(marker in compact for marker in ["变量", "解释", "呢"]):
-            return ["formula"]
-        return ["general_answer"]
+        return cast(
+            list[AnswerSlot],
+            research_answer_slots(
+                clean_query=clean_query,
+                lowered=lowered,
+                compact=compact,
+                active_relation=session.effective_active_research().relation,
+            ),
+        )

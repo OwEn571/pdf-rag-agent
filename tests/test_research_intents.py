@@ -6,6 +6,7 @@ from app.services.research_intents import (
     looks_like_summary_results_query,
     normalized_query_needs_external_search,
     query_needs_external_search,
+    research_answer_slots,
 )
 
 
@@ -26,3 +27,26 @@ def test_research_intent_classifier_detects_external_search_need() -> None:
         include_router_extras=True,
     )
     assert not query_needs_external_search("这篇论文的主要结论是什么？")
+
+
+def test_research_answer_slots_cover_common_research_queries() -> None:
+    assert research_answer_slots(clean_query="DPO 最早哪篇提出", lowered="dpo 最早哪篇提出", compact="dpo最早哪篇提出") == [
+        "origin"
+    ]
+    assert research_answer_slots(clean_query="这个公式变量呢", lowered="这个公式变量呢", compact="这个公式变量呢") == ["formula"]
+    assert research_answer_slots(clean_query="Figure 1 说明什么", lowered="figure 1 说明什么", compact="figure1说明什么") == [
+        "figure"
+    ]
+    assert research_answer_slots(clean_query="PBA 准确率多少", lowered="pba 准确率多少", compact="pba准确率多少") == [
+        "metric_value"
+    ]
+    assert research_answer_slots(clean_query="agent 拓扑哪种最好", lowered="agent 拓扑哪种最好", compact="agent拓扑哪种最好") == [
+        "topology_recommendation"
+    ]
+    assert research_answer_slots(
+        clean_query="变量呢",
+        lowered="变量呢",
+        compact="变量呢",
+        active_relation="formula_lookup",
+    ) == ["formula"]
+    assert research_answer_slots(clean_query="随便聊聊", lowered="随便聊聊", compact="随便聊聊") == ["general_answer"]
