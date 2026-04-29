@@ -9,7 +9,35 @@ from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import safe_year
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.query_shaping import matches_target
+
+
+ENTITY_DEFINITION_MARKERS: dict[str, MarkerProfile] = {
+    "algorithm_type": (
+        "algorithm",
+        "policy optimization",
+        "reinforcement learning",
+        "reward model",
+        "rule-based rewards",
+        "rubric-based rewards",
+        "objective",
+        "loss",
+        "training objective",
+        "ppo",
+        "grpo",
+        "advantage",
+        "critic",
+        "group relative",
+        "算法",
+        "优化",
+        "训练目标",
+        "目标函数",
+    ),
+    "dataset_type": ("dataset", "benchmark", "corpus", "leaderboard", "数据集", "基准"),
+    "framework_type": ("framework", "system", "platform", "agent", "架构", "系统", "框架"),
+    "model_type": ("model", "llm", "language model", "simulator", "classifier", "policy", "模型"),
+}
 
 
 class EntityDefinitionMixin:
@@ -456,35 +484,13 @@ class EntityDefinitionMixin:
         dataset_score = 0
         framework_score = 0
         model_score = 0
-        if any(
-            token in text
-            for token in [
-                "algorithm",
-                "policy optimization",
-                "reinforcement learning",
-                "reward model",
-                "rule-based rewards",
-                "rubric-based rewards",
-                "objective",
-                "loss",
-                "training objective",
-                "ppo",
-                "grpo",
-                "advantage",
-                "critic",
-                "group relative",
-                "算法",
-                "优化",
-                "训练目标",
-                "目标函数",
-            ]
-        ):
+        if query_matches_any(text, "", ENTITY_DEFINITION_MARKERS["algorithm_type"]):
             algorithm_score += 3
-        if any(token in text for token in ["dataset", "benchmark", "corpus", "leaderboard", "数据集", "基准"]):
+        if query_matches_any(text, "", ENTITY_DEFINITION_MARKERS["dataset_type"]):
             dataset_score += 2
-        if any(token in text for token in ["framework", "system", "platform", "agent", "架构", "系统", "框架"]):
+        if query_matches_any(text, "", ENTITY_DEFINITION_MARKERS["framework_type"]):
             framework_score += 2
-        if any(token in text for token in ["model", "llm", "language model", "simulator", "classifier", "policy", "模型"]):
+        if query_matches_any(text, "", ENTITY_DEFINITION_MARKERS["model_type"]):
             model_score += 2
         scores = {
             "优化算法/训练方法": algorithm_score,
