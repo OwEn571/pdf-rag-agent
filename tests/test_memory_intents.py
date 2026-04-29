@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from app.domain.models import SessionContext, SessionTurn
+from app.services.intent_marker_matching import query_matches_any
 from app.services.memory_intents import (
+    MEMORY_INTENT_MARKERS,
     contains_ordinal_reference,
     is_memory_comparison_query,
     is_pdf_agent_topology_design_query,
@@ -9,6 +11,16 @@ from app.services.memory_intents import (
     looks_like_memory_reference,
     looks_like_recent_tool_result_reference,
 )
+
+
+def test_memory_intent_markers_use_centralized_profiles() -> None:
+    assert query_matches_any("上一轮", "上一轮", MEMORY_INTENT_MARKERS["memory_reference"])
+    assert query_matches_any(
+        "pdf agent",
+        "pdfagent",
+        MEMORY_INTENT_MARKERS["pdf_agent_explicit"],
+    )
+    assert not query_matches_any("随便聊聊", "随便聊聊", MEMORY_INTENT_MARKERS["short_followup"])
 
 
 def test_memory_intents_detect_references_and_short_followups() -> None:
