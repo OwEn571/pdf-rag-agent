@@ -45,6 +45,7 @@ from app.services.clarification_intents import (
     pending_clarification_selection_index,
     remember_clarification_attempt,
     reset_clarification_tracking,
+    resolve_disambiguation_judge_decision,
     select_pending_clarification_option,
     selected_option_from_judge_decision,
     selected_clarification_paper_id,
@@ -356,6 +357,68 @@ def test_disambiguation_judge_recommendation_and_auto_contract_notes() -> None:
     assert "selected_paper_id=p2" in updated.notes
     assert "disambiguation_judge_confidence=0.910" in updated.notes
     assert not any(note.startswith("ambiguity_option=old") for note in updated.notes)
+
+
+def test_resolve_disambiguation_judge_decision_auto_resolves_contract() -> None:
+    options = [
+        {"option_id": "a", "paper_id": "p1", "title": "First", "index": 1},
+        {"option_id": "b", "paper_id": "p2", "title": "Second", "index": 0},
+    ]
+    decision = DisambiguationJudgeDecision(
+        decision="auto_resolve",
+        selected_option_id="b",
+        selected_paper_id="p2",
+        confidence=0.91,
+        reason="Second has direct title alignment.",
+    )
+
+    result = resolve_disambiguation_judge_decision(
+        contract=QueryContract(clean_query="PBA是什么"),
+        options=options,
+        judge_decision=decision,
+        auto_resolve_threshold=0.85,
+        recommend_threshold=0.7,
+    )
+
+    assert result.auto_resolve is True
+    assert result.selected_option == options[1]
+    assert result.verification is None
+    assert result.observation_tool == "resolve_ambiguity"
+    assert result.observation_summary == "options=2, judge=auto_resolve, confidence=0.91"
+    assert result.observation_payload["options"] == options
+    assert "auto_resolved_by_llm_judge" in result.contract.notes
+    assert "selected_paper_id=p2" in result.contract.notes
+
+
+def test_resolve_disambiguation_judge_decision_marks_clarification_with_recommendation() -> None:
+    options = [
+        {"option_id": "a", "paper_id": "p1", "title": "First", "index": 1},
+        {"option_id": "b", "paper_id": "p2", "title": "Second", "index": 0},
+    ]
+    decision = DisambiguationJudgeDecision(
+        decision="ask_human",
+        selected_option_id="b",
+        selected_paper_id="p2",
+        confidence=0.74,
+        reason="Second is more likely but not enough for auto-resolve.",
+    )
+
+    result = resolve_disambiguation_judge_decision(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"]),
+        options=options,
+        judge_decision=decision,
+        auto_resolve_threshold=0.85,
+        recommend_threshold=0.7,
+    )
+
+    assert result.auto_resolve is False
+    assert result.observation_tool == "detect_ambiguity"
+    assert result.options[0]["option_id"] == "b"
+    assert result.options[0]["judge_recommended"] is True
+    assert result.verification is not None
+    assert result.verification.status == "clarify"
+    assert result.verification.recommended_action == "clarify_ambiguous_entity"
+    assert any(note.startswith("ambiguity_option=") for note in result.contract.notes)
 
 
 def test_acronym_helpers_extract_normalize_and_match_context() -> None:

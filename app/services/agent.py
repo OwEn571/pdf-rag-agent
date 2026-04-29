@@ -58,8 +58,6 @@ from app.services.clarification_intents import (
     clarification_tracking_key,
     clarification_options_from_contract_notes,
     clear_pending_clarification,
-    apply_disambiguation_judge_recommendation,
-    contract_with_auto_resolved_ambiguity,
     contract_from_pending_clarification,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
@@ -67,14 +65,11 @@ from app.services.clarification_intents import (
     evidence_disambiguation_options,
     disambiguation_judge_human_prompt,
     disambiguation_judge_option_payload,
-    disambiguation_judge_summary,
     disambiguation_judge_system_prompt,
-    disambiguation_missing_fields,
-    judge_allows_auto_resolve,
     next_clarification_attempt,
     remember_clarification_attempt,
     reset_clarification_tracking,
-    selected_option_from_judge_decision,
+    resolve_disambiguation_judge_decision,
     selected_clarification_paper_id,
     store_pending_clarification,
 )
@@ -1013,37 +1008,26 @@ class ResearchAssistantAgentV4(
         )
         if ambiguity_options:
             judge_decision = self._judge_disambiguation_options(contract=contract, options=ambiguity_options)
-            selected_option = selected_option_from_judge_decision(
-                decision=judge_decision,
+            resolution = resolve_disambiguation_judge_decision(
+                contract=contract,
                 options=ambiguity_options,
-            )
-            auto_resolve = selected_option is not None and judge_allows_auto_resolve(
-                judge_decision,
-                threshold=self.agent_settings.disambiguation_auto_resolve_threshold,
+                judge_decision=judge_decision,
+                auto_resolve_threshold=self.agent_settings.disambiguation_auto_resolve_threshold,
+                recommend_threshold=self.agent_settings.disambiguation_recommend_threshold,
             )
             self._record_agent_observation(
                 emit=emit,
                 execution_steps=execution_steps,
-                tool="resolve_ambiguity" if auto_resolve else "detect_ambiguity",
-                summary=disambiguation_judge_summary(
-                    options=ambiguity_options,
-                    judge_decision=judge_decision,
-                ),
-                payload={
-                    "options": ambiguity_options[:4],
-                    "judge_decision": judge_decision.model_dump() if judge_decision is not None else {},
-                },
+                tool=resolution.observation_tool,
+                summary=resolution.observation_summary,
+                payload=resolution.observation_payload,
             )
-            if auto_resolve and selected_option is not None:
-                contract = contract_with_auto_resolved_ambiguity(
-                    contract=contract,
-                    selected=selected_option,
-                    decision=judge_decision,
-                )
+            if resolution.auto_resolve and resolution.selected_option is not None:
+                contract = resolution.contract
                 state["contract"] = contract
                 self._refresh_state_for_selected_ambiguity(
                     state=state,
-                    selected=selected_option,
+                    selected=resolution.selected_option,
                     emit=emit,
                     execution_steps=execution_steps,
                 )
@@ -1070,19 +1054,9 @@ class ResearchAssistantAgentV4(
                 )
                 state["claims"] = claims
             else:
-                ambiguity_options = apply_disambiguation_judge_recommendation(
-                    options=ambiguity_options,
-                    decision=judge_decision,
-                    recommend_threshold=self.agent_settings.disambiguation_recommend_threshold,
-                )
-                contract = contract_with_ambiguity_options(contract=contract, options=ambiguity_options)
-                state["contract"] = contract
+                state["contract"] = resolution.contract
                 state["claims"] = []
-                state["verification"] = VerificationReport(
-                    status="clarify",
-                    missing_fields=disambiguation_missing_fields(contract),
-                    recommended_action="clarify_ambiguous_entity",
-                )
+                state["verification"] = resolution.verification
         else:
             claims = solve_claims_with_web_research(
                 contract=contract,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
@@ -45,6 +46,18 @@ CLARIFICATION_ORDINAL_PATTERNS = [
         ["第四个", "第四项", "第4个", "第 4 个", "第4项", "第 4 项", "fourth", "the fourth"],
     ),
 ]
+
+
+@dataclass(frozen=True)
+class DisambiguationResolutionDecision:
+    auto_resolve: bool
+    selected_option: dict[str, Any] | None
+    contract: QueryContract
+    options: list[dict[str, Any]]
+    verification: VerificationReport | None
+    observation_tool: str
+    observation_summary: str
+    observation_payload: dict[str, Any]
 
 
 def looks_like_clarification_choice_text(normalized_query: str) -> bool:
@@ -435,6 +448,64 @@ def disambiguation_judge_summary(
     return (
         f"options={len(options)}, judge={judge_decision.decision}, "
         f"confidence={float(judge_decision.confidence):.2f}"
+    )
+
+
+def resolve_disambiguation_judge_decision(
+    *,
+    contract: QueryContract,
+    options: list[dict[str, Any]],
+    judge_decision: DisambiguationJudgeDecision | None,
+    auto_resolve_threshold: float,
+    recommend_threshold: float,
+) -> DisambiguationResolutionDecision:
+    selected_option = selected_option_from_judge_decision(
+        decision=judge_decision,
+        options=options,
+    )
+    auto_resolve = selected_option is not None and judge_allows_auto_resolve(
+        judge_decision,
+        threshold=auto_resolve_threshold,
+    )
+    observation_payload = {
+        "options": options[:4],
+        "judge_decision": judge_decision.model_dump() if judge_decision is not None else {},
+    }
+    if auto_resolve and selected_option is not None:
+        resolved_contract = contract_with_auto_resolved_ambiguity(
+            contract=contract,
+            selected=selected_option,
+            decision=judge_decision,
+        )
+        return DisambiguationResolutionDecision(
+            auto_resolve=True,
+            selected_option=selected_option,
+            contract=resolved_contract,
+            options=options,
+            verification=None,
+            observation_tool="resolve_ambiguity",
+            observation_summary=disambiguation_judge_summary(options=options, judge_decision=judge_decision),
+            observation_payload=observation_payload,
+        )
+    annotated_options = apply_disambiguation_judge_recommendation(
+        options=options,
+        decision=judge_decision,
+        recommend_threshold=recommend_threshold,
+    )
+    clarified_contract = contract_with_ambiguity_options(contract=contract, options=annotated_options)
+    return DisambiguationResolutionDecision(
+        auto_resolve=False,
+        selected_option=selected_option,
+        contract=clarified_contract,
+        options=annotated_options,
+        verification=VerificationReport(
+            status="clarify",
+            missing_fields=disambiguation_missing_fields(clarified_contract),
+            recommended_action="clarify_ambiguous_entity",
+        ),
+        observation_tool="detect_ambiguity",
+        observation_summary=disambiguation_judge_summary(options=options, judge_decision=judge_decision),
+        observation_payload=observation_payload,
     )
 
 
