@@ -63,7 +63,6 @@ from app.services.contract_context import (
     canonical_tools,
     contract_allows_active_context_override,
     contract_answer_slots,
-    contract_topic_state,
     note_value,
     note_values,
 )
@@ -71,6 +70,10 @@ from app.services.contract_normalization import (
     normalize_contract_targets,
     normalize_lookup_text,
     normalize_modalities,
+)
+from app.services.conversation_memory_contract import (
+    apply_conversation_memory_to_contract,
+    target_binding_from_memory,
 )
 from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
@@ -2043,7 +2046,11 @@ class ResearchAssistantAgentV4(
         refined_contract = self._resolve_contextual_active_paper_contract(contract=refined_contract, session=session)
         refined_contract = self._inherit_followup_relationship_contract(contract=refined_contract, session=session)
         refined_contract = self._normalize_followup_direction_contract(contract=refined_contract)
-        return self._apply_conversation_memory_to_contract(contract=refined_contract, session=session)
+        return apply_conversation_memory_to_contract(
+            contract=refined_contract,
+            session=session,
+            selected_clarification_paper_id=self._selected_clarification_paper_id(refined_contract),
+        )
 
     def _normalize_conversation_tool_contract(
         self,
@@ -2453,53 +2460,6 @@ class ResearchAssistantAgentV4(
         memory["tool_results"] = results[-12:]
         memory["last_tool_result"] = record
         session.working_memory = memory
-
-    def _target_binding_from_memory(self, *, session: SessionContext, target: str) -> dict[str, Any] | None:
-        key = normalize_lookup_text(target)
-        if not key:
-            return None
-        bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
-        binding = bindings.get(key)
-        return dict(binding) if isinstance(binding, dict) else None
-
-    def _apply_conversation_memory_to_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        if contract.interaction_mode != "research" or not contract.targets:
-            return contract
-        target_bindings = {
-            target: binding
-            for target in contract.targets
-            if (binding := self._target_binding_from_memory(session=session, target=target))
-        }
-        topic_state = contract_topic_state(contract)
-        goals = research_plan_goals(contract)
-        if contract.relation == "origin_lookup" or "origin" in contract_answer_slots(contract) or goals & {"paper_title", "year"}:
-            return contract
-        allow_explicit_target_binding = bool(target_bindings) and topic_state != "switch"
-        if "formula" in goals and topic_state != "continue":
-            allow_explicit_target_binding = False
-        if (
-            not contract_allows_active_context_override(contract)
-            and not allow_explicit_target_binding
-        ):
-            return contract
-        if "exclude_previous_focus" in contract.notes or is_negative_correction_query(contract.clean_query):
-            return contract
-        if self._selected_clarification_paper_id(contract):
-            return contract
-        notes = list(contract.notes)
-        for target in contract.targets:
-            binding = target_bindings.get(target)
-            if not binding:
-                continue
-            paper_id = str(binding.get("paper_id", "") or "").strip()
-            title = str(binding.get("title", "") or "").strip()
-            if not paper_id:
-                continue
-            notes = list(dict.fromkeys([*notes, "resolved_from_conversation_memory", f"selected_paper_id={paper_id}"]))
-            if title:
-                notes.append("memory_title=" + title)
-            return contract.model_copy(update={"continuation_mode": "followup", "notes": notes})
-        return contract
 
     def _formula_answer_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         active = session.effective_active_research()
@@ -3093,7 +3053,7 @@ class ResearchAssistantAgentV4(
             return []
         target = str(contract.targets[0] or "").strip()
         if not is_negative_correction_query(contract.clean_query) and "exclude_previous_focus" not in contract.notes:
-            if self._target_binding_from_memory(session=session, target=target):
+            if target_binding_from_memory(session=session, target=target):
                 return []
         options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
         goals = research_plan_goals(contract)
@@ -3932,7 +3892,7 @@ class ResearchAssistantAgentV4(
             }
         goals = research_plan_goals(contract)
         if self._contract_needs_evidence_disambiguation(contract):
-            if self._target_binding_from_memory(session=session, target=contract.targets[0]) and "exclude_previous_focus" not in contract.notes:
+            if target_binding_from_memory(session=session, target=contract.targets[0]) and "exclude_previous_focus" not in contract.notes:
                 option_count = 1
             else:
                 option_count = len(self._acronym_options_from_evidence(target=contract.targets[0], papers=papers, evidence=evidence))
