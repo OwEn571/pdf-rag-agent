@@ -10,7 +10,11 @@ from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
-from app.services.evidence_presentation import extract_topology_terms, formula_terms
+from app.services.evidence_presentation import (
+    evidence_ids_for_paper,
+    extract_topology_terms,
+    formula_terms,
+)
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
@@ -167,7 +171,7 @@ class SolverPipelineMixin:
         selected = self._select_origin_paper(contract=contract, papers=papers, evidence=evidence)
         if selected is None:
             return []
-        supporting_ids = self._evidence_ids_for_paper(evidence, selected.paper_id, limit=2)
+        supporting_ids = evidence_ids_for_paper(evidence or [], selected.paper_id, limit=2)
         return [origin_helpers.origin_lookup_claim(contract=contract, paper=selected, evidence_ids=supporting_ids)]
 
     def _solve_entity_definition_text(
@@ -227,7 +231,7 @@ class SolverPipelineMixin:
         claim = topology_discovery_claim(
             papers=papers,
             topology_terms=topology_terms,
-            evidence_ids_for_paper=lambda paper_id: self._evidence_ids_for_paper(evidence, paper_id, limit=2),
+            evidence_ids_for_paper=lambda paper_id: evidence_ids_for_paper(evidence, paper_id, limit=2),
         )
         return [claim] if claim is not None else []
 
@@ -269,7 +273,7 @@ class SolverPipelineMixin:
             papers=papers,
             metric_lines=self._extract_metric_lines(evidence),
             summary_for_paper=self._paper_summary_text,
-            evidence_ids_for_paper=lambda paper_id, limit: self._evidence_ids_for_paper(evidence, paper_id, limit=limit),
+            evidence_ids_for_paper=lambda paper_id, limit: evidence_ids_for_paper(evidence, paper_id, limit=limit),
         )
 
     def _solve_paper_recommendation_text(
@@ -317,7 +321,7 @@ class SolverPipelineMixin:
                 selected_papers=selected_papers,
                 metric_lines=self._extract_metric_lines(metric_evidence or evidence),
                 metric_evidence=metric_evidence,
-                fallback_evidence_ids=self._evidence_ids_for_paper(evidence, selected_paper.paper_id, limit=4),
+                fallback_evidence_ids=evidence_ids_for_paper(evidence, selected_paper.paper_id, limit=4),
                 paper_ids=paper_ids or [selected_paper.paper_id],
             )
         ]
@@ -336,7 +340,7 @@ class SolverPipelineMixin:
             entity=contract.targets[0] if contract.targets else "",
             papers=papers,
             summary_for_paper=self._paper_summary_text,
-            evidence_ids_for_paper=lambda paper_id, limit: self._evidence_ids_for_paper(evidence, paper_id, limit=limit),
+            evidence_ids_for_paper=lambda paper_id, limit: evidence_ids_for_paper(evidence, paper_id, limit=limit),
         )
 
     def _select_origin_paper(
@@ -514,7 +518,7 @@ class SolverPipelineMixin:
                 matched_targets=matched_targets,
                 formula_payload=formula_payload,
                 formula_blocks=formula_blocks,
-                fallback_evidence_ids=self._evidence_ids_for_paper(evidence, paper.paper_id, limit=3),
+                fallback_evidence_ids=evidence_ids_for_paper(evidence, paper.paper_id, limit=3),
                 fallback_term_text="\n".join(item.snippet for item in paper_evidence[:3]),
                 term_extractor=formula_terms,
             )

@@ -94,7 +94,6 @@ from app.services.evidence_presentation import (
     chunk_text,
     citations_from_doc_ids,
     claim_evidence_ids,
-    evidence_ids_for_paper,
     figure_fallback_summary,
     paper_recommendation_reason,
     safe_year,
@@ -5470,10 +5469,6 @@ class ResearchAssistantAgentV4(
     def _paper_recommendation_reason(self, paper: CandidatePaper) -> str:
         summary = self._paper_summary_text(paper.paper_id)
         return paper_recommendation_reason(summary)
-
-    @staticmethod
-    def _evidence_ids_for_paper(evidence: list[EvidenceBlock], paper_id: str, *, limit: int) -> list[str]:
-        return evidence_ids_for_paper(evidence, paper_id, limit=limit)
 
     @staticmethod
     def _claim_evidence_ids(claims: list[Claim]) -> list[str]:
