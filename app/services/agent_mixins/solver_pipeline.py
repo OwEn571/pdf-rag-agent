@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -19,10 +18,12 @@ from app.services.schema_claim_helpers import (
 )
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 from app.services.topology_recommendation_helpers import (
-    fallback_topology_recommendation,
     is_unusable_topology_recommendation_text,
     topology_discovery_claim,
+    topology_recommendation_from_payload,
+    topology_recommendation_human_prompt,
     topology_recommendation_claim,
+    topology_recommendation_system_prompt,
 )
 from app.services.visual_claim_helpers import (
     figure_conclusion_claim_from_vlm_payload,
@@ -789,29 +790,11 @@ class SolverPipelineMixin:
 
     def _derive_topology_recommendation(self, *, evidence: list[EvidenceBlock], topology_terms: list[str]) -> dict[str, str]:
         payload = self.clients.invoke_json(
-            system_prompt=(
-                "你是 topology 证据分析器。"
-                "请只输出 JSON，字段为 overall_best, engineering_best, rationale, summary。"
-                "必须严格基于给定证据，不要使用外部知识。"
-            ),
-            human_prompt=json.dumps(
-                {
-                    "topology_terms": topology_terms,
-                    "evidence": [item.snippet[:260] for item in evidence[:6]],
-                },
-                ensure_ascii=False,
-            ),
+            system_prompt=topology_recommendation_system_prompt(),
+            human_prompt=topology_recommendation_human_prompt(topology_terms=topology_terms, evidence=evidence),
             fallback={},
         )
-        summary = str(payload.get("summary", "")).strip()
-        if summary and not self._is_unusable_topology_recommendation_text(summary):
-            return {
-                "overall_best": str(payload.get("overall_best", "")).strip(),
-                "engineering_best": str(payload.get("engineering_best", "")).strip(),
-                "rationale": str(payload.get("rationale", "")).strip(),
-                "summary": summary,
-            }
-        return fallback_topology_recommendation(topology_terms)
+        return topology_recommendation_from_payload(payload, topology_terms=topology_terms)
 
     @staticmethod
     def _is_unusable_topology_recommendation_text(text: str) -> bool:

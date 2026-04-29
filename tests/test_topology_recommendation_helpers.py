@@ -4,7 +4,10 @@ from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
     is_unusable_topology_recommendation_text,
     topology_discovery_claim,
+    topology_recommendation_from_payload,
+    topology_recommendation_human_prompt,
     topology_recommendation_claim,
+    topology_recommendation_system_prompt,
 )
 from app.domain.models import CandidatePaper, EvidenceBlock
 
@@ -23,6 +26,37 @@ def test_fallback_topology_recommendation_uses_terms_or_default() -> None:
     assert recommendation["engineering_best"] == "DAG"
     assert "chain / DAG" in recommendation["summary"]
     assert "chain / tree / mesh / DAG" in default_recommendation["summary"]
+
+
+def test_topology_recommendation_prompt_and_payload_helpers() -> None:
+    evidence = [
+        EvidenceBlock(
+            doc_id="ev-1",
+            paper_id="p1",
+            title="Topology",
+            file_path="/tmp/topology.pdf",
+            page=1,
+            block_type="page_text",
+            snippet="DAG is useful when dependencies are explicit.",
+        )
+    ]
+    prompt = topology_recommendation_system_prompt()
+    human_prompt = topology_recommendation_human_prompt(topology_terms=["DAG"], evidence=evidence)
+    recommendation = topology_recommendation_from_payload(
+        {"summary": "Use DAG when dependencies matter.", "engineering_best": "DAG", "rationale": "explicit dependencies"},
+        topology_terms=["DAG"],
+    )
+    fallback = topology_recommendation_from_payload(
+        {"summary": "does not contain specific comparison"},
+        topology_terms=["chain"],
+    )
+
+    assert "topology 证据分析器" in prompt
+    assert '"topology_terms": ["DAG"]' in human_prompt
+    assert "dependencies are explicit" in human_prompt
+    assert recommendation["engineering_best"] == "DAG"
+    assert fallback["engineering_best"] == "DAG"
+    assert "chain" in fallback["summary"]
 
 
 def test_topology_discovery_claim_collects_relevant_papers_and_evidence_ids() -> None:

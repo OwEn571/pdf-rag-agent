@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock
 
@@ -35,6 +37,41 @@ def is_unusable_topology_recommendation_text(text: str) -> bool:
         "不包含",
     ]
     return any(marker in lowered for marker in negative_markers)
+
+
+def topology_recommendation_system_prompt() -> str:
+    return (
+        "你是 topology 证据分析器。"
+        "请只输出 JSON，字段为 overall_best, engineering_best, rationale, summary。"
+        "必须严格基于给定证据，不要使用外部知识。"
+    )
+
+
+def topology_recommendation_human_prompt(*, topology_terms: list[str], evidence: list[EvidenceBlock]) -> str:
+    return json.dumps(
+        {
+            "topology_terms": topology_terms,
+            "evidence": [item.snippet[:260] for item in evidence[:6]],
+        },
+        ensure_ascii=False,
+    )
+
+
+def topology_recommendation_from_payload(
+    payload: Any,
+    *,
+    topology_terms: list[str],
+) -> dict[str, str]:
+    if isinstance(payload, dict):
+        summary = str(payload.get("summary", "")).strip()
+        if summary and not is_unusable_topology_recommendation_text(summary):
+            return {
+                "overall_best": str(payload.get("overall_best", "")).strip(),
+                "engineering_best": str(payload.get("engineering_best", "")).strip(),
+                "rationale": str(payload.get("rationale", "")).strip(),
+                "summary": summary,
+            }
+    return fallback_topology_recommendation(topology_terms)
 
 
 def topology_discovery_claim(
