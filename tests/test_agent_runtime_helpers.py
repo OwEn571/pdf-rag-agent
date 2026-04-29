@@ -5,15 +5,18 @@ from types import SimpleNamespace
 from app.domain.models import QueryContract, ResearchPlan
 from app.services.agent_runtime_helpers import (
     agent_loop_summary,
+    agent_loop_execution_step,
     configured_max_steps,
     contract_needs_human_clarification,
     conversation_runtime_actions,
     conversation_runtime_state,
     dequeue_action,
     execute_tool_loop,
+    finalize_research_runtime,
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
+    record_tool_loop_ready,
     planner_next_action,
     research_runtime_actions,
     research_runtime_state,
@@ -54,8 +57,33 @@ def test_runtime_helpers_build_initial_conversation_and_research_state() -> None
     assert research_state["tool_inputs"] == {"fetch_url": {"url": "https://example.com"}}
     assert research_state["verification"] is None
     assert agent_loop_summary(["read_memory", "compose"]) == "read_memory -> compose"
+    assert agent_loop_execution_step(["read_memory", "compose"]) == {
+        "node": "agent_loop",
+        "summary": "read_memory -> compose",
+    }
     assert tool_loop_ready_tool(["search_corpus", "compose"]) == "search_corpus"
     assert tool_loop_ready_tool(["compose"]) == "compose"
+
+
+def test_runtime_helpers_record_tool_loop_ready_event_and_step() -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    execution_steps: list[dict[str, object]] = []
+
+    record_tool_loop_ready(
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=execution_steps,
+        tool="search_corpus",
+        actions=["search_corpus", "compose"],
+        tool_inputs={"search_corpus": {"query": "DPO"}},
+    )
+
+    assert events[0][0] == "observation"
+    assert events[0][1]["tool"] == "search_corpus"
+    assert events[0][1]["payload"] == {
+        "actions": ["search_corpus", "compose"],
+        "tool_inputs": {"search_corpus": {"query": "DPO"}},
+    }
+    assert execution_steps == [{"node": "agent_loop", "summary": "search_corpus -> compose"}]
 
 
 def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:
@@ -207,6 +235,32 @@ def test_runtime_helpers_finalize_research_verification_and_confidence() -> None
     assert passed.status == "pass"
     assert passed_confidence["score"] > 0.8
     assert pass_state["verification"] == passed
+
+
+def test_runtime_helpers_finalize_research_runtime_emits_verification_and_confidence() -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    execution_steps: list[dict[str, object]] = []
+    session = SimpleNamespace()
+
+    class Agent:
+        def _agent_reflect(self, **kwargs: object) -> None:
+            kwargs["state"]["reflected"] = True  # type: ignore[index]
+            kwargs["execution_steps"].append({"node": "reflect", "summary": "ok"})  # type: ignore[index, union-attr]
+
+    state: dict[str, object] = {}
+    finalize_research_runtime(
+        agent=Agent(),
+        state=state,
+        session=session,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=execution_steps,
+    )
+
+    assert state["reflected"] is True
+    assert events[0][0] == "verification"
+    assert events[0][1]["status"] == "clarify"
+    assert events[1][0] == "confidence"
+    assert execution_steps[-1] == {"node": "agent_tool:verify_claim", "summary": "clarify"}
 
 
 def test_runtime_helpers_choose_next_conversation_action() -> None:

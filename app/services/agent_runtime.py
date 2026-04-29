@@ -13,20 +13,16 @@ from app.services.agent_tools import (
     research_execution_tool_names,
 )
 from app.services.agent_runtime_helpers import (
-    agent_loop_summary,
     conversation_runtime_actions,
     conversation_runtime_state,
     execute_tool_loop,
-    finalize_research_verification,
+    finalize_research_runtime,
     next_conversation_action,
     next_research_action,
+    record_tool_loop_ready,
     research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
-    verification_execution_step,
-)
-from app.services.tool_registry_helpers import (
-    tool_loop_ready_observation,
 )
 
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -49,11 +45,13 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         actions = conversation_runtime_actions(contract=contract, agent_plan=agent_plan)
         state = conversation_runtime_state(contract=contract, agent_plan=agent_plan)
-        emit(
-            "observation",
-            tool_loop_ready_observation(tool="compose", actions=actions, tool_inputs=state["tool_inputs"]),
+        record_tool_loop_ready(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool="compose",
+            actions=actions,
+            tool_inputs=state["tool_inputs"],
         )
-        execution_steps.append({"node": "agent_loop", "summary": agent_loop_summary(actions)})
         tools = build_conversation_tool_registry(
             agent=self.agent,
             state=state,
@@ -115,15 +113,13 @@ class AgentRuntime:
             web_enabled=web_enabled,
             is_negative_correction_query=self.agent._is_negative_correction_query,
         )
-        emit(
-            "observation",
-            tool_loop_ready_observation(
-                tool=tool_loop_ready_tool(actions),
-                actions=actions,
-                tool_inputs=state["tool_inputs"],
-            ),
+        record_tool_loop_ready(
+            emit=emit,
+            execution_steps=execution_steps,
+            tool=tool_loop_ready_tool(actions),
+            actions=actions,
+            tool_inputs=state["tool_inputs"],
         )
-        execution_steps.append({"node": "agent_loop", "summary": agent_loop_summary(actions)})
 
         tools = build_research_tool_registry(
             agent=self.agent,
@@ -159,14 +155,11 @@ class AgentRuntime:
         if state["verification"] is None:
             executor.run("compose")
 
-        self.agent._agent_reflect(
+        finalize_research_runtime(
+            agent=self.agent,
             state=state,
             session=session,
             emit=emit,
             execution_steps=execution_steps,
         )
-        verification, confidence = finalize_research_verification(state)
-        emit("verification", verification.model_dump())
-        emit("confidence", confidence)
-        execution_steps.append(verification_execution_step(verification))
         return state

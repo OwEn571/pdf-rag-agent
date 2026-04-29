@@ -10,7 +10,11 @@ from app.services.confidence import (
     confidence_payload,
     should_ask_human,
 )
-from app.services.tool_registry_helpers import tool_input_from_state, tool_inputs_by_name
+from app.services.tool_registry_helpers import (
+    tool_input_from_state,
+    tool_inputs_by_name,
+    tool_loop_ready_observation,
+)
 
 NegativeCorrectionFn = Callable[[str], bool]
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -81,8 +85,27 @@ def agent_loop_summary(actions: list[str]) -> str:
     return " -> ".join(actions)
 
 
+def agent_loop_execution_step(actions: list[str]) -> dict[str, str]:
+    return {"node": "agent_loop", "summary": agent_loop_summary(actions)}
+
+
 def tool_loop_ready_tool(actions: list[str]) -> str:
     return "search_corpus" if "search_corpus" in actions else "compose"
+
+
+def record_tool_loop_ready(
+    *,
+    emit: EmitFn,
+    execution_steps: list[dict[str, Any]],
+    tool: str,
+    actions: list[str],
+    tool_inputs: dict[str, Any],
+) -> None:
+    emit(
+        "observation",
+        tool_loop_ready_observation(tool=tool, actions=actions, tool_inputs=tool_inputs),
+    )
+    execution_steps.append(agent_loop_execution_step(actions))
 
 
 def finalize_research_verification(state: dict[str, Any]) -> tuple[VerificationReport, dict[str, Any]]:
@@ -101,6 +124,26 @@ def finalize_research_verification(state: dict[str, Any]) -> tuple[VerificationR
 
 def verification_execution_step(verification: VerificationReport) -> dict[str, str]:
     return {"node": "agent_tool:verify_claim", "summary": verification.status}
+
+
+def finalize_research_runtime(
+    *,
+    agent: Any,
+    state: dict[str, Any],
+    session: SessionContext,
+    emit: EmitFn,
+    execution_steps: list[dict[str, Any]],
+) -> None:
+    agent._agent_reflect(
+        state=state,
+        session=session,
+        emit=emit,
+        execution_steps=execution_steps,
+    )
+    verification, confidence = finalize_research_verification(state)
+    emit("verification", verification.model_dump())
+    emit("confidence", confidence)
+    execution_steps.append(verification_execution_step(verification))
 
 
 def configured_max_steps(agent_settings: Any, *, fallback: int) -> int:
