@@ -11,8 +11,12 @@ from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.paper_claim_helpers import default_text_claim, paper_recommendation_claim, paper_summary_claim
-from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
-from app.services.schema_claim_helpers import claims_from_schema_payload, should_use_schema_claim_solver
+from app.services.schema_claim_helpers import (
+    claims_from_schema_payload,
+    schema_claim_human_prompt,
+    schema_claim_system_prompt,
+    should_use_schema_claim_solver,
+)
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
@@ -73,58 +77,13 @@ class SolverPipelineMixin:
         if self.clients.chat is None or not evidence:
             return []
         payload = self.clients.invoke_json(
-            system_prompt=(
-                "你是论文研究助手的通用证据 Claim 抽取器。"
-                "不要根据 relation 分支套模板。"
-                "只基于输入 evidence 和 papers，输出 JSON："
-                "{claims:[{claim_type, entity, value, structured_data, evidence_ids, paper_ids, confidence, required}]}。"
-                "claim_type 应来自用户目标和 requested_fields，例如 definition/formula/metric_value/"
-                "paper_summary/followup_research/recommendation/general_answer。"
-                "每条 claim 必须引用能支撑它的 evidence_ids；证据不足就返回空 claims。"
-                "不要编造 evidence 中不存在的论文、指标、公式或结论。"
-                f"{DOCUMENT_SAFETY_INSTRUCTION}"
-            ),
-            human_prompt=json.dumps(
-                {
-                    "query": contract.clean_query,
-                    "intent_adapter": {
-                        "relation": contract.relation,
-                        "targets": contract.targets,
-                        "requested_fields": contract.requested_fields,
-                        "answer_shape": contract.answer_shape,
-                        "precision_requirement": contract.precision_requirement,
-                        "notes": contract.notes,
-                    },
-                    "required_claims": plan.required_claims,
-                    "papers": [
-                        {
-                            "paper_id": item.paper_id,
-                            "title": item.title,
-                            "year": item.year,
-                        }
-                        for item in papers[:8]
-                    ],
-                    "evidence": [
-                        {
-                            "doc_id": item.doc_id,
-                            "paper_id": item.paper_id,
-                            "title": item.title,
-                            "page": item.page,
-                            "block_type": item.block_type,
-                            "caption": item.caption,
-                            "snippet": wrap_untrusted_document_text(
-                                item.snippet,
-                                doc_id=item.doc_id,
-                                title=item.title,
-                                source=item.block_type or "pdf",
-                                max_chars=1200,
-                            ),
-                        }
-                        for item in evidence[:40]
-                    ],
-                    "conversation_context": self._session_conversation_context(session, max_chars=12000),
-                },
-                ensure_ascii=False,
+            system_prompt=schema_claim_system_prompt(),
+            human_prompt=schema_claim_human_prompt(
+                contract=contract,
+                plan=plan,
+                papers=papers,
+                evidence=evidence,
+                conversation_context=self._session_conversation_context(session, max_chars=12000),
             ),
             fallback={},
         )
