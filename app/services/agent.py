@@ -874,7 +874,7 @@ class ResearchAssistantAgentV4(
         )
         human_payload = {
             "current_query": clean_query,
-            "available_tools": self._agent_tool_manifest(),
+            "available_tools": agent_tool_manifest(),
             "conversation_context": self._session_conversation_context(session, max_chars=10000),
         }
         invoke_json_messages = getattr(self.clients, "invoke_json_messages", None)
@@ -2578,10 +2578,6 @@ class ResearchAssistantAgentV4(
                 "notes": list(dict.fromkeys(notes)),
             }
         )
-
-    @staticmethod
-    def _agent_tool_manifest() -> list[dict[str, Any]]:
-        return agent_tool_manifest()
 
     def _session_conversation_context(self, session: SessionContext, *, max_chars: int = 24000) -> dict[str, Any]:
         """Return the retained conversation as the LLM-facing working memory."""
