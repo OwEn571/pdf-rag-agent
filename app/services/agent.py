@@ -72,16 +72,15 @@ from app.services.contract_normalization import (
     normalize_modalities,
 )
 from app.services.contextual_contract_helpers import (
-    active_paper_reference_notes,
+    contextual_active_paper_contract,
     formula_answer_correction_contract,
     formula_contextual_paper_contract,
     formula_followup_target,
     formula_location_followup_contract,
     formula_query_allows_paper_context,
-    normalize_entity_key,
     paper_context_supports_formula_target,
     paper_from_query_hint,
-    promote_contextual_metric_contract,
+    paper_scope_correction_contract,
 )
 from app.services.conversation_memory_contract import (
     active_memory_bindings,
@@ -2359,28 +2358,7 @@ class ResearchAssistantAgentV4(
         paper = self._paper_from_query_hint(contract.clean_query)
         if paper is None:
             return contract
-        inherited_query = active.clean_query or contract.clean_query
-        notes = active_paper_reference_notes(
-            notes=contract.notes,
-            paper=paper,
-            marker="paper_scope_correction",
-        )
-        rewritten = f"限定在论文《{paper.title}》中回答：{inherited_query}"
-        scoped = QueryContract(
-            clean_query=rewritten,
-            interaction_mode="research",
-            relation=active.relation or contract.relation,
-            targets=list(active.targets),
-            answer_slots=list(contract.answer_slots),
-            requested_fields=list(active.requested_fields or contract.requested_fields or ["answer"]),
-            required_modalities=list(active.required_modalities or contract.required_modalities or ["page_text"]),
-            answer_shape=active.answer_shape or contract.answer_shape,
-            precision_requirement=active.precision_requirement or contract.precision_requirement,
-            continuation_mode="followup",
-            allow_web_search=contract.allow_web_search,
-            notes=notes,
-        )
-        return promote_contextual_metric_contract(scoped)
+        return paper_scope_correction_contract(contract=contract, active=active, paper=paper)
 
     def _resolve_contextual_active_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
@@ -2395,22 +2373,7 @@ class ResearchAssistantAgentV4(
         paper = self._paper_from_query_hint(" ".join(active.titles))
         if paper is None:
             return contract
-        notes = active_paper_reference_notes(
-            notes=contract.notes,
-            paper=paper,
-            marker="active_paper_reference",
-        )
-        clean_query = contract.clean_query
-        if normalize_entity_key(paper.title) not in normalize_entity_key(clean_query):
-            clean_query = f"限定在论文《{paper.title}》中回答：{clean_query}"
-        scoped = contract.model_copy(
-            update={
-                "clean_query": clean_query,
-                "continuation_mode": "followup",
-                "notes": notes,
-            }
-        )
-        return promote_contextual_metric_contract(scoped)
+        return contextual_active_paper_contract(contract=contract, paper=paper)
 
     def _paper_from_query_hint(self, query: str) -> CandidatePaper | None:
         return paper_from_query_hint(

@@ -151,6 +151,54 @@ def paper_context_supports_formula_target(*, block_documents: Iterable[Any], tar
     return False
 
 
+def paper_scope_correction_contract(
+    *,
+    contract: QueryContract,
+    active: ActiveResearch,
+    paper: CandidatePaper,
+) -> QueryContract:
+    inherited_query = active.clean_query or contract.clean_query
+    notes = active_paper_reference_notes(
+        notes=contract.notes,
+        paper=paper,
+        marker="paper_scope_correction",
+    )
+    scoped = QueryContract(
+        clean_query=f"限定在论文《{paper.title}》中回答：{inherited_query}",
+        interaction_mode="research",
+        relation=active.relation or contract.relation,
+        targets=list(active.targets),
+        answer_slots=list(contract.answer_slots),
+        requested_fields=list(active.requested_fields or contract.requested_fields or ["answer"]),
+        required_modalities=list(active.required_modalities or contract.required_modalities or ["page_text"]),
+        answer_shape=active.answer_shape or contract.answer_shape,
+        precision_requirement=active.precision_requirement or contract.precision_requirement,
+        continuation_mode="followup",
+        allow_web_search=contract.allow_web_search,
+        notes=notes,
+    )
+    return promote_contextual_metric_contract(scoped)
+
+
+def contextual_active_paper_contract(*, contract: QueryContract, paper: CandidatePaper) -> QueryContract:
+    notes = active_paper_reference_notes(
+        notes=contract.notes,
+        paper=paper,
+        marker="active_paper_reference",
+    )
+    clean_query = contract.clean_query
+    if normalize_entity_key(paper.title) not in normalize_entity_key(clean_query):
+        clean_query = f"限定在论文《{paper.title}》中回答：{clean_query}"
+    scoped = contract.model_copy(
+        update={
+            "clean_query": clean_query,
+            "continuation_mode": "followup",
+            "notes": notes,
+        }
+    )
+    return promote_contextual_metric_contract(scoped)
+
+
 def promote_contextual_metric_contract(contract: QueryContract) -> QueryContract:
     if contract.relation == "metric_value_lookup":
         return contract

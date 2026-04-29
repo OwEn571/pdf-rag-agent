@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from app.domain.models import ActiveResearch, CandidatePaper, QueryContract
 from app.services.contextual_contract_helpers import (
     active_paper_reference_notes,
+    contextual_active_paper_contract,
     formula_answer_correction_contract,
     formula_contextual_paper_contract,
     formula_followup_target,
@@ -14,6 +15,7 @@ from app.services.contextual_contract_helpers import (
     paper_context_supports_formula_target,
     paper_from_query_hint,
     paper_hint_names,
+    paper_scope_correction_contract,
     promote_contextual_metric_contract,
 )
 
@@ -124,6 +126,46 @@ def test_paper_context_supports_formula_target_requires_target_and_formula_signa
         ],
         target="PBA",
     )
+
+
+def test_paper_scope_correction_contract_inherits_active_research_shape() -> None:
+    contract = QueryContract(
+        clean_query="我问的是这篇论文中的效果",
+        relation="general_question",
+        targets=["PBA"],
+        answer_slots=["metric_value"],
+        allow_web_search=True,
+    )
+    active = ActiveResearch(
+        relation="metric_value_lookup",
+        targets=["PBA", "ICA"],
+        requested_fields=["metric_value"],
+        required_modalities=["table"],
+        answer_shape="narrative",
+        precision_requirement="exact",
+        clean_query="PBA 和 ICA 的效果如何？",
+    )
+    paper = CandidatePaper(paper_id="paper-1", title="AlignX Paper")
+
+    scoped = paper_scope_correction_contract(contract=contract, active=active, paper=paper)
+
+    assert scoped.relation == "metric_value_lookup"
+    assert scoped.targets == ["PBA", "ICA"]
+    assert scoped.allow_web_search is True
+    assert scoped.clean_query == "限定在论文《AlignX Paper》中回答：PBA 和 ICA 的效果如何？"
+    assert "paper_scope_correction" in scoped.notes
+    assert "selected_paper_id=paper-1" in scoped.notes
+
+
+def test_contextual_active_paper_contract_adds_scope_when_title_missing() -> None:
+    contract = QueryContract(clean_query="PBA 的效果如何？", relation="general_question", targets=["PBA"])
+    paper = CandidatePaper(paper_id="paper-1", title="AlignX Paper")
+
+    scoped = contextual_active_paper_contract(contract=contract, paper=paper)
+
+    assert scoped.clean_query == "限定在论文《AlignX Paper》中回答：PBA 的效果如何？"
+    assert scoped.continuation_mode == "followup"
+    assert "active_paper_reference" in scoped.notes
 
 
 def test_promote_contextual_metric_contract_adds_metric_requirements() -> None:
