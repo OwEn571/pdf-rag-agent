@@ -12,7 +12,7 @@ from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.paper_claim_helpers import default_text_claim, paper_recommendation_claim, paper_summary_claim
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
-from app.services.schema_claim_helpers import claims_from_schema_payload
+from app.services.schema_claim_helpers import claims_from_schema_payload, should_use_schema_claim_solver
 from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
 from app.services.topology_recommendation_helpers import (
     fallback_topology_recommendation,
@@ -59,20 +59,7 @@ class SolverPipelineMixin:
 
     @classmethod
     def _should_use_schema_claim_solver(cls, *, contract: QueryContract, plan: ResearchPlan) -> bool:
-        goals = cls._claim_goals(contract=contract, plan=plan)
-        high_precision_goals = {
-            "formula",
-            "origin",
-            "paper_title",
-            "year",
-            "variable_explanation",
-            "followup_papers",
-            "candidate_relationship",
-            "strict_followup",
-            "best_topology",
-            "langgraph_recommendation",
-        }
-        return not bool(goals & high_precision_goals)
+        return should_use_schema_claim_solver(contract=contract, plan=plan)
 
     def _solve_claims_with_schema(
         self,

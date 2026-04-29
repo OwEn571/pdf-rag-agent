@@ -2,8 +2,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract
+from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan
 from app.services.confidence import coerce_confidence_value
+from app.services.solver_goal_helpers import claim_goals
+
+
+SCHEMA_CLAIM_SOLVER_BLOCKED_GOALS = {
+    "formula",
+    "origin",
+    "paper_title",
+    "year",
+    "variable_explanation",
+    "followup_papers",
+    "candidate_relationship",
+    "strict_followup",
+    "best_topology",
+    "langgraph_recommendation",
+}
+
+
+def should_use_schema_claim_solver(*, contract: QueryContract, plan: ResearchPlan) -> bool:
+    goals = claim_goals(contract=contract, plan=plan)
+    return not bool(goals & SCHEMA_CLAIM_SOLVER_BLOCKED_GOALS)
 
 
 def claims_from_schema_payload(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
-from app.services.schema_claim_helpers import claims_from_schema_payload
+from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract, ResearchPlan
+from app.services.schema_claim_helpers import claims_from_schema_payload, should_use_schema_claim_solver
 
 
 def _evidence(doc_id: str, *, paper_id: str = "paper-1") -> EvidenceBlock:
@@ -59,3 +59,15 @@ def test_claims_from_schema_payload_falls_back_to_contract_target_and_evidence_p
     assert claims[0].paper_ids == ["paper-from-evidence"]
     assert claims[0].confidence == 0.72
     assert claims[0].required is False
+
+
+def test_should_use_schema_claim_solver_blocks_high_precision_goals() -> None:
+    general_contract = QueryContract(clean_query="总结一下", requested_fields=["summary"])
+    formula_contract = QueryContract(clean_query="公式是什么", requested_fields=["formula"])
+
+    assert should_use_schema_claim_solver(contract=general_contract, plan=ResearchPlan(required_claims=["summary"]))
+    assert not should_use_schema_claim_solver(contract=formula_contract, plan=ResearchPlan(required_claims=["formula"]))
+    assert not should_use_schema_claim_solver(
+        contract=QueryContract(clean_query="哪种 topology 最好", requested_fields=["best_topology"]),
+        plan=ResearchPlan(required_claims=["best_topology", "langgraph_recommendation"]),
+    )
