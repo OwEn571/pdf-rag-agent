@@ -45,6 +45,7 @@ from app.services.agent_runtime_helpers import (
     retry_research_limits,
     refresh_selected_ambiguity_materials,
     run_agent_paper_search,
+    run_retry_verification_from_materials,
     screen_agent_papers,
     search_agent_evidence,
     solve_agent_state_claims,
@@ -1145,48 +1146,42 @@ class ResearchAssistantAgentV4(
                 limit=limit,
             ),
         )
-        broader_candidates = retry_materials.candidate_papers
-        broader_evidence = retry_materials.evidence
-        goals = retry_materials.goals
-        retry_plan = plan.model_copy(update={"retry_budget": 0})
-        retry_claims = self._run_solvers(
+        retry_result = run_retry_verification_from_materials(
             contract=contract,
-            plan=retry_plan,
-            papers=broader_candidates,
-            evidence=broader_evidence,
-            session=session,
-            use_web_search=explicit_web_search,
-            max_web_results=max_web_results,
+            plan=plan,
+            materials=retry_materials,
+            solve_claims=lambda retry_plan, retry_papers, retry_evidence: self._run_solvers(
+                contract=contract,
+                plan=retry_plan,
+                papers=retry_papers,
+                evidence=retry_evidence,
+                session=session,
+                use_web_search=explicit_web_search,
+                max_web_results=max_web_results,
+            ),
+            verify_claims=lambda retry_plan, retry_claims, retry_papers, retry_evidence: self._verify_claims(
+                contract=contract,
+                plan=retry_plan,
+                claims=retry_claims,
+                papers=retry_papers,
+                evidence=retry_evidence,
+            ),
+            prefer_identity_matching_papers=lambda candidates, targets: self._prefer_identity_matching_papers(
+                candidates=candidates,
+                targets=targets,
+            ),
         )
-        retry_report = self._verify_claims(
-            contract=contract,
-            plan=retry_plan,
-            claims=retry_claims,
-            papers=broader_candidates,
-            evidence=broader_evidence,
-        )
-        if retry_report.status == "pass":
-            state["screened_papers"] = (
-                self._prefer_identity_matching_papers(candidates=broader_candidates, targets=contract.targets)
-                if "figure_conclusion" in goals and contract.targets
-                else broader_candidates
-            )
-            state["evidence"] = broader_evidence
-            state["claims"] = retry_claims
-            state["verification"] = retry_report
-        else:
-            state["verification"] = retry_report
+        if retry_result.should_replace_materials:
+            state["screened_papers"] = retry_result.candidate_papers
+            state["evidence"] = retry_result.evidence
+            state["claims"] = retry_result.claims
+        state["verification"] = retry_result.verification
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="retry_research",
-            summary=f"retry_status={state['verification'].status}",
-            payload={
-                "candidate_count": len(broader_candidates),
-                "evidence_count": len(broader_evidence),
-                "claim_count": len(retry_claims),
-                "status": state["verification"].status,
-            },
+            summary=retry_result.observation_summary,
+            payload=retry_result.observation_payload,
         )
 
     def _agent_reflect(

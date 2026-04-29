@@ -42,8 +42,10 @@ from app.services.agent_runtime_helpers import (
     refresh_selected_ambiguity_materials,
     research_runtime_actions,
     research_runtime_state,
+    RetryResearchMaterials,
     retry_research_limits,
     run_agent_paper_search,
+    run_retry_verification_from_materials,
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
@@ -458,6 +460,66 @@ def test_runtime_helpers_prepare_retry_research_materials_entity_path_grounds_ca
     assert materials.evidence == evidence
     assert entity_limits == [72]
     assert "role_in_context" in materials.goals
+
+
+def test_runtime_helpers_run_retry_verification_replaces_materials_on_pass() -> None:
+    first = CandidatePaper(paper_id="p1", title="First")
+    second = CandidatePaper(paper_id="p2", title="Second")
+    evidence = [
+        EvidenceBlock(doc_id="e1", paper_id="p1", title="First", file_path="", page=1, block_type="page_text", snippet="hit")
+    ]
+    claim = Claim(claim_type="figure_conclusion", text="figure")
+    retry_plans: list[ResearchPlan] = []
+
+    result = run_retry_verification_from_materials(
+        contract=QueryContract(clean_query="Figure 1", targets=["Second"]),
+        plan=ResearchPlan(retry_budget=2),
+        materials=RetryResearchMaterials(
+            candidate_papers=[first, second],
+            evidence=evidence,
+            limits=retry_research_limits(ResearchPlan()),
+            goals={"figure_conclusion"},
+        ),
+        solve_claims=lambda retry_plan, _papers, _evidence: retry_plans.append(retry_plan) or [claim],
+        verify_claims=lambda _retry_plan, _claims, _papers, _evidence: VerificationReport(status="pass"),
+        prefer_identity_matching_papers=lambda candidates, targets: [
+            paper for paper in candidates if paper.title in targets
+        ],
+    )
+
+    assert retry_plans[0].retry_budget == 0
+    assert result.should_replace_materials is True
+    assert result.candidate_papers == [second]
+    assert result.evidence == evidence
+    assert result.claims == [claim]
+    assert result.observation_payload == {
+        "candidate_count": 2,
+        "evidence_count": 1,
+        "claim_count": 1,
+        "status": "pass",
+    }
+
+
+def test_runtime_helpers_run_retry_verification_keeps_materials_on_retry() -> None:
+    paper = CandidatePaper(paper_id="p1", title="First")
+
+    result = run_retry_verification_from_materials(
+        contract=QueryContract(clean_query="DPO"),
+        plan=ResearchPlan(retry_budget=2),
+        materials=RetryResearchMaterials(
+            candidate_papers=[paper],
+            evidence=[],
+            limits=retry_research_limits(ResearchPlan()),
+            goals=set(),
+        ),
+        solve_claims=lambda *_: [],
+        verify_claims=lambda *_: VerificationReport(status="retry", recommended_action="expand"),
+        prefer_identity_matching_papers=lambda candidates, _targets: candidates,
+    )
+
+    assert result.should_replace_materials is False
+    assert result.verification.status == "retry"
+    assert result.observation_summary == "retry_status=retry"
 
 
 def test_runtime_helpers_refresh_selected_ambiguity_materials_reuses_existing_evidence() -> None:

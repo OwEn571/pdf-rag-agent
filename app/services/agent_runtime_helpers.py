@@ -46,6 +46,11 @@ ExpandEvidenceFn = Callable[[list[str], str, QueryContract, int], list[EvidenceB
 AmbiguityOptionCountFn = Callable[[], int]
 AgentClaimSolverFn = Callable[[QueryContract, ResearchPlan, list[CandidatePaper], list[EvidenceBlock]], list[Claim]]
 AgentWebClaimBuilderFn = Callable[[QueryContract, list[EvidenceBlock]], Claim]
+RetryClaimSolverFn = Callable[[ResearchPlan, list[CandidatePaper], list[EvidenceBlock]], list[Claim]]
+RetryClaimVerifierFn = Callable[
+    [ResearchPlan, list[Claim], list[CandidatePaper], list[EvidenceBlock]],
+    VerificationReport,
+]
 ScreenAgentPapersFn = Callable[
     [QueryContract, ResearchPlan, list[CandidatePaper], set[str]],
     tuple[list[CandidatePaper], list[EvidenceBlock] | None],
@@ -92,6 +97,17 @@ class RetryResearchMaterials:
     evidence: list[EvidenceBlock]
     limits: RetryResearchLimits
     goals: set[str]
+
+
+@dataclass(frozen=True)
+class RetryVerificationResult:
+    candidate_papers: list[CandidatePaper]
+    evidence: list[EvidenceBlock]
+    claims: list[Claim]
+    verification: VerificationReport
+    should_replace_materials: bool
+    observation_summary: str
+    observation_payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -572,6 +588,37 @@ def prepare_retry_research_materials(
         evidence=broader_evidence,
         limits=limits,
         goals=goals,
+    )
+
+
+def run_retry_verification_from_materials(
+    *,
+    contract: QueryContract,
+    plan: ResearchPlan,
+    materials: RetryResearchMaterials,
+    solve_claims: RetryClaimSolverFn,
+    verify_claims: RetryClaimVerifierFn,
+    prefer_identity_matching_papers: PaperIdentityMatcherFn,
+) -> RetryVerificationResult:
+    retry_plan = plan.model_copy(update={"retry_budget": 0})
+    retry_claims = solve_claims(retry_plan, materials.candidate_papers, materials.evidence)
+    retry_report = verify_claims(retry_plan, retry_claims, materials.candidate_papers, materials.evidence)
+    candidate_papers = materials.candidate_papers
+    if retry_report.status == "pass" and "figure_conclusion" in materials.goals and contract.targets:
+        candidate_papers = prefer_identity_matching_papers(materials.candidate_papers, contract.targets)
+    return RetryVerificationResult(
+        candidate_papers=candidate_papers,
+        evidence=materials.evidence,
+        claims=retry_claims,
+        verification=retry_report,
+        should_replace_materials=retry_report.status == "pass",
+        observation_summary=f"retry_status={retry_report.status}",
+        observation_payload={
+            "candidate_count": len(materials.candidate_papers),
+            "evidence_count": len(materials.evidence),
+            "claim_count": len(retry_claims),
+            "status": retry_report.status,
+        },
     )
 
 
