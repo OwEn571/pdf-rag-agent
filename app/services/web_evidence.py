@@ -20,6 +20,7 @@ WEB_RESEARCH_DOMAINS = [
 
 WebEvidenceCollector = Callable[[QueryContract, bool, int, str], list[EvidenceBlock]]
 WebClaimBuilder = Callable[[QueryContract, list[EvidenceBlock]], Claim]
+ClaimSolver = Callable[[], list[Claim]]
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,24 @@ def claims_with_web_research_claim(
     ):
         return [*claims, build_claim(contract, web_evidence)]
     return claims
+
+
+def solve_claims_with_web_research(
+    *,
+    contract: QueryContract,
+    web_evidence: list[EvidenceBlock],
+    explicit_web: bool,
+    solve_claims: ClaimSolver,
+    build_claim: WebClaimBuilder,
+) -> list[Claim]:
+    claims = solve_claims()
+    return claims_with_web_research_claim(
+        contract=contract,
+        claims=claims,
+        web_evidence=web_evidence,
+        explicit_web=explicit_web,
+        build_claim=build_claim,
+    )
 
 
 def build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:

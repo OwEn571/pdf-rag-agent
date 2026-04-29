@@ -8,6 +8,7 @@ from app.services.web_evidence import (
     merge_evidence,
     search_agent_web_evidence,
     should_add_web_claim,
+    solve_claims_with_web_research,
     web_include_domains,
     web_query_text,
     web_search_topic,
@@ -234,3 +235,30 @@ def test_web_evidence_claims_with_web_research_claim_appends_when_needed() -> No
         explicit_web=True,
         build_claim=lambda *_: Claim(claim_type="unused", entity="", value=""),
     ) == claims
+
+
+def test_web_evidence_solve_claims_with_web_research_runs_solver_once() -> None:
+    contract = QueryContract(clean_query="最新 RAG 论文", allow_web_search=True)
+    web = [
+        EvidenceBlock(
+            doc_id="web-a",
+            paper_id="web-a",
+            title="Web",
+            file_path="https://example.com",
+            page=0,
+            block_type="web",
+            snippet="web",
+        )
+    ]
+    calls: list[str] = []
+
+    claims = solve_claims_with_web_research(
+        contract=contract,
+        web_evidence=web,
+        explicit_web=True,
+        solve_claims=lambda: calls.append("solve") or [Claim(claim_type="summary", entity="RAG", value="local")],
+        build_claim=lambda _contract, _evidence: Claim(claim_type="web_research", entity="RAG", value="web"),
+    )
+
+    assert calls == ["solve"]
+    assert [item.claim_type for item in claims] == ["summary", "web_research"]

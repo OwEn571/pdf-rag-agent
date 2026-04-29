@@ -168,9 +168,9 @@ from app.services.research_memory import remember_compound_outcome, remember_res
 from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
-    claims_with_web_research_claim,
     collect_web_evidence,
     search_agent_web_evidence,
+    solve_claims_with_web_research,
 )
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -1093,21 +1093,19 @@ class ResearchAssistantAgentV4(
                 contract = state["contract"]
                 screened_papers = state["screened_papers"]
                 evidence = state["evidence"]
-                claims = self._run_solvers(
+                claims = solve_claims_with_web_research(
                     contract=contract,
-                    plan=plan,
-                    papers=screened_papers,
-                    evidence=evidence,
-                    session=session,
-                    use_web_search=explicit_web_search,
-                    max_web_results=max_web_results,
-                )
-                web_evidence: list[EvidenceBlock] = state["web_evidence"]
-                claims = claims_with_web_research_claim(
-                    contract=contract,
-                    claims=claims,
-                    web_evidence=web_evidence,
+                    web_evidence=state["web_evidence"],
                     explicit_web=explicit_web_search,
+                    solve_claims=lambda: self._run_solvers(
+                        contract=contract,
+                        plan=plan,
+                        papers=screened_papers,
+                        evidence=evidence,
+                        session=session,
+                        use_web_search=explicit_web_search,
+                        max_web_results=max_web_results,
+                    ),
                     build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
                         contract=item_contract,
                         web_evidence=item_evidence,
@@ -1129,21 +1127,19 @@ class ResearchAssistantAgentV4(
                     recommended_action="clarify_ambiguous_entity",
                 )
         else:
-            claims = self._run_solvers(
+            claims = solve_claims_with_web_research(
                 contract=contract,
-                plan=plan,
-                papers=screened_papers,
-                evidence=evidence,
-                session=session,
-                use_web_search=explicit_web_search,
-                max_web_results=max_web_results,
-            )
-            web_evidence: list[EvidenceBlock] = state["web_evidence"]
-            claims = claims_with_web_research_claim(
-                contract=contract,
-                claims=claims,
-                web_evidence=web_evidence,
+                web_evidence=state["web_evidence"],
                 explicit_web=explicit_web_search,
+                solve_claims=lambda: self._run_solvers(
+                    contract=contract,
+                    plan=plan,
+                    papers=screened_papers,
+                    evidence=evidence,
+                    session=session,
+                    use_web_search=explicit_web_search,
+                    max_web_results=max_web_results,
+                ),
                 build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
                     contract=item_contract,
                     web_evidence=item_evidence,
