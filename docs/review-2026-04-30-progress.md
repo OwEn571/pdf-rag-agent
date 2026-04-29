@@ -6,11 +6,11 @@ not be changed mechanically.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `6a3556a`.
+- Latest pushed local baseline before this snapshot: `481e34a`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1925 lines.
+  to about 1929 lines.
 - The latest validated full test suite before this snapshot collected and passed
-  557 tests in the `zotero-paper-rag` conda environment.
+  566 tests in the `zotero-paper-rag` conda environment.
 - Published branch target remains `publish/main`
   (`git@github.com:OwEn571/pdf-rag-agent.git`).
 
@@ -25,8 +25,8 @@ not be changed mechanically.
   verify, todo, remember, propose_tool, ask_human, and Task.
 - Event/trace protocol: canonical event normalization covers tool use/results,
   answer/thinking deltas, verification, confidence, plan payloads, and
-  `ask_human`; trace diff now includes stable `ask_human` question and option
-  counts.
+  `ask_human`, `todo_update`, `final`, and error-path final events; trace diff
+  now includes stable `ask_human` question/options and todo item changes.
 - Confidence and clarification: centralized settings and confidence helpers now
   drive clarification thresholds while preserving the existing user-facing
   behavior.
@@ -34,7 +34,8 @@ not be changed mechanically.
   `search_corpus`, atomic search tools, rerank inputs, formula-heavy retrieval
   flag, SSRF-safe `fetch_url`, and prompt-injection wrapping are implemented.
 - Dynamic extension foundation: `propose_tool` writes pending proposals only
-  after static safety checks; arbitrary proposed Python code is not executed.
+  after static safety checks; pending proposals include `proposal_id` and
+  `code_sha256`; arbitrary proposed Python code is not executed.
 - Persistent learning foundation: `remember` persists learnings and conversation
   context can inject them into later turns.
 - Security boundary: PDF page rendering is isolated in `pdf_rendering.py`, with a
@@ -44,6 +45,12 @@ not be changed mechanically.
   entity, concept, solver-origin, and Zotero webpage marker lists have been
   centralized behind marker profiles or helper modules rather than scattered
   inline across the Agent.
+- Metric follow-up routing: a user asking how a reported accuracy/metric is
+  defined after a table-backed answer now stays on the research path, inherits
+  the active metric context, and triggers both text and table evidence planning.
+- Sandbox documentation: `docs/tool-sandbox.md` defines the approval stages,
+  deny-by-default runtime requirements, audit fields, and non-goals for dynamic
+  tool execution.
 
 ## Remaining High-Risk Work
 
@@ -73,8 +80,8 @@ enough that they should stop for explicit product/architecture confirmation:
 
 Continue with small, test-backed slices only where behavior can stay compatible:
 
-- Add more regression coverage around current user-visible failure cases, such
-  as asking for the definition of reported accuracy after a paper-table answer.
+- Add more regression coverage around user-visible paper QA failures before
+  deleting deterministic compatibility paths.
 - Replace remaining inline marker fragments only when they are clearly isolated
   formatting or routing helpers.
 - Improve trace/eval tooling so high-risk architectural replacements can be
