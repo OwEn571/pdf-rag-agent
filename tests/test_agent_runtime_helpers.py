@@ -13,6 +13,7 @@ from app.services.agent_runtime_helpers import (
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
+    planner_next_action,
     research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
@@ -81,6 +82,49 @@ def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:
     assert dequeue_action(queue=queue, executed={"read_memory"}) == "compose"
     assert queue == []
     assert dequeue_action(queue=[], executed=set()) is None
+
+
+def test_runtime_helpers_choose_planner_next_action() -> None:
+    base_contract = QueryContract(clean_query="base")
+    override_contract = QueryContract(clean_query="override")
+    session = SimpleNamespace()
+    calls: list[dict[str, object]] = []
+
+    class Planner:
+        def choose_next_action(self, **kwargs: object) -> str:
+            calls.append(kwargs)
+            return "compose"
+
+    action = planner_next_action(
+        agent=SimpleNamespace(planner=Planner()),
+        contract=base_contract,
+        session=session,
+        state={"contract": override_contract},
+        executed_actions=["read_memory"],
+        allowed_tools={"read_memory", "compose"},
+    )
+
+    assert action == "compose"
+    assert calls == [
+        {
+            "contract": override_contract,
+            "session": session,
+            "state": {"contract": override_contract},
+            "executed_actions": ["read_memory"],
+            "allowed_tools": {"read_memory", "compose"},
+        }
+    ]
+    assert (
+        planner_next_action(
+            agent=SimpleNamespace(),
+            contract=base_contract,
+            session=session,
+            state={},
+            executed_actions=[],
+            allowed_tools={"compose"},
+        )
+        is None
+    )
 
 
 def test_runtime_helpers_detect_clarification_need_from_contract_confidence() -> None:

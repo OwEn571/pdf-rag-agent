@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.domain.models import QueryContract, VerificationReport
+from app.domain.models import QueryContract, SessionContext, VerificationReport
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
 from app.services.confidence import (
     confidence_from_contract,
@@ -115,6 +115,28 @@ def dequeue_action(*, queue: list[str], executed: set[str]) -> str | None:
         if action not in executed:
             return action
     return None
+
+
+def planner_next_action(
+    *,
+    agent: Any,
+    contract: QueryContract,
+    session: SessionContext,
+    state: dict[str, Any],
+    executed_actions: list[str],
+    allowed_tools: set[str],
+) -> str | None:
+    planner = getattr(agent, "planner", None)
+    choose_next = getattr(planner, "choose_next_action", None)
+    if not callable(choose_next):
+        return None
+    return choose_next(
+        contract=state.get("contract", contract),
+        session=session,
+        state=state,
+        executed_actions=executed_actions,
+        allowed_tools=allowed_tools,
+    )
 
 
 def contract_needs_human_clarification(contract: QueryContract, agent_settings: Any) -> bool:

@@ -21,6 +21,7 @@ from app.services.agent_runtime_helpers import (
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
+    planner_next_action,
     research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
@@ -194,7 +195,8 @@ class AgentRuntime:
         for index in range(1, max_step_count + 1):
             action = dequeue_action(queue=queue, executed=executor.executed)
             if action is None:
-                action = self._planner_next_action(
+                action = planner_next_action(
+                    agent=self.agent,
                     contract=contract,
                     session=session,
                     state=state,
@@ -219,24 +221,3 @@ class AgentRuntime:
             executed_order.append(action)
             if should_stop or stop_condition(executor.executed):
                 break
-
-    def _planner_next_action(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        state: dict[str, Any],
-        executed_actions: list[str],
-        allowed_tools: set[str],
-    ) -> str | None:
-        planner = getattr(self.agent, "planner", None)
-        choose_next = getattr(planner, "choose_next_action", None)
-        if not callable(choose_next):
-            return None
-        return choose_next(
-            contract=state.get("contract", contract),
-            session=session,
-            state=state,
-            executed_actions=executed_actions,
-            allowed_tools=allowed_tools,
-        )
