@@ -202,6 +202,7 @@ def normalize_research_goal(value: str) -> set[str]:
         "figure_conclusion": {"figure_conclusion"},
         "caption": {"caption"},
         "metric_value": {"metric_value", "setting"},
+        "metric_definition": {"metric_value", "setting", "definition"},
         "paper_recommendation": {"recommended_papers", "rationale"},
         "recommended_papers": {"recommended_papers"},
         "topology_discovery": {"relevant_papers", "topology_types"},

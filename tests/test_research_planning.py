@@ -47,3 +47,20 @@ def test_research_planning_maps_formula_and_followup_goals_to_specialized_solver
 def test_research_planning_relation_compatibility_is_centralized() -> None:
     assert goals_from_relation_compatibility("origin_lookup") == {"paper_title", "year"}
     assert "metric_value" in goals_from_relation_compatibility("metric_value_lookup")
+
+
+def test_research_planning_metric_definition_uses_text_and_table_solvers() -> None:
+    plan = build_research_plan(
+        contract=QueryContract(
+            clean_query="ICA、PBA 的准确度/指标在论文中是怎么定义或计算的？",
+            relation="metric_value_lookup",
+            targets=["ICA", "PBA"],
+            requested_fields=["metric_value", "metric_definition", "setting", "evidence"],
+            required_modalities=["table", "caption", "page_text"],
+        ),
+        settings=SimpleNamespace(paper_limit_default=4, evidence_limit_default=8, llm_retry_budget=2),
+    )
+
+    assert plan.solver_sequence == ["text_solver", "table_solver"]
+    assert {"metric_value", "setting", "definition"} <= set(plan.required_claims)
+    assert plan.evidence_limit >= 32
