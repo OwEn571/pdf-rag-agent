@@ -45,6 +45,40 @@ LIBRARY_COMPOSER_MARKERS: dict[str, MarkerProfile] = {
 }
 
 
+ANSWER_COMPOSER_MARKERS: dict[str, MarkerProfile] = {
+    "blocked_topology_text": (
+        "does not address",
+        "does not contain",
+        "impossible to determine",
+        "no direct analysis",
+        "not provide specific",
+        "cannot determine",
+        "无法确定",
+        "不能确定",
+        "没有覆盖",
+        "不包含",
+    ),
+    "formula_math_symbol": (
+        "\\",
+        "_",
+        "^",
+        "{",
+        "}",
+        "(",
+        ")",
+        "π",
+        "σ",
+        "β",
+        "θ",
+        "∇",
+        "ϕ",
+        "φ",
+        "ϵ",
+        "ε",
+    ),
+}
+
+
 @lru_cache(maxsize=1)
 def _load_assistant_self_knowledge() -> str:
     path = Path(__file__).resolve().parents[2] / "prompts" / "assistant_self.md"
@@ -812,19 +846,7 @@ class AnswerComposerMixin:
         if not compact:
             return ""
         lowered = compact.lower()
-        blocked_markers = [
-            "does not address",
-            "does not contain",
-            "impossible to determine",
-            "no direct analysis",
-            "not provide specific",
-            "cannot determine",
-            "无法确定",
-            "不能确定",
-            "没有覆盖",
-            "不包含",
-        ]
-        if any(marker in lowered for marker in blocked_markers):
+        if query_matches_any(lowered, "", ANSWER_COMPOSER_MARKERS["blocked_topology_text"]):
             return ""
         ascii_letters = sum(1 for char in compact if ("a" <= char.lower() <= "z"))
         chinese_chars = sum(1 for char in compact if "\u4e00" <= char <= "\u9fff")
@@ -969,7 +991,7 @@ class AnswerComposerMixin:
         compact = " ".join(str(symbol or "").strip().split())
         if not compact:
             return "`?`"
-        if any(token in compact for token in ["\\", "_", "^", "{", "}", "(", ")", "π", "σ", "β", "θ", "∇", "ϕ", "φ", "ϵ", "ε"]):
+        if query_matches_any(compact, "", ANSWER_COMPOSER_MARKERS["formula_math_symbol"]):
             return f"${compact}$"
         if re.fullmatch(r"[A-Za-z](?:_[A-Za-z0-9]+)?", compact):
             return f"${compact}$"
