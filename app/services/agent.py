@@ -131,7 +131,7 @@ from app.services.research_planning import (
     build_research_plan,
     research_plan_goals,
 )
-from app.services.research_memory import remember_research_outcome
+from app.services.research_memory import remember_compound_outcome, remember_research_outcome
 from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
@@ -2267,43 +2267,12 @@ class ResearchAssistantAgentV4(
         clean_query: str,
         subtask_results: list[dict[str, Any]],
     ) -> None:
-        subtasks: list[dict[str, Any]] = []
-        for result in subtask_results:
-            contract = result.get("contract")
-            if not isinstance(contract, QueryContract):
-                continue
-            claims = [item for item in list(result.get("claims", []) or []) if isinstance(item, Claim)]
-            evidence = [item for item in list(result.get("evidence", []) or []) if isinstance(item, EvidenceBlock)]
-            citations = [item for item in list(result.get("citations", []) or []) if isinstance(item, AssistantCitation)]
-            paper_ids = list(dict.fromkeys(pid for claim in claims for pid in claim.paper_ids))
-            papers = [paper for paper_id in paper_ids if (paper := self._candidate_from_paper_id(paper_id)) is not None]
-            if not papers:
-                papers = [paper for citation in citations if (paper := self._candidate_from_paper_id(citation.paper_id)) is not None]
-            self._remember_research_outcome(
-                session=session,
-                contract=contract,
-                answer=str(result.get("answer", "")),
-                claims=claims,
-                papers=papers,
-                evidence=evidence,
-                citations=citations,
-            )
-            subtasks.append(
-                {
-                    "relation": contract.relation,
-                    "targets": list(contract.targets),
-                    "requested_fields": list(contract.requested_fields),
-                    "clean_query": contract.clean_query,
-                    "answer_preview": truncate_context_text(str(result.get("answer", "")), limit=900),
-                    "citation_titles": [citation.title for citation in citations[:4]],
-                }
-            )
-        memory = dict(session.working_memory or {})
-        memory["last_compound_query"] = {
-            "query": clean_query,
-            "subtasks": subtasks,
-        }
-        session.working_memory = memory
+        remember_compound_outcome(
+            session=session,
+            clean_query=clean_query,
+            subtask_results=subtask_results,
+            candidate_lookup=self._candidate_from_paper_id,
+        )
 
     def _formula_answer_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         active = session.effective_active_research()

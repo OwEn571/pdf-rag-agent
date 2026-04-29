@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models import AssistantCitation, CandidatePaper, Claim, EvidenceBlock, QueryContract, SessionContext
-from app.services.research_memory import remember_research_outcome
+from app.services.research_memory import remember_compound_outcome, remember_research_outcome
 
 
 def _paper(paper_id: str, title: str = "DPO Paper") -> CandidatePaper:
@@ -99,3 +99,43 @@ def test_remember_research_outcome_stores_followup_relationship_memory() -> None
     )
 
     assert session.working_memory["last_followup_relationship"]["candidate_paper_id"] == "candidate-1"
+
+
+def test_remember_compound_outcome_stores_subtasks_and_target_bindings() -> None:
+    session = SessionContext(session_id="compound-memory")
+    papers = {"dpo-paper": _paper("dpo-paper", "DPO Paper")}
+    contract = QueryContract(
+        clean_query="DPO 公式",
+        relation="formula_lookup",
+        targets=["DPO"],
+        requested_fields=["formula"],
+    )
+    citation = AssistantCitation(
+        doc_id="paper::dpo-paper",
+        paper_id="dpo-paper",
+        title="DPO Paper",
+        file_path="/tmp/dpo.pdf",
+        page=1,
+        snippet="DPO citation",
+    )
+
+    remember_compound_outcome(
+        session=session,
+        clean_query="DPO 和 PPO 公式分别是什么？",
+        subtask_results=[
+            {
+                "contract": contract,
+                "claims": [Claim(claim_type="formula", entity="DPO", paper_ids=["dpo-paper"])],
+                "evidence": [],
+                "citations": [citation],
+                "answer": "DPO answer",
+            }
+        ],
+        candidate_lookup=lambda paper_id: papers.get(paper_id),
+    )
+
+    assert session.working_memory["target_bindings"]["dpo"]["paper_id"] == "dpo-paper"
+    compound = session.working_memory["last_compound_query"]
+    assert compound["query"] == "DPO 和 PPO 公式分别是什么？"
+    assert compound["subtasks"][0]["relation"] == "formula_lookup"
+    assert compound["subtasks"][0]["citation_titles"] == ["DPO Paper"]
