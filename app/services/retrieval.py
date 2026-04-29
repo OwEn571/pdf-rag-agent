@@ -10,6 +10,8 @@ from langchain_core.documents import Document
 
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+from app.services.intent_marker_matching import normalized_query_text, query_matches_any
+from app.services.solver_goal_helpers import SOLVER_GOAL_MARKERS, looks_like_metric_goal
 from app.services.vector_index import CollectionVectorIndex
 
 logger = logging.getLogger(__name__)
@@ -819,32 +821,31 @@ class DualIndexRetriever:
             ],
         ]:
             goals.update(DualIndexRetriever._normalize_contract_goal(value))
-        lowered = " ".join(str(query or contract.clean_query or "").lower().split())
+        raw_query = str(query or contract.clean_query or "")
+        lowered, compact = normalized_query_text(raw_query)
         if not goals or goals <= {"answer", "general_answer"}:
-            if any(token in lowered for token in ["最早", "最先", "谁提出", "提出的", "origin", "first proposed"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["origin"]):
                 goals.update({"origin", "paper_title", "year"})
-            if any(token in lowered for token in ["公式", "损失函数", "objective", "loss", "gradient", "梯度"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["formula"]):
                 goals.add("formula")
-            if any(token in lowered for token in ["后续", "followup", "follow-up", "successor"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["followup"]):
                 goals.add("followup_papers")
-            if any(token in lowered for token in ["figure", "fig.", "图", "caption"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["figure"]):
                 goals.add("figure_conclusion")
-            if any(token in lowered for token in ["结果", "实验", "核心结论", "贡献", "summary", "result"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["summary"]):
                 goals.update({"summary", "results"})
-            if any(token in lowered for token in ["多少", "数值", "准确率", "得分", "score", "accuracy", "metric", "win rate"]):
+            if looks_like_metric_goal(raw_query, goals):
                 goals.add("metric_value")
-            if any(token in lowered for token in ["推荐", "值得", "入门", "recommend"]):
+            if query_matches_any(lowered, compact, SOLVER_GOAL_MARKERS["recommendation"]):
                 goals.add("recommended_papers")
             if contract.targets and (
-                any(token in str(query or contract.clean_query or "") for token in ["是什么", "什么意思", "定义"])
-                or any(token in lowered for token in ["what is", "what are"])
+                query_matches_any(lowered, raw_query, SOLVER_GOAL_MARKERS["definition_targeted"])
+                or query_matches_any(lowered, "", SOLVER_GOAL_MARKERS["definition_english"])
             ):
                 goals.update({"definition", "entity_type", "mechanism"})
         if "figure" in contract.required_modalities:
             goals.add("figure_conclusion")
-        if "table" in contract.required_modalities and any(
-            token in lowered for token in ["多少", "数值", "准确率", "得分", "score", "accuracy", "metric", "win rate"]
-        ):
+        if "table" in contract.required_modalities and looks_like_metric_goal(raw_query, goals):
             goals.add("metric_value")
         return goals or {"answer"}
 
