@@ -19,8 +19,30 @@ from app.domain.models import (
 )
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import claim_evidence_ids, extract_topology_terms
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.zotero_sqlite import ZoteroSQLiteReader
+
+
+LIBRARY_COMPOSER_MARKERS: dict[str, MarkerProfile] = {
+    "status_recommendation": (
+        "最值得",
+        "值得一读",
+        "值得读",
+        "值得一看",
+        "值得看",
+        "推荐",
+        "哪篇",
+        "哪几篇",
+        "must read",
+        "worth reading",
+        "recommend",
+    ),
+    "status_listing": ("有哪些", "有哪些文章", "有哪些论文", "文章列表", "论文列表", "列出", "list"),
+    "same_best": ("最值得", "best", "top", "first"),
+    "recent": ("最新", "最近", "newest", "latest", "recent"),
+    "survey": ("综述", "survey", "review", "入门", "overview"),
+}
 
 
 @lru_cache(maxsize=1)
@@ -1740,7 +1762,7 @@ class AnswerComposerMixin:
         limit: int,
     ) -> list[dict[str, str]]:
         recent_keys = {normalize_lookup_text(title) for title in recent_titles}
-        wants_same_best = any(marker in str(query).lower() for marker in ["最值得", "best", "top", "first"])
+        wants_same_best = query_matches_any(str(query).lower(), "", LIBRARY_COMPOSER_MARKERS["same_best"])
         fresh: list[dict[str, str]] = []
         repeated: list[dict[str, str]] = []
         for item in candidates:
@@ -1781,34 +1803,12 @@ class AnswerComposerMixin:
     @staticmethod
     def _library_status_query_wants_recommendation(query: str) -> bool:
         compact = " ".join(str(query or "").lower().split())
-        markers = [
-            "最值得",
-            "值得一读",
-            "值得读",
-            "值得一看",
-            "值得看",
-            "推荐",
-            "哪篇",
-            "哪几篇",
-            "must read",
-            "worth reading",
-            "recommend",
-        ]
-        return any(marker in compact for marker in markers)
+        return query_matches_any(compact, "", LIBRARY_COMPOSER_MARKERS["status_recommendation"])
 
     @staticmethod
     def _library_status_query_wants_listing(query: str) -> bool:
         compact = " ".join(str(query or "").lower().split())
-        markers = [
-            "有哪些",
-            "有哪些文章",
-            "有哪些论文",
-            "文章列表",
-            "论文列表",
-            "列出",
-            "list",
-        ]
-        return any(marker in compact for marker in markers)
+        return query_matches_any(compact, "", LIBRARY_COMPOSER_MARKERS["status_listing"])
 
     @staticmethod
     def _library_paper_preview_lines(
@@ -1851,8 +1851,8 @@ class AnswerComposerMixin:
         limit: int = 3,
     ) -> list[dict[str, str]]:
         lowered_query = str(query or "").lower()
-        wants_recent = any(marker in lowered_query for marker in ["最新", "最近", "newest", "latest", "recent"])
-        wants_survey = any(marker in lowered_query for marker in ["综述", "survey", "review", "入门", "overview"])
+        wants_recent = query_matches_any(lowered_query, "", LIBRARY_COMPOSER_MARKERS["recent"])
+        wants_survey = query_matches_any(lowered_query, "", LIBRARY_COMPOSER_MARKERS["survey"])
         scored: list[tuple[float, dict[str, str]]] = []
         for meta in docs:
             title = str(meta.get("title", "") or "").strip()
@@ -1865,7 +1865,7 @@ class AnswerComposerMixin:
             score = 0.0
             if wants_recent and year_text.isdigit():
                 score += max(0, int(year_text) - 2000) * 0.2
-            if wants_survey and any(token in text for token in ["survey", "review", "overview", "综述"]):
+            if wants_survey and query_matches_any(text, "", LIBRARY_COMPOSER_MARKERS["survey"]):
                 score += 8.0
             signal_weights = {
                 "survey": 2.2,
