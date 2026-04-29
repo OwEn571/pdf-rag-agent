@@ -78,5 +78,26 @@ def is_short_acronym(text: str) -> bool:
     return bool(re.fullmatch(r"[A-Z][A-Z0-9\-]{1,7}", str(text or "").strip()))
 
 
+def matches_target(text: str, target: str) -> bool:
+    raw_text = str(text or "")
+    raw_target = str(target or "").strip()
+    if not raw_text or not raw_target:
+        return False
+    if " " not in raw_target and len(raw_target) <= 16 and re.fullmatch(r"[a-z0-9\-]{2,}", raw_target.lower()):
+        lowered_text = raw_text.lower()
+        target_key = raw_target.lower()
+        pattern = re.compile(rf"(?<![a-z0-9\-]){re.escape(target_key)}(?![a-z0-9\-])")
+        if pattern.search(lowered_text) is not None:
+            return True
+        if raw_target.upper() == raw_target and len(raw_target) <= 10:
+            loss_patterns = [
+                rf"\bl[_\{{\s]*(?:\\mathrm\{{?)?\s*{re.escape(target_key)}\b",
+                rf"\bl{re.escape(target_key)}\b",
+            ]
+            return any(re.search(loss_pattern, lowered_text) for loss_pattern in loss_patterns)
+        return False
+    return raw_target in raw_text
+
+
 def should_use_web_search(*, use_web_search: bool, contract: QueryContract) -> bool:
     return bool(use_web_search or query_needs_external_search(contract.clean_query))

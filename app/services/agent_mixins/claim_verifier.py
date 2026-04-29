@@ -8,7 +8,7 @@ from app.services import origin_selection_helpers as origin_helpers
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
-from app.services.query_shaping import is_short_acronym
+from app.services.query_shaping import is_short_acronym, matches_target
 
 
 class ClaimVerifierMixin:
@@ -558,11 +558,11 @@ class ClaimVerifierMixin:
             if not target_key:
                 continue
             formula_text = f"{claim.value}\n{claim.entity}"
-            if self._matches_target(formula_text, target):
+            if matches_target(formula_text, target):
                 return True
             if self._formula_evidence_supports_target(target=target, evidence=claim_evidence):
                 return True
-            if not is_short_acronym(target) and self._matches_target(normalized_context, target):
+            if not is_short_acronym(target) and matches_target(normalized_context, target):
                 return True
         return False
 
@@ -570,7 +570,7 @@ class ClaimVerifierMixin:
         formula_markers = ["=", "formula", "objective", "loss", "目标函数", "公式", "∑", "π", "\\pi", "sigma", "σ"]
         for item in evidence[:8]:
             text = "\n".join([item.title, item.caption, item.snippet])
-            if not self._matches_target(text, target):
+            if not matches_target(text, target):
                 continue
             lowered = text.lower()
             if any(marker in lowered or marker in text for marker in formula_markers):
@@ -625,7 +625,7 @@ class ClaimVerifierMixin:
             haystacks.append(normalize_lookup_text(paper.title))
             haystacks.append(normalize_lookup_text(str(paper.metadata.get("paper_card_text", ""))))
         return any(
-            self._matches_target(haystack, target)
+            matches_target(haystack, target)
             for target in normalized_targets
             for haystack in haystacks
             if haystack

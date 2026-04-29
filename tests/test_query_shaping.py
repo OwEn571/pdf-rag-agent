@@ -5,6 +5,7 @@ from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
     is_short_acronym,
+    matches_target,
     paper_query_text,
     should_use_concept_evidence,
     should_use_web_search,
@@ -61,3 +62,10 @@ def test_query_shaping_web_flag_and_acronym_detection() -> None:
     assert should_use_web_search(use_web_search=False, contract=latest_contract)
     assert should_use_web_search(use_web_search=True, contract=local_contract)
     assert not should_use_web_search(use_web_search=False, contract=local_contract)
+
+
+def test_query_shaping_matches_short_targets_with_boundaries_and_loss_aliases() -> None:
+    assert matches_target("Direct Preference Optimization (DPO) improves preference tuning.", "DPO")
+    assert not matches_target("ADPO is a different token.", "DPO")
+    assert matches_target(r"The objective includes L_{\mathrm{DPO}} terms.", "DPO")
+    assert matches_target("Direct Preference Optimization", "Direct Preference")

@@ -9,6 +9,7 @@ from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import safe_year
+from app.services.query_shaping import matches_target
 
 
 class EntityDefinitionMixin:
@@ -79,7 +80,7 @@ class EntityDefinitionMixin:
             item
             for item in evidence
             if any(
-                self._matches_target(haystack, target)
+                matches_target(haystack, target)
                 for haystack in [item.snippet, item.caption, item.title]
                 if haystack
             )
@@ -131,12 +132,12 @@ class EntityDefinitionMixin:
                 score += definition_bonus * 2.5
                 score += mechanism_bonus * 1.0
                 score += application_bonus * 0.3
-                if self._matches_target(paper_text, target):
+                if matches_target(paper_text, target):
                     score += 1.2
                 if context_targets:
                     if self._paper_identity_matches_targets(paper=paper, targets=context_targets) or self._paper_introduces_context_target(paper=paper, context_targets=context_targets):
                         score += 12.0
-                    elif any(self._matches_target(paper_text, context_target) for context_target in context_targets):
+                    elif any(matches_target(paper_text, context_target) for context_target in context_targets):
                         score += 4.0
                 if definition_bonus > 0:
                     score += 1.6
@@ -166,8 +167,8 @@ class EntityDefinitionMixin:
                     str(paper.metadata.get("abstract_note", "")),
                 ]
             )
-            if self._matches_target(paper_text, target) and (
-                not context_targets or any(self._matches_target(paper_text, context_target) for context_target in context_targets)
+            if matches_target(paper_text, target) and (
+                not context_targets or any(matches_target(paper_text, context_target) for context_target in context_targets)
             ):
                 fallback_evidence = [item for item in evidence if item.paper_id == paper.paper_id]
                 fallback_evidence.sort(
@@ -241,7 +242,7 @@ class EntityDefinitionMixin:
                 ]
             )
         haystack = "\n".join([item.title, item.caption, item.snippet, paper_text])
-        return any(self._matches_target(haystack, context_target) for context_target in context_targets if str(context_target).strip())
+        return any(matches_target(haystack, context_target) for context_target in context_targets if str(context_target).strip())
 
     def _llm_select_entity_supporting_paper(
         self,

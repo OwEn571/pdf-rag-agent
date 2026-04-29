@@ -20,6 +20,7 @@ from app.services.evidence_presentation import (
 )
 from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
+from app.services.query_shaping import matches_target
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
     schema_claim_human_prompt,
@@ -204,7 +205,7 @@ class SolverPipelineMixin:
                     contract=contract,
                     paper=paper,
                     evidence=relevant_evidence,
-                    target_matcher=self._matches_target,
+                    target_matcher=matches_target,
                 ),
                 definition_lines=self._entity_supporting_lines(relevant_evidence, kind="definition"),
                 mechanism_lines=self._entity_supporting_lines(relevant_evidence, kind="mechanism"),
@@ -382,7 +383,7 @@ class SolverPipelineMixin:
                     item
                     for item in support
                     if any(
-                        self._matches_target(haystack, alias)
+                        matches_target(haystack, alias)
                         for alias in target_aliases
                         for haystack in [item.snippet, item.caption, item.title]
                         if haystack
@@ -401,7 +402,7 @@ class SolverPipelineMixin:
                 score += origin_helpers.origin_target_definition_score(item.snippet, target_aliases)
             if target_aliases:
                 paper_text = origin_helpers.origin_paper_text(paper)
-                if any(self._matches_target(paper_text, alias) for alias in target_aliases):
+                if any(matches_target(paper_text, alias) for alias in target_aliases):
                     score += 0.8
                 intro_score += origin_helpers.origin_target_intro_score(paper_text, target_aliases)
                 score += origin_helpers.origin_target_definition_score(paper_text, target_aliases)
@@ -503,7 +504,7 @@ class SolverPipelineMixin:
                 paper=paper,
                 evidence=paper_evidence,
                 target_terms=target_terms,
-                target_matcher=self._matches_target,
+                target_matcher=matches_target,
             )
             if target_terms and not matched_targets:
                 continue

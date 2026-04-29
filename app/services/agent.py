@@ -115,6 +115,7 @@ from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
     is_short_acronym,
+    matches_target,
     paper_query_text,
     should_use_concept_evidence,
     should_use_web_search,
@@ -3205,7 +3206,7 @@ class ResearchAssistantAgentV4(
             return False
         for doc in self.retriever.block_documents_for_paper(paper.paper_id, limit=256):
             text = str(doc.page_content or "")
-            if not self._matches_target(text, target):
+            if not matches_target(text, target):
                 continue
             meta = dict(doc.metadata or {})
             lowered = text.lower()
@@ -3267,7 +3268,7 @@ class ResearchAssistantAgentV4(
                 if name_key in query_key:
                     best = max(best, min(200, len(name_key)))
                     continue
-                if self._matches_target(query_words, name.lower()):
+                if matches_target(query_words, name.lower()):
                     best = max(best, min(160, len(name_key)))
             paper_context = "\n".join(
                 [
@@ -3280,7 +3281,7 @@ class ResearchAssistantAgentV4(
                 ]
             )
             for hint in query_hints:
-                if self._matches_target(paper_context, hint):
+                if matches_target(paper_context, hint):
                     best = max(best, 80 + min(40, len(hint)))
             if best:
                 scored.append((best, paper))
@@ -4030,7 +4031,7 @@ class ResearchAssistantAgentV4(
         buckets: dict[str, dict[str, Any]] = {}
         target_key = target.lower()
         for item in evidence:
-            if not any(self._matches_target(haystack, target) for haystack in [item.snippet, item.caption, item.title] if haystack):
+            if not any(matches_target(haystack, target) for haystack in [item.snippet, item.caption, item.title] if haystack):
                 continue
             paper = paper_by_id.get(item.paper_id) or self._candidate_from_paper_id(item.paper_id)
             if paper is None:
@@ -4092,7 +4093,7 @@ class ResearchAssistantAgentV4(
             for doc in self.retriever.block_documents_for_paper(paper_id, limit=320):
                 meta = dict(doc.metadata or {})
                 text = str(doc.page_content or "")
-                if not self._matches_target(text, target):
+                if not matches_target(text, target):
                     continue
                 score = 1.0
                 expansion = self._extract_acronym_expansion_from_text(text=text, acronym=target)
@@ -4172,7 +4173,7 @@ class ResearchAssistantAgentV4(
 
     def _ambiguity_option_matches_context(self, *, option: dict[str, Any], context_targets: list[str]) -> bool:
         text = str(option.get("context_text", "")) or self._ambiguity_option_context_text(option)
-        return any(self._matches_target(text, str(target)) for target in context_targets if str(target).strip())
+        return any(matches_target(text, str(target)) for target in context_targets if str(target).strip())
 
     @staticmethod
     def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:
@@ -4539,27 +4540,6 @@ class ResearchAssistantAgentV4(
     @staticmethod
     def _build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:
         return build_web_research_claim(contract=contract, web_evidence=web_evidence)
-
-    @staticmethod
-    def _matches_target(text: str, target: str) -> bool:
-        raw_text = str(text or "")
-        raw_target = str(target or "").strip()
-        if not raw_text or not raw_target:
-            return False
-        if " " not in raw_target and len(raw_target) <= 16 and re.fullmatch(r"[a-z0-9\-]{2,}", raw_target.lower()):
-            lowered_text = raw_text.lower()
-            target_key = raw_target.lower()
-            pattern = re.compile(rf"(?<![a-z0-9\-]){re.escape(target_key)}(?![a-z0-9\-])")
-            if pattern.search(lowered_text) is not None:
-                return True
-            if raw_target.upper() == raw_target and len(raw_target) <= 10:
-                loss_patterns = [
-                    rf"\bl[_\{{\s]*(?:\\mathrm\{{?)?\s*{re.escape(target_key)}\b",
-                    rf"\bl{re.escape(target_key)}\b",
-                ]
-                return any(re.search(loss_pattern, lowered_text) for loss_pattern in loss_patterns)
-            return False
-        return raw_target in raw_text
 
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
         titles: list[str] = []
@@ -4941,7 +4921,7 @@ class ResearchAssistantAgentV4(
             score = paper.score
             summary = self._paper_summary_text(paper.paper_id)
             haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}"
-            if target_text and self._matches_target(haystack.lower(), target_text.lower()):
+            if target_text and matches_target(haystack.lower(), target_text.lower()):
                 score += 1.2
             if seed_year < 9999:
                 year = safe_year(paper.year)
@@ -5001,7 +4981,7 @@ class ResearchAssistantAgentV4(
         support_signals: list[str] = []
         target_seen = ""
         for alias in target_aliases:
-            if alias and self._matches_target(haystack, alias):
+            if alias and matches_target(haystack, alias):
                 target_seen = alias
                 if target_relation_cue_near_text(text=haystack, target=alias):
                     score += 3.2
@@ -5156,7 +5136,7 @@ class ResearchAssistantAgentV4(
         if paper.title in session.effective_active_research().titles:
             score += 2.5
         for target in contract.targets:
-            if target and self._matches_target(haystack, target.lower()):
+            if target and matches_target(haystack, target.lower()):
                 score += 1.1
         if has_followup_seed_intro_signal(haystack):
             score += 1.2
