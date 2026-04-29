@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from app.domain.models import QueryContract, VerificationReport
+import json
+
+from app.domain.models import QueryContract, SessionContext, VerificationReport
 from app.services.compound_task_helpers import (
+    compound_contracts_from_decomposer_payload,
     compound_subtask_contract_from_payload,
     compound_subtask_relation_from_slots,
     compound_research_progress_markdown,
@@ -10,6 +13,7 @@ from app.services.compound_task_helpers import (
     compound_task_result_from_task_payload,
     demote_markdown_headings,
     format_compound_section,
+    llm_decompose_compound_query,
     merge_redundant_field_subtasks,
 )
 
@@ -126,3 +130,53 @@ def test_merge_redundant_field_subtasks_merges_same_target_fields() -> None:
     assert merged[0].required_modalities == ["page_text", "table"]
     assert merged[0].precision_requirement == "exact"
     assert "merged_same_target_fields" in merged[0].notes
+
+
+def test_compound_contracts_from_decomposer_payload_requires_two_valid_subtasks() -> None:
+    contracts = compound_contracts_from_decomposer_payload(
+        payload={
+            "is_compound": True,
+            "subtasks": [
+                {"clean_query": "DPO 公式", "targets": ["DPO"], "answer_slots": ["formula"]},
+                {"clean_query": "PPO 公式", "targets": ["PPO"], "answer_slots": ["formula"]},
+            ],
+        },
+        fallback_query="DPO 和 PPO 公式",
+    )
+
+    assert [contract.targets for contract in contracts] == [["DPO"], ["PPO"]]
+    assert [contract.relation for contract in contracts] == ["formula_lookup", "formula_lookup"]
+
+
+def test_llm_decompose_compound_query_uses_message_history_branch() -> None:
+    class Clients:
+        chat = object()
+
+        def __init__(self) -> None:
+            self.messages: list[dict[str, str]] = []
+
+        def invoke_json_messages(self, *, system_prompt: str, messages: list[dict[str, str]], fallback: object) -> object:
+            assert "任务分解器" in system_prompt
+            self.messages = messages
+            payload = json.loads(messages[-1]["content"])
+            assert payload["conversation_context"] == {"summary": "previous"}
+            return {
+                "is_compound": True,
+                "subtasks": [
+                    {"clean_query": "DPO 公式", "targets": ["DPO"], "answer_slots": ["formula"]},
+                    {"clean_query": "PPO 公式", "targets": ["PPO"], "answer_slots": ["formula"]},
+                ],
+            }
+
+    clients = Clients()
+    contracts = llm_decompose_compound_query(
+        clean_query="DPO 和 PPO 的公式分别是什么？",
+        session=SessionContext(session_id="compound-helper"),
+        clients=clients,
+        available_tools=[{"name": "search_corpus"}],
+        conversation_context=lambda *_args, **_kwargs: {"summary": "previous"},
+        history_messages=lambda _session: [{"role": "assistant", "content": "history"}],
+    )
+
+    assert len(contracts) == 2
+    assert clients.messages[0] == {"role": "assistant", "content": "history"}

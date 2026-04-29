@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from typing import Any
 
-from app.domain.models import QueryContract, VerificationReport
+from app.domain.models import QueryContract, SessionContext, VerificationReport
 from app.services.contract_normalization import normalize_contract_targets, normalize_lookup_text, normalize_modalities
 
 
 TargetNormalizer = Callable[[list[str], list[str]], list[str]]
+ConversationContextFn = Callable[..., dict[str, Any]]
+HistoryMessagesFn = Callable[[SessionContext], list[dict[str, str]]]
+SubtaskContractBuilder = Callable[[object, str, int], QueryContract | None]
 
 ALLOWED_COMPOUND_SUBTASK_RELATIONS = {
     "library_status",
@@ -35,6 +39,100 @@ def default_compound_target_normalizer(targets: list[str], requested_fields: lis
         requested_fields=requested_fields,
         canonicalize_targets=lambda values: values,
     )
+
+
+def compound_decomposer_system_prompt() -> str:
+    return (
+        "你是论文研究 Agent 的任务分解器，不是最终回答器。"
+        "你的任务是判断当前用户消息是否包含多个可执行子任务，并把它们拆成有序 QueryContract。"
+        "检索论文只是工具，子任务应围绕用户真实意图组织，而不是套模板。"
+        "你可以参考 available_tools，但你不调用工具；planner/executor 会基于你的子任务调用工具。"
+        "如果问题只有一个任务，输出 is_compound=false 和空 subtasks。"
+        "如果一句话中有多个需求，例如多个公式查询、总结+实验结果、查询+比较、数量+推荐，输出 is_compound=true。"
+        "但同一篇论文/同一实体的多个字段（例如“核心结论是什么，实验结果如何”）不是 compound；"
+        "必须合并为一个 QueryContract，并把 requested_fields 写成多个字段。"
+        "每个 subtask 字段为 clean_query, interaction_mode, intent_kind, continuation_mode, targets, answer_slots, "
+        "requested_fields, required_modalities, answer_shape, precision_requirement, notes。"
+        "不要输出 relation；用 answer_slots/requested_fields 表达子任务目标。"
+        "可用 answer_slots 包括 library_status, library_recommendation, origin, formula, followup_research, "
+        "entity_definition, topology_discovery, topology_recommendation, figure, paper_summary, metric_value, "
+        "concept_definition, paper_recommendation, comparison, general_answer。"
+        "interaction_mode 只能是 conversation 或 research。"
+        "required_modalities 只能使用 page_text, paper_card, table, caption, figure。"
+        "answer_shape 只能是 bullets, narrative, table。precision_requirement 只能是 exact, high, normal。"
+        "公式查询使用 answer_slots=[formula] + requested_fields=[formula, variable_explanation] + required_modalities=[page_text, table]。"
+        "库状态/库列表/库元信息问题使用 library_status，必须 interaction_mode=conversation，targets=[]，不要走 research 检索；"
+        "例如按年份、作者、标签、分类、PDF 有无统计或筛选当前库内论文。"
+        "库内默认推荐问题使用 library_recommendation，必须 interaction_mode=conversation，targets=[]。"
+        "比较/综合使用 answer_slots=[comparison]，并且应放在其依赖的检索子任务之后。"
+        "targets 只能放实体本身，不要把“公式、结果、summary”等任务词拼进 target。"
+        "只输出 JSON：is_compound, reason, subtasks。"
+    )
+
+
+def llm_decompose_compound_query(
+    *,
+    clean_query: str,
+    session: SessionContext,
+    clients: Any,
+    available_tools: list[dict[str, Any]],
+    conversation_context: ConversationContextFn,
+    history_messages: HistoryMessagesFn,
+    target_normalizer: TargetNormalizer = default_compound_target_normalizer,
+) -> list[QueryContract]:
+    if getattr(clients, "chat", None) is None:
+        return []
+    system_prompt = compound_decomposer_system_prompt()
+    human_payload = {
+        "current_query": clean_query,
+        "available_tools": available_tools,
+        "conversation_context": conversation_context(session, max_chars=10000),
+    }
+    invoke_json_messages = getattr(clients, "invoke_json_messages", None)
+    if callable(invoke_json_messages):
+        payload = invoke_json_messages(
+            system_prompt=system_prompt,
+            messages=[
+                *history_messages(session),
+                {"role": "user", "content": json.dumps(human_payload, ensure_ascii=False)},
+            ],
+            fallback={},
+        )
+    else:
+        payload = clients.invoke_json(
+            system_prompt=system_prompt,
+            human_prompt=json.dumps(human_payload, ensure_ascii=False),
+            fallback={},
+        )
+    return compound_contracts_from_decomposer_payload(
+        payload=payload,
+        fallback_query=clean_query,
+        target_normalizer=target_normalizer,
+    )
+
+
+def compound_contracts_from_decomposer_payload(
+    *,
+    payload: Any,
+    fallback_query: str,
+    target_normalizer: TargetNormalizer = default_compound_target_normalizer,
+) -> list[QueryContract]:
+    if not isinstance(payload, dict) or not bool(payload.get("is_compound")):
+        return []
+    raw_subtasks = payload.get("subtasks", [])
+    if not isinstance(raw_subtasks, list):
+        return []
+    contracts: list[QueryContract] = []
+    for index, item in enumerate(raw_subtasks[:5]):
+        contract = compound_subtask_contract_from_payload(
+            item,
+            fallback_query=fallback_query,
+            index=index,
+            target_normalizer=target_normalizer,
+        )
+        if contract is not None:
+            contracts.append(contract)
+    return contracts if len(contracts) >= 2 else []
 
 
 def compound_task_label(contract: QueryContract) -> str:
