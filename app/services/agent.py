@@ -1530,7 +1530,7 @@ class ResearchAssistantAgentV4(
                 if evidence:
                     emit("web_search", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
                     all_evidence.extend(evidence)
-            extracted = self._extract_citation_count_from_evidence(title=title, evidence=evidence)
+            extracted = extract_citation_count_from_evidence(title=title, evidence=evidence)
             result = {
                 **candidate,
                 "citation_count": extracted.get("citation_count"),
@@ -1586,13 +1586,13 @@ class ResearchAssistantAgentV4(
             if not isinstance(record, dict):
                 continue
             record_title = str(record.get("title", "") or "").strip()
-            overlap = self._title_token_overlap(title, record_title)
+            overlap = title_token_overlap(title, record_title)
             if overlap > best_overlap:
                 best_overlap = overlap
                 best_record = record
         if best_record is None or best_overlap < 0.55:
             return None
-        count = self._parse_citation_count(str(best_record.get("citationCount", "")))
+        count = parse_citation_count(str(best_record.get("citationCount", "")))
         if count is None:
             return None
         record_title = str(best_record.get("title", "") or title).strip()
@@ -1622,33 +1622,9 @@ class ResearchAssistantAgentV4(
             },
         )
 
-    def _extract_citation_count_from_evidence(self, *, title: str, evidence: list[EvidenceBlock]) -> dict[str, Any]:
-        return extract_citation_count_from_evidence(title=title, evidence=evidence)
-
-    @staticmethod
-    def _parse_citation_count(value: str) -> int | None:
-        return parse_citation_count(value)
-
-    @staticmethod
-    def _title_token_overlap(left: str, right: str) -> float:
-        return title_token_overlap(left, right)
-
     @staticmethod
     def _normalize_title_key(title: str) -> str:
         return re.sub(r"[^a-z0-9]+", "", str(title or "").lower())
-
-    @staticmethod
-    def _format_citation_ranking_answer(
-        *,
-        candidates: list[dict[str, str]],
-        citation_results: list[dict[str, Any]],
-        web_enabled: bool,
-    ) -> str:
-        return format_citation_ranking_answer(
-            candidates=candidates,
-            citation_results=citation_results,
-            web_enabled=web_enabled,
-        )
 
     def _force_best_effort_after_clarification_limit(
         self,

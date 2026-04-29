@@ -5,6 +5,7 @@ from typing import Any, Callable
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
+from app.services.citation_ranking import format_citation_ranking_answer
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
@@ -309,7 +310,7 @@ def build_conversation_tool_registry(
     def rank_by_verified_citation_count() -> None:
         candidates = list(state.get("citation_candidates", []) or [])
         lookup = dict(state.get("citation_lookup", {}) or {})
-        answer = agent._format_citation_ranking_answer(
+        answer = format_citation_ranking_answer(
             candidates=candidates,
             citation_results=list(lookup.get("results", []) or []),
             web_enabled=bool(lookup.get("web_enabled")),
