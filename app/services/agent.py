@@ -75,7 +75,13 @@ from app.services.citation_ranking import (
     semantic_scholar_citation_evidence,
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
-from app.services.compound_task_helpers import compound_task_label, compound_task_result_from_task_payload
+from app.services.compound_task_helpers import (
+    compound_subtask_contract_from_payload,
+    compound_subtask_relation_from_slots,
+    compound_task_label,
+    compound_task_result_from_task_payload,
+    merge_redundant_field_subtasks,
+)
 from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
     canonical_tools,
@@ -86,7 +92,6 @@ from app.services.contract_context import (
 from app.services.contract_normalization import (
     normalize_contract_targets,
     normalize_lookup_text,
-    normalize_modalities,
 )
 from app.services.contextual_contract_helpers import (
     contextual_active_paper_contract,
@@ -599,91 +604,14 @@ class ResearchAssistantAgentV4(
         fallback_query: str,
         index: int,
     ) -> QueryContract | None:
-        if not isinstance(payload, dict):
-            return None
-        allowed_relations = {
-            "library_status",
-            "library_recommendation",
-            "origin_lookup",
-            "formula_lookup",
-            "followup_research",
-            "entity_definition",
-            "topology_discovery",
-            "topology_recommendation",
-            "figure_question",
-            "paper_summary_results",
-            "metric_value_lookup",
-            "concept_definition",
-            "paper_recommendation",
-            "general_question",
-            "comparison_synthesis",
-        }
-        continuation_mode = str(payload.get("continuation_mode", "") or "").strip().lower()
-        if continuation_mode not in {"fresh", "followup", "context_switch"}:
-            continuation_mode = "fresh" if index == 0 else "followup"
-        clean_query = " ".join(str(payload.get("clean_query", "") or fallback_query).strip().split())
-        raw_targets = payload.get("targets", [])
-        targets = [str(item).strip() for item in raw_targets if str(item).strip()] if isinstance(raw_targets, list) else []
-        raw_answer_slots = payload.get("answer_slots", [])
-        if isinstance(raw_answer_slots, str):
-            raw_answer_slots = [raw_answer_slots]
-        answer_slots = [str(item).strip() for item in raw_answer_slots if str(item).strip()] if isinstance(raw_answer_slots, list) else []
-        raw_requested_fields = payload.get("requested_fields", [])
-        requested_fields = [str(item).strip() for item in raw_requested_fields if str(item).strip()] if isinstance(raw_requested_fields, list) else []
-        targets = self._normalize_contract_targets(targets=targets, requested_fields=requested_fields)
-        relation = str(payload.get("relation", "") or "").strip()
-        if relation not in allowed_relations:
-            relation = self._subtask_relation_from_slots(
-                answer_slots=answer_slots,
-                requested_fields=requested_fields,
+        return compound_subtask_contract_from_payload(
+            payload,
+            fallback_query=fallback_query,
+            index=index,
+            target_normalizer=lambda targets, fields: self._normalize_contract_targets(
                 targets=targets,
-            )
-        if relation not in allowed_relations:
-            return None
-        interaction_mode = str(payload.get("interaction_mode", "") or "").strip().lower()
-        if interaction_mode not in {"conversation", "research"}:
-            interaction_mode = "conversation" if relation in {"library_status", "library_recommendation", "comparison_synthesis"} else "research"
-        if relation in {"library_status", "library_recommendation", "comparison_synthesis"}:
-            interaction_mode = "conversation"
-        if relation in {"library_status", "library_recommendation"}:
-            targets = []
-            requested_fields = []
-        raw_required_modalities = payload.get("required_modalities", [])
-        required_modalities = normalize_modalities(
-            [str(item).strip() for item in raw_required_modalities if str(item).strip()] if isinstance(raw_required_modalities, list) else [],
-            relation=relation,
-        )
-        if relation == "formula_lookup":
-            requested_fields = [*requested_fields, *[field for field in ["formula", "variable_explanation"] if field not in requested_fields]]
-            required_modalities = [*required_modalities, *[modality for modality in ["page_text", "table"] if modality not in required_modalities]]
-            interaction_mode = "research"
-        if interaction_mode == "conversation":
-            required_modalities = []
-        elif not required_modalities:
-            required_modalities = ["page_text", "paper_card"]
-        if interaction_mode == "research" and not requested_fields:
-            requested_fields = ["answer"]
-        answer_shape = str(payload.get("answer_shape", "") or "").strip().lower()
-        if answer_shape not in {"bullets", "narrative", "table"}:
-            answer_shape = "table" if relation == "comparison_synthesis" else "narrative"
-        precision_requirement = str(payload.get("precision_requirement", "") or "").strip().lower()
-        if precision_requirement not in {"exact", "high", "normal"}:
-            precision_requirement = "exact" if relation in {"formula_lookup", "metric_value_lookup"} else "high"
-        raw_notes = payload.get("notes", [])
-        notes = [str(item).strip() for item in raw_notes if str(item).strip()] if isinstance(raw_notes, list) else []
-        notes = list(dict.fromkeys([*notes, "compound_subtask", *[f"answer_slot={slot}" for slot in answer_slots], f"subtask_{relation}"]))
-        return QueryContract(
-            clean_query=clean_query,
-            interaction_mode=interaction_mode,
-            relation=relation,
-            targets=targets,
-            answer_slots=answer_slots,
-            requested_fields=requested_fields,
-            required_modalities=required_modalities,
-            answer_shape=answer_shape,
-            precision_requirement=precision_requirement,  # type: ignore[arg-type]
-            continuation_mode=continuation_mode,  # type: ignore[arg-type]
-            notes=notes,
+                requested_fields=fields,
+            ),
         )
 
     @staticmethod
@@ -693,83 +621,14 @@ class ResearchAssistantAgentV4(
         requested_fields: list[str],
         targets: list[str],
     ) -> str:
-        slots = {"_".join(str(item or "").strip().lower().replace("-", "_").split()) for item in answer_slots}
-        fields = {"_".join(str(item or "").strip().lower().replace("-", "_").split()) for item in requested_fields}
-        tokens = slots | fields
-        if "library_status" in tokens:
-            return "library_status"
-        if "library_recommendation" in tokens:
-            return "library_recommendation"
-        if "comparison" in tokens or "synthesis" in tokens:
-            return "comparison_synthesis"
-        if "origin" in tokens or {"paper_title", "year"} <= tokens:
-            return "origin_lookup"
-        if "formula" in tokens:
-            return "formula_lookup"
-        if "followup_research" in tokens or "followup_papers" in tokens:
-            return "followup_research"
-        if "figure" in tokens or "figure_conclusion" in tokens:
-            return "figure_question"
-        if "metric_value" in tokens:
-            return "metric_value_lookup"
-        if "paper_summary" in tokens or "summary" in tokens or "results" in tokens:
-            return "paper_summary_results"
-        if "paper_recommendation" in tokens or "recommended_papers" in tokens:
-            return "paper_recommendation"
-        if "topology_recommendation" in tokens or "best_topology" in tokens:
-            return "topology_recommendation"
-        if "topology_discovery" in tokens or "relevant_papers" in tokens:
-            return "topology_discovery"
-        if "entity_definition" in tokens or "entity_type" in tokens or ("definition" in tokens and targets):
-            return "entity_definition"
-        if "concept_definition" in tokens or "definition" in tokens:
-            return "concept_definition"
-        return "general_question"
+        return compound_subtask_relation_from_slots(
+            answer_slots=answer_slots,
+            requested_fields=requested_fields,
+            targets=targets,
+        )
 
     def _merge_redundant_field_subtasks(self, subcontracts: list[QueryContract]) -> list[QueryContract]:
-        mergeable_relations = {
-            "paper_summary_results",
-            "metric_value_lookup",
-            "entity_definition",
-            "concept_definition",
-            "formula_lookup",
-            "figure_question",
-            "general_question",
-            "followup_research",
-        }
-        merged: list[QueryContract] = []
-        by_key: dict[tuple[str, str, tuple[str, ...]], int] = {}
-        precision_rank = {"normal": 0, "high": 1, "exact": 2}
-        for contract in subcontracts:
-            normalized_targets = tuple(normalize_lookup_text(target) for target in contract.targets if target)
-            key = (contract.interaction_mode, contract.relation, normalized_targets)
-            if contract.relation not in mergeable_relations or key not in by_key:
-                by_key[key] = len(merged)
-                merged.append(contract)
-                continue
-            existing_index = by_key[key]
-            existing = merged[existing_index]
-            requested_fields = list(dict.fromkeys([*existing.requested_fields, *contract.requested_fields]))
-            required_modalities = list(dict.fromkeys([*existing.required_modalities, *contract.required_modalities]))
-            notes = list(dict.fromkeys([*existing.notes, *contract.notes, "merged_same_target_fields"]))
-            clean_query = existing.clean_query
-            if contract.clean_query and contract.clean_query not in clean_query:
-                clean_query = f"{clean_query}；{contract.clean_query}"
-            precision = (
-                contract.precision_requirement
-                if precision_rank.get(contract.precision_requirement, 0) > precision_rank.get(existing.precision_requirement, 0)
-                else existing.precision_requirement
-            )
-            merged[existing_index] = existing.model_copy(
-                update={
-                    "clean_query": clean_query,
-                    "requested_fields": requested_fields or existing.requested_fields,
-                    "required_modalities": required_modalities or existing.required_modalities,
-                    "precision_requirement": precision,
-                    "notes": notes,
-                }
-            )
-        return merged
+        return merge_redundant_field_subtasks(subcontracts)
 
     def _execute_compound_conversation_subtask(
         self,

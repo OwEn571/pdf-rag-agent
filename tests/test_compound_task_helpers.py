@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from app.domain.models import QueryContract, VerificationReport
 from app.services.compound_task_helpers import (
+    compound_subtask_contract_from_payload,
+    compound_subtask_relation_from_slots,
     compound_research_progress_markdown,
     compound_section_heading,
     compound_task_label,
     compound_task_result_from_task_payload,
     demote_markdown_headings,
     format_compound_section,
+    merge_redundant_field_subtasks,
 )
 
 
@@ -50,3 +53,76 @@ def test_compound_task_result_from_payload_uses_fallbacks_for_bad_values() -> No
     assert result["contract"] == fallback
     assert result["verification"].status == "pass"
     assert result["verification"].recommended_action == "task_subagent"
+
+
+def test_compound_subtask_relation_from_slots_maps_common_slots() -> None:
+    assert (
+        compound_subtask_relation_from_slots(
+            answer_slots=["formula"],
+            requested_fields=[],
+            targets=["DPO"],
+        )
+        == "formula_lookup"
+    )
+    assert (
+        compound_subtask_relation_from_slots(
+            answer_slots=[],
+            requested_fields=["paper_title", "year"],
+            targets=["Transformer"],
+        )
+        == "origin_lookup"
+    )
+
+
+def test_compound_subtask_contract_from_payload_normalizes_formula_defaults() -> None:
+    contract = compound_subtask_contract_from_payload(
+        {
+            "clean_query": " DPO 的公式 ",
+            "targets": ["DPO"],
+            "answer_slots": "formula",
+            "requested_fields": [],
+            "required_modalities": [],
+            "answer_shape": "unknown",
+            "notes": ["from_llm"],
+        },
+        fallback_query="fallback",
+        index=0,
+    )
+
+    assert contract is not None
+    assert contract.relation == "formula_lookup"
+    assert contract.interaction_mode == "research"
+    assert contract.requested_fields == ["formula", "variable_explanation"]
+    assert contract.required_modalities == ["page_text", "table"]
+    assert contract.precision_requirement == "exact"
+    assert "compound_subtask" in contract.notes
+    assert "answer_slot=formula" in contract.notes
+
+
+def test_merge_redundant_field_subtasks_merges_same_target_fields() -> None:
+    first = QueryContract(
+        clean_query="POPI 的核心结论是什么？",
+        relation="paper_summary_results",
+        targets=["POPI"],
+        requested_fields=["core_conclusion"],
+        required_modalities=["page_text"],
+        precision_requirement="high",
+        notes=["first"],
+    )
+    second = QueryContract(
+        clean_query="POPI 的实验结果如何？",
+        relation="paper_summary_results",
+        targets=["POPI"],
+        requested_fields=["experiment_results"],
+        required_modalities=["table"],
+        precision_requirement="exact",
+        notes=["second"],
+    )
+
+    merged = merge_redundant_field_subtasks([first, second])
+
+    assert len(merged) == 1
+    assert merged[0].requested_fields == ["core_conclusion", "experiment_results"]
+    assert merged[0].required_modalities == ["page_text", "table"]
+    assert merged[0].precision_requirement == "exact"
+    assert "merged_same_target_fields" in merged[0].notes
