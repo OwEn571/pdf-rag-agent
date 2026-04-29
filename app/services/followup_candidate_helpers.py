@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from typing import Any
 
-from app.domain.models import CandidatePaper, QueryContract
+from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.followup_relationship_intents import has_followup_domain_signal
 
@@ -83,3 +84,53 @@ def filter_followup_candidates(
             continue
         filtered.append(item)
     return filtered or candidates[: min(8, len(candidates))]
+
+
+def merge_followup_rankings(
+    *,
+    primary: list[dict[str, Any]],
+    secondary: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in (primary, secondary):
+        for item in source:
+            paper = item.get("paper")
+            paper_id = getattr(paper, "paper_id", "")
+            if not paper_id or paper_id in seen:
+                continue
+            seen.add(paper_id)
+            merged.append(item)
+    return merged
+
+
+def relationship_evidence_ids_from_payload(
+    *,
+    payload: dict[str, Any],
+    relationship_evidence: list[EvidenceBlock],
+) -> list[str]:
+    available = {item.doc_id for item in relationship_evidence}
+    raw_ids = payload.get("evidence_ids", [])
+    selected: list[str] = []
+    if isinstance(raw_ids, list):
+        selected = [str(item).strip() for item in raw_ids if str(item).strip() in available]
+    if selected:
+        return selected[:6]
+    return [item.doc_id for item in relationship_evidence[:4]]
+
+
+def paper_relationship_brief(
+    *,
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+) -> dict[str, Any]:
+    return {
+        "paper_id": paper.paper_id,
+        "title": paper.title,
+        "year": paper.year,
+        "authors": str(paper.metadata.get("authors", "")),
+        "aliases": str(paper.metadata.get("aliases", "")),
+        "summary": paper_summary_text(paper.paper_id),
+        "paper_card_text": str(paper.metadata.get("paper_card_text", ""))[:1800],
+        "tags": str(paper.metadata.get("tags", "")),
+    }

@@ -119,6 +119,9 @@ from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
     followup_target_aliases,
+    merge_followup_rankings,
+    paper_relationship_brief,
+    relationship_evidence_ids_from_payload,
     selected_followup_candidate_title,
 )
 from app.services.figure_intents import figure_signal_score
@@ -3664,7 +3667,7 @@ class ResearchAssistantAgentV4(
                         seed_papers=seed_papers,
                         candidates=filtered,
                     )
-                    return self._merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
+                    return merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
         return self._rank_followup_candidates_fallback(contract=contract, seed_papers=seed_papers, candidates=filtered)
 
     def _selected_followup_candidate_assessment(
@@ -3765,8 +3768,17 @@ class ResearchAssistantAgentV4(
                 {
                     "query": contract.clean_query,
                     "targets": contract.targets,
-                    "seed_papers": [self._paper_relationship_brief(item) for item in seed_papers[:2]],
-                    "candidate_paper": self._paper_relationship_brief(paper),
+                    "seed_papers": [
+                        paper_relationship_brief(
+                            paper=item,
+                            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                        )
+                        for item in seed_papers[:2]
+                    ],
+                    "candidate_paper": paper_relationship_brief(
+                        paper=paper,
+                        paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                    ),
                     "relationship_evidence": [
                         {
                             "doc_id": item.doc_id,
@@ -3811,37 +3823,10 @@ class ResearchAssistantAgentV4(
             "relationship_strength": strength,
             "strict_followup": strict,
             "classification": classification,
-            "evidence_ids": self._relationship_evidence_ids_from_payload(
+            "evidence_ids": relationship_evidence_ids_from_payload(
                 payload=payload,
                 relationship_evidence=relationship_evidence,
             ),
-        }
-
-    @staticmethod
-    def _relationship_evidence_ids_from_payload(
-        *,
-        payload: dict[str, Any],
-        relationship_evidence: list[EvidenceBlock],
-    ) -> list[str]:
-        available = {item.doc_id for item in relationship_evidence}
-        raw_ids = payload.get("evidence_ids", [])
-        selected: list[str] = []
-        if isinstance(raw_ids, list):
-            selected = [str(item).strip() for item in raw_ids if str(item).strip() in available]
-        if selected:
-            return selected[:6]
-        return [item.doc_id for item in relationship_evidence[:4]]
-
-    def _paper_relationship_brief(self, paper: CandidatePaper) -> dict[str, Any]:
-        return {
-            "paper_id": paper.paper_id,
-            "title": paper.title,
-            "year": paper.year,
-            "authors": str(paper.metadata.get("authors", "")),
-            "aliases": str(paper.metadata.get("aliases", "")),
-            "summary": self._paper_summary_text(paper.paper_id),
-            "paper_card_text": str(paper.metadata.get("paper_card_text", ""))[:1800],
-            "tags": str(paper.metadata.get("tags", "")),
         }
 
     def _rank_followup_candidates_fallback(
@@ -4009,24 +3994,6 @@ class ResearchAssistantAgentV4(
             "reason": reason,
             "confidence": confidence,
         }
-
-    @staticmethod
-    def _merge_followup_rankings(
-        *,
-        primary: list[dict[str, Any]],
-        secondary: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        merged: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for source in (primary, secondary):
-            for item in source:
-                paper = item.get("paper")
-                paper_id = getattr(paper, "paper_id", "")
-                if not paper_id or paper_id in seen:
-                    continue
-                seen.add(paper_id)
-                merged.append(item)
-        return merged
 
     def _followup_seed_score(
         self,

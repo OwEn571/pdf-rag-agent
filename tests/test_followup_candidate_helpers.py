@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from app.domain.models import CandidatePaper, QueryContract
+from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
     followup_target_aliases,
+    merge_followup_rankings,
+    paper_relationship_brief,
+    relationship_evidence_ids_from_payload,
     selected_followup_candidate_title,
 )
 
@@ -72,3 +75,52 @@ def test_filter_followup_candidates_keeps_domain_related_without_literal_target(
     )
 
     assert [item.paper_id for item in filtered] == ["ALIGNX", "PERSONADUAL"]
+
+
+def test_merge_followup_rankings_deduplicates_by_paper_id() -> None:
+    paper_a = CandidatePaper(paper_id="a", title="A")
+    paper_b = CandidatePaper(paper_id="b", title="B")
+
+    merged = merge_followup_rankings(
+        primary=[{"paper": paper_a, "source": "primary"}],
+        secondary=[{"paper": paper_a, "source": "secondary"}, {"paper": paper_b, "source": "secondary"}],
+    )
+
+    assert [item["paper"].paper_id for item in merged] == ["a", "b"]
+    assert merged[0]["source"] == "primary"
+
+
+def test_relationship_evidence_ids_from_payload_filters_unknown_ids() -> None:
+    evidence = [
+        EvidenceBlock(doc_id="doc-1", paper_id="p1", title="P1", file_path="p1.pdf", page=1, block_type="page_text", snippet="one"),
+        EvidenceBlock(doc_id="doc-2", paper_id="p2", title="P2", file_path="p2.pdf", page=2, block_type="page_text", snippet="two"),
+    ]
+
+    selected = relationship_evidence_ids_from_payload(
+        payload={"evidence_ids": ["doc-2", "missing", "doc-1"]},
+        relationship_evidence=evidence,
+    )
+    fallback = relationship_evidence_ids_from_payload(payload={"evidence_ids": ["missing"]}, relationship_evidence=evidence)
+
+    assert selected == ["doc-2", "doc-1"]
+    assert fallback == ["doc-1", "doc-2"]
+
+
+def test_paper_relationship_brief_truncates_card_and_injects_summary() -> None:
+    paper = CandidatePaper(
+        paper_id="p1",
+        title="Paper One",
+        year="2026",
+        metadata={
+            "authors": "A; B",
+            "aliases": "P1",
+            "paper_card_text": "x" * 1900,
+            "tags": "alignment",
+        },
+    )
+
+    brief = paper_relationship_brief(paper=paper, paper_summary_text=lambda paper_id: f"summary:{paper_id}")
+
+    assert brief["paper_id"] == "p1"
+    assert brief["summary"] == "summary:p1"
+    assert len(brief["paper_card_text"]) == 1800
