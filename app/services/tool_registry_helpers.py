@@ -6,6 +6,7 @@ from typing import Any
 
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.contract_context import contract_answer_slots, note_value
+from app.services.memory_artifact_helpers import remember_conversation_tool_result
 from app.services.evidence_tools import (
     evidence_from_payload,
     summarize_evidence,
@@ -136,16 +137,14 @@ def store_conversation_answer_result(
     answer: str,
     artifact: dict[str, Any] | None = None,
 ) -> dict[str, int]:
-    remember_kwargs: dict[str, Any] = {
-        "session": session,
-        "contract": contract,
-        "tool": tool,
-        "query": query,
-        "answer": answer,
-    }
-    if artifact is not None:
-        remember_kwargs["artifact"] = artifact
-    agent._remember_conversation_tool_result(**remember_kwargs)
+    remember_conversation_tool_result(
+        session=session,
+        contract=contract,
+        tool=tool,
+        query=query,
+        answer=answer,
+        artifact=artifact,
+    )
     agent._set_conversation_answer(state=state, answer=answer, emit=emit)
     return {"chars": len(answer)}
 

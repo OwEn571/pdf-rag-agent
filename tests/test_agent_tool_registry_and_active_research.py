@@ -76,9 +76,6 @@ class _RegistryProbeAgent:
     def _compose_conversation_response(self, **_: object) -> str:
         return "hello from runtime"
 
-    def _remember_conversation_tool_result(self, **_: object) -> None:
-        return None
-
     def _set_conversation_answer(self, *, state: dict[str, object], answer: str, **_: object) -> None:
         state["answer"] = answer
 

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from app.domain.models import SessionContext
+from app.domain.models import QueryContract, SessionContext
 from app.services.memory_artifact_helpers import (
     answer_from_recent_tool_artifact_reference,
     chinese_ordinal_value,
     conversation_tool_result_artifact,
     latest_list_tool_artifact,
+    remember_conversation_tool_result,
     referenced_list_item_index,
 )
 
@@ -101,3 +102,28 @@ def test_conversation_tool_result_artifact_compacts_tabular_sql_rows() -> None:
 
 def test_conversation_tool_result_artifact_ignores_other_tools() -> None:
     assert conversation_tool_result_artifact(tool="read_memory", result={"rows": [{"title": "Nope"}]}) == {}
+
+
+def test_remember_conversation_tool_result_stores_recent_list_artifact() -> None:
+    session = SessionContext(session_id="remember-artifact")
+    contract = QueryContract(
+        clean_query="推荐论文",
+        relation="library_recommendation",
+        targets=["alignment"],
+        requested_fields=["recommendation"],
+    )
+
+    remember_conversation_tool_result(
+        session=session,
+        contract=contract,
+        tool="query_library_metadata",
+        query="推荐论文",
+        answer="hello",
+        artifact={"items": [{"row": {"title": "A"}}]},
+    )
+
+    memory = session.working_memory
+    assert memory["last_tool_result"]["answer_preview"] == "hello"
+    assert memory["last_tool_result"]["targets"] == ["alignment"]
+    assert memory["last_displayed_list"]["tool"] == "query_library_metadata"
+    assert memory["last_library_metadata_result"] == {"items": [{"row": {"title": "A"}}]}

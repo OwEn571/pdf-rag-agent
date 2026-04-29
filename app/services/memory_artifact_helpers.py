@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.domain.models import SessionContext
+from app.domain.models import QueryContract, SessionContext
 from app.services.session_context_helpers import truncate_context_text
 
 
@@ -36,6 +36,41 @@ def conversation_tool_result_artifact(*, tool: str, result: dict[str, Any]) -> d
         "truncated": bool(result.get("truncated", False)),
         "items": items,
     }
+
+
+def remember_conversation_tool_result(
+    *,
+    session: SessionContext,
+    contract: QueryContract,
+    tool: str,
+    query: str,
+    answer: str,
+    artifact: dict[str, Any] | None = None,
+) -> None:
+    memory = dict(session.working_memory or {})
+    results = [item for item in list(memory.get("tool_results", []) or []) if isinstance(item, dict)]
+    record = {
+        "tool": tool,
+        "query": query,
+        "relation": contract.relation,
+        "targets": list(contract.targets),
+        "requested_fields": list(contract.requested_fields),
+        "answer_shape": contract.answer_shape,
+        "answer_preview": truncate_context_text(answer, limit=1800),
+    }
+    if isinstance(artifact, dict) and artifact:
+        record["artifact"] = artifact
+        if isinstance(artifact.get("items"), list):
+            list_artifact = dict(artifact)
+            list_artifact.setdefault("query", query)
+            list_artifact.setdefault("tool", tool)
+            memory["last_displayed_list"] = list_artifact
+        if tool == "query_library_metadata":
+            memory["last_library_metadata_result"] = artifact
+    results.append(record)
+    memory["tool_results"] = results[-12:]
+    memory["last_tool_result"] = record
+    session.working_memory = memory
 
 
 def answer_from_recent_tool_artifact_reference(*, query: str, session: SessionContext) -> str:

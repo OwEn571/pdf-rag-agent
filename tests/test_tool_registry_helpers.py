@@ -210,12 +210,7 @@ def test_tool_registry_helpers_build_library_metadata_payloads() -> None:
 
 
 def test_tool_registry_helpers_store_conversation_answer_result() -> None:
-    calls: dict[str, object] = {}
-
     class _Agent:
-        def _remember_conversation_tool_result(self, **kwargs: object) -> None:
-            calls["remember"] = kwargs
-
         def _set_conversation_answer(self, *, state: dict[str, object], answer: str, **_: object) -> None:
             state["answer"] = answer
 
@@ -229,7 +224,7 @@ def test_tool_registry_helpers_store_conversation_answer_result() -> None:
         session=session,
         contract=contract,
         emit=lambda *_: None,
-        tool="answer_conversation",
+        tool="query_library_metadata",
         query="query",
         answer="hello",
         artifact={"items": []},
@@ -237,10 +232,11 @@ def test_tool_registry_helpers_store_conversation_answer_result() -> None:
 
     assert payload == {"chars": 5}
     assert state["answer"] == "hello"
-    remember_call = calls["remember"]
-    assert isinstance(remember_call, dict)
-    assert remember_call["tool"] == "answer_conversation"
-    assert remember_call["artifact"] == {"items": []}
+    memory = session.working_memory
+    assert memory["last_tool_result"]["tool"] == "query_library_metadata"
+    assert memory["last_tool_result"]["artifact"] == {"items": []}
+    assert memory["last_displayed_list"]["query"] == "query"
+    assert memory["last_library_metadata_result"] == {"items": []}
 
 
 def test_tool_registry_helpers_build_read_memory_payload() -> None:

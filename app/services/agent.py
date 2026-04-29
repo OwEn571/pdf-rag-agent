@@ -2426,41 +2426,6 @@ class ResearchAssistantAgentV4(
         }
         session.working_memory = memory
 
-    def _remember_conversation_tool_result(
-        self,
-        *,
-        session: SessionContext,
-        contract: QueryContract,
-        tool: str,
-        query: str,
-        answer: str,
-        artifact: dict[str, Any] | None = None,
-    ) -> None:
-        memory = dict(session.working_memory or {})
-        results = [item for item in list(memory.get("tool_results", []) or []) if isinstance(item, dict)]
-        record = {
-            "tool": tool,
-            "query": query,
-            "relation": contract.relation,
-            "targets": list(contract.targets),
-            "requested_fields": list(contract.requested_fields),
-            "answer_shape": contract.answer_shape,
-            "answer_preview": truncate_context_text(answer, limit=1800),
-        }
-        if isinstance(artifact, dict) and artifact:
-            record["artifact"] = artifact
-            if isinstance(artifact.get("items"), list):
-                list_artifact = dict(artifact)
-                list_artifact.setdefault("query", query)
-                list_artifact.setdefault("tool", tool)
-                memory["last_displayed_list"] = list_artifact
-            if tool == "query_library_metadata":
-                memory["last_library_metadata_result"] = artifact
-        results.append(record)
-        memory["tool_results"] = results[-12:]
-        memory["last_tool_result"] = record
-        session.working_memory = memory
-
     def _formula_answer_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         active = session.effective_active_research()
         title = active.titles[0] if active.titles else ""
