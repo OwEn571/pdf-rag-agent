@@ -5,6 +5,7 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext
 from app.services.entity_definition_helpers import entity_definition_claim, entity_definition_evidence_ids
+from app.services.followup_candidate_helpers import selected_followup_candidate_title
 from app.services.followup_claim_helpers import followup_research_claim
 from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
@@ -468,7 +469,7 @@ class SolverPipelineMixin:
         if not papers:
             return []
         seed_papers = self._resolve_followup_seed_papers(contract=contract, candidates=papers, session=session)
-        selected_candidate_title = self._selected_followup_candidate_title(contract)
+        selected_candidate_title = selected_followup_candidate_title(contract)
         candidate_pool = self._expand_followup_candidate_pool(
             contract=contract,
             seed_papers=seed_papers,

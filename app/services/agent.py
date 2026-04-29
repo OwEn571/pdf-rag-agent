@@ -115,6 +115,12 @@ from app.services.evidence_presentation import (
     paper_recommendation_reason,
     safe_year,
 )
+from app.services.followup_candidate_helpers import (
+    candidate_title_matches,
+    filter_followup_candidates,
+    followup_target_aliases,
+    selected_followup_candidate_title,
+)
 from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
@@ -1504,7 +1510,11 @@ class ResearchAssistantAgentV4(
         precomputed_evidence: list[EvidenceBlock] | None = None
         goals = research_plan_goals(contract)
         if goals & {"followup_papers", "candidate_relationship", "strict_followup"}:
-            screened_papers = self._filter_followup_candidates(contract=contract, candidates=candidate_papers)
+            screened_papers = filter_followup_candidates(
+                contract=contract,
+                candidates=candidate_papers,
+                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            )
         elif "formula" in goals and contract.targets:
             screened_papers = self._prefer_identity_matching_papers(candidates=candidate_papers, targets=contract.targets)
         elif "figure_conclusion" in goals and contract.targets:
@@ -3582,9 +3592,9 @@ class ResearchAssistantAgentV4(
         filtered = [item for item in candidates if item.paper_id not in seed_ids]
         if not filtered:
             return []
-        selected_title = self._selected_followup_candidate_title(contract)
+        selected_title = selected_followup_candidate_title(contract)
         if selected_title:
-            selected_filtered = [item for item in filtered if self._candidate_title_matches(item, selected_title)]
+            selected_filtered = [item for item in filtered if candidate_title_matches(item, selected_title)]
             if selected_filtered:
                 return [
                     {
@@ -3656,22 +3666,6 @@ class ResearchAssistantAgentV4(
                     )
                     return self._merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
         return self._rank_followup_candidates_fallback(contract=contract, seed_papers=seed_papers, candidates=filtered)
-
-    @staticmethod
-    def _selected_followup_candidate_title(contract: QueryContract) -> str:
-        for note in contract.notes:
-            raw = str(note or "")
-            if raw.startswith("candidate_title="):
-                return raw.split("=", 1)[1].strip()
-        return ""
-
-    def _candidate_title_matches(self, paper: CandidatePaper, selected_title: str) -> bool:
-        selected_key = normalize_lookup_text(selected_title)
-        if not selected_key:
-            return False
-        title_key = normalize_lookup_text(paper.title)
-        aliases = normalize_lookup_text(str(paper.metadata.get("aliases", "")))
-        return selected_key in title_key or title_key in selected_key or selected_key in aliases
 
     def _selected_followup_candidate_assessment(
         self,
@@ -3863,7 +3857,11 @@ class ResearchAssistantAgentV4(
         seed_year = min((safe_year(item.year) for item in seed_papers), default=9999)
         seed_ids = {item.paper_id for item in seed_papers}
         scored: list[tuple[float, CandidatePaper, dict[str, Any]]] = []
-        for paper in self._filter_followup_candidates(contract=contract, candidates=candidates):
+        for paper in filter_followup_candidates(
+            contract=contract,
+            candidates=candidates,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        ):
             if paper.paper_id in seed_ids:
                 continue
             score = paper.score
@@ -3913,7 +3911,11 @@ class ResearchAssistantAgentV4(
         seed_papers: list[CandidatePaper],
         paper: CandidatePaper,
     ) -> dict[str, Any]:
-        target_aliases = self._followup_target_aliases(contract=contract, seed_papers=seed_papers)
+        target_aliases = followup_target_aliases(
+            contract=contract,
+            seed_papers=seed_papers,
+            paper_anchor_text=lambda paper: self._paper_anchor_text(paper),
+        )
         seed_keywords = self._paper_keyword_set(seed_papers)
         candidate_keywords = self._paper_keyword_set([paper])
         seed_phrases: set[str] = set()
@@ -4007,51 +4009,6 @@ class ResearchAssistantAgentV4(
             "reason": reason,
             "confidence": confidence,
         }
-
-    def _followup_target_aliases(self, *, contract: QueryContract, seed_papers: list[CandidatePaper]) -> list[str]:
-        aliases: list[str] = []
-        for target in contract.targets:
-            target = str(target or "").strip()
-            if target:
-                aliases.append(target)
-        for paper in seed_papers[:2]:
-            raw_aliases = str(paper.metadata.get("aliases", ""))
-            for alias in re.split(r"\|\||[,;/]", raw_aliases):
-                alias = alias.strip()
-                if alias and len(alias) <= 48:
-                    aliases.append(alias)
-            anchor = self._paper_anchor_text(paper)
-            if anchor and len(anchor) <= 48:
-                aliases.append(anchor)
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for alias in aliases:
-            key = alias.lower()
-            if key and key not in seen:
-                seen.add(key)
-                normalized.append(alias)
-        return normalized
-
-    def _filter_followup_candidates(self, *, contract: QueryContract, candidates: list[CandidatePaper]) -> list[CandidatePaper]:
-        if not candidates:
-            return []
-        target = contract.targets[0].lower() if contract.targets else ""
-        filtered: list[CandidatePaper] = []
-        for item in candidates:
-            title_lower = item.title.lower()
-            card_text = str(item.metadata.get("paper_card_text", "")).lower()
-            summary_lower = str(item.metadata.get("generated_summary", "") or self._paper_summary_text(item.paper_id)).lower()
-            if (
-                target
-                and target not in title_lower
-                and target not in summary_lower
-                and target not in str(item.metadata.get("abstract_note", "")).lower()
-                and target not in card_text
-                and not has_followup_domain_signal(title_lower + "\n" + card_text + "\n" + summary_lower)
-            ):
-                continue
-            filtered.append(item)
-        return filtered or candidates[: min(8, len(candidates))]
 
     @staticmethod
     def _merge_followup_rankings(

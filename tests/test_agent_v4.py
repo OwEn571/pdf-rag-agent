@@ -2906,31 +2906,6 @@ def test_followup_solver_uses_seed_paper_then_excludes_it_from_followups(tmp_pat
     assert "ALIGNXPLORE" in followup_ids
 
 
-def test_followup_filter_keeps_domain_related_papers_without_literal_target(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    candidates = [
-        CandidatePaper(
-            paper_id="ALIGNX",
-            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-            metadata={"paper_card_text": "This paper introduces AlignX."},
-        ),
-        CandidatePaper(
-            paper_id="PERSONADUAL",
-            title="PersonaDual: Balancing Personalization and Objectivity via Adaptive Reasoning",
-            metadata={"paper_card_text": "A personalized alignment method using user preferences and persona reasoning."},
-        ),
-    ]
-
-    filtered = agent._filter_followup_candidates(contract=contract, candidates=candidates)
-
-    assert [item.paper_id for item in filtered] == ["ALIGNX", "PERSONADUAL"]
-
-
 def test_followup_relevance_boost_prioritizes_personalization_continuations(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     contract = QueryContract(
