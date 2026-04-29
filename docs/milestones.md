@@ -309,3 +309,4 @@
 - 2026-04-30 继续按 review §3.1/M1 收敛 Zotero ingestion markers：`zotero_sqlite.py` 新增 `PAPERLIKE_WEBPAGE_TITLE_MARKERS` profile，集中网页条目转论文候选的 title cues，并新增 reader 回归测试覆盖，保持 Zotero webpage include 判定行为不变。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 554 个测试。
 - 2026-04-30 继续按 review §4.2/M1 收敛 SSE 事件协议：`agent_events.py` 显式规范化 `thinking_delta` 与 `ask_human` 事件，补齐 question/options/reason 与 text 字段归一化，并新增事件协议测试覆盖。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 555 个测试。
 - 2026-04-30 继续按 review §4.3/M2 收敛 Task tool-use loop：`Task` 现在进入 research executable tool set，`build_research_tool_registry` 可在研究 loop 中执行子任务并记录 task result observation，新增 research runtime Task 测试覆盖。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 556 个测试。
+- 2026-04-30 继续按 review §10/M3 收敛 trace diff 可观测性：`agent_trace_diff.py` 将 `ask_human` question 与 options_count 纳入稳定签名，trace diff 现在能捕捉澄清问题/选项数量变化，并新增回归测试覆盖。使用 `zotero-paper-rag` conda 环境相关测试与全量 `pytest` 通过 557 个测试。

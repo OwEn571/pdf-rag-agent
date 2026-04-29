@@ -89,6 +89,9 @@ def _event_signature(*, event: str, data: dict[str, Any]) -> dict[str, Any]:
         item["recommended_action"] = data["recommended_action"]
     if event == "confidence":
         item["basis"] = str(data.get("basis", "") or "")
+    if event == "ask_human":
+        item["question"] = str(data.get("question", "") or "")[:200]
+        item["options_count"] = len(data.get("options", [])) if isinstance(data.get("options"), list) else 0
     if event == "final":
         item["execution_nodes"] = _execution_nodes(data.get("execution_steps"))
         if "answer_chars" in data:

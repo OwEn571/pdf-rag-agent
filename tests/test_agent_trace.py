@@ -86,3 +86,24 @@ def test_diff_agent_traces_reports_stable_signal_changes() -> None:
     assert diff.ok is False
     assert "search_corpus" in diff.differences[0]
     assert "web_search" in diff.differences[0]
+
+
+def test_diff_agent_traces_reports_ask_human_question_changes() -> None:
+    expected = [
+        {
+            "event": "ask_human",
+            "data": {"type": "ask_human", "question": "选哪篇？", "options": [{"label": "A"}]},
+        }
+    ]
+    actual = [
+        {
+            "event": "ask_human",
+            "data": {"type": "ask_human", "question": "确认哪个公式？", "options": []},
+        }
+    ]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is False
+    assert "选哪篇" in diff.differences[0]
+    assert "确认哪个公式" in diff.differences[0]
