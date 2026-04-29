@@ -368,6 +368,19 @@ def finalize_research_verification(state: dict[str, Any]) -> tuple[VerificationR
     return verification, confidence
 
 
+def clarify_retry_verification_if_needed(*, contract: QueryContract, verification: VerificationReport) -> VerificationReport:
+    goals = research_plan_goals(contract)
+    if verification.status == "retry" and contract.targets and (
+        goals & {"definition", "mechanism", "examples", "figure_conclusion", "answer", "general_answer"}
+    ):
+        return VerificationReport(
+            status="clarify",
+            missing_fields=["relevant_evidence"],
+            recommended_action="clarify_target",
+        )
+    return verification
+
+
 def verification_execution_step(verification: VerificationReport) -> dict[str, str]:
     return {"node": "agent_tool:verify_claim", "summary": verification.status}
 

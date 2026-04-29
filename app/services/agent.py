@@ -36,6 +36,7 @@ from app.services.agent_runtime import AgentRuntime
 from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_runtime_helpers import (
     claim_focus_titles,
+    clarify_retry_verification_if_needed,
     entity_evidence_limit,
     excluded_focus_titles,
     filter_candidate_papers_by_excluded_titles,
@@ -1204,16 +1205,8 @@ class ResearchAssistantAgentV4(
                 execution_steps=execution_steps,
             )
             verification = state["verification"]
-        goals = research_plan_goals(contract)
-        if verification.status == "retry" and contract.targets and (
-            goals & {"definition", "mechanism", "examples", "figure_conclusion", "answer", "general_answer"}
-        ):
-            verification = VerificationReport(
-                status="clarify",
-                missing_fields=["relevant_evidence"],
-                recommended_action="clarify_target",
-            )
-            state["verification"] = verification
+        verification = clarify_retry_verification_if_needed(contract=contract, verification=verification)
+        state["verification"] = verification
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,

@@ -2,11 +2,22 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.domain.models import ActiveResearch, CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn
+from app.domain.models import (
+    ActiveResearch,
+    CandidatePaper,
+    Claim,
+    EvidenceBlock,
+    QueryContract,
+    ResearchPlan,
+    SessionContext,
+    SessionTurn,
+    VerificationReport,
+)
 from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     agent_loop_execution_step,
     claim_focus_titles,
+    clarify_retry_verification_if_needed,
     configured_max_steps,
     contract_needs_human_clarification,
     conversation_runtime_actions,
@@ -336,6 +347,22 @@ def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates(
         paper_title_lookup=lambda paper_id: "Looked Up Paper" if paper_id == "p2" else None,
     ) == ["Known Paper", "Looked Up Paper"]
     assert claim_focus_titles(claims=[], papers=papers, paper_title_lookup=lambda _: None) == ["Known Paper", "Fallback Paper"]
+
+
+def test_runtime_helpers_clarify_retry_verification_for_targeted_research_goals() -> None:
+    retry = VerificationReport(status="retry", missing_fields=["evidence"], recommended_action="expand")
+
+    clarified = clarify_retry_verification_if_needed(
+        contract=QueryContract(clean_query="DPO是什么", targets=["DPO"], requested_fields=["definition"]),
+        verification=retry,
+    )
+
+    assert clarified.status == "clarify"
+    assert clarified.missing_fields == ["relevant_evidence"]
+    assert clarify_retry_verification_if_needed(
+        contract=QueryContract(clean_query="继续", targets=[]),
+        verification=retry,
+    ) is retry
 
 
 def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:
