@@ -57,6 +57,25 @@ def test_normalize_thinking_and_ask_human_events_add_protocol_fields() -> None:
     assert ask_human["reason"] == ""
 
 
+def test_normalize_todo_update_event_adds_protocol_items() -> None:
+    payload = normalize_agent_event(
+        "todo_update",
+        {
+            "items": [
+                {"id": "  step-1 ", "text": "  查找表格证据  ", "status": "doing"},
+                {"text": "解释指标定义", "status": "bad"},
+                {"id": "empty", "text": ""},
+            ]
+        },
+    )
+
+    assert payload["type"] == "todo_update"
+    assert payload["items"] == [
+        {"id": "step-1", "text": "查找表格证据", "status": "doing"},
+        {"id": "todo-2", "text": "解释指标定义", "status": "pending"},
+    ]
+
+
 def test_observation_events_record_tool_metrics(monkeypatch) -> None:
     calls = _CounterProbe()
     latency = _HistogramProbe()

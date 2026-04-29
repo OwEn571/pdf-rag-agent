@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.agent_metrics import record_agent_event
+from app.services.tool_registry_helpers import normalize_todo_items
 
 
 def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -30,6 +31,8 @@ def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
         options = payload.get("options", [])
         payload["options"] = options if isinstance(options, list) else []
         payload.setdefault("reason", str(payload.get("reason", "") or ""))
+    elif event == "todo_update":
+        payload["items"] = normalize_todo_items(payload.get("items", []))
     elif event == "plan":
         payload.setdefault("payload", dict(data))
         payload.setdefault("items", _plan_items(payload))
@@ -54,6 +57,7 @@ def _event_type(event: str) -> str:
         "thinking_delta": "thinking_delta",
         "answer_delta": "answer_delta",
         "ask_human": "ask_human",
+        "todo_update": "todo_update",
         "plan": "plan",
         "verification": "verification",
         "confidence": "confidence",
