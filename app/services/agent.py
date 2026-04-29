@@ -41,6 +41,8 @@ from app.services.agent_step_messages import agent_step_message
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
+    ambiguity_option_context_text,
+    ambiguity_option_matches_context,
     ambiguity_options_from_notes,
     clarification_option_description,
     clarification_option_id,
@@ -48,8 +50,15 @@ from app.services.clarification_intents import (
     clarification_string_list,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
+    disambiguation_goal_markers,
+    disambiguation_judge_option_payload,
+    disambiguation_judge_summary,
+    disambiguation_missing_fields,
+    extract_acronym_expansion_from_text,
+    normalize_acronym_meaning,
     option_from_clarification_choice,
     select_pending_clarification_option,
+    selected_option_from_judge_decision,
     selected_clarification_paper_id,
 )
 from app.services.citation_ranking import (
@@ -1700,7 +1709,7 @@ class ResearchAssistantAgentV4(
         )
         if ambiguity_options:
             judge_decision = self._judge_disambiguation_options(contract=contract, options=ambiguity_options)
-            selected_option = self._selected_option_from_judge_decision(
+            selected_option = selected_option_from_judge_decision(
                 decision=judge_decision,
                 options=ambiguity_options,
             )
@@ -1709,7 +1718,7 @@ class ResearchAssistantAgentV4(
                 emit=emit,
                 execution_steps=execution_steps,
                 tool="resolve_ambiguity" if auto_resolve else "detect_ambiguity",
-                summary=self._disambiguation_judge_summary(
+                summary=disambiguation_judge_summary(
                     options=ambiguity_options,
                     judge_decision=judge_decision,
                 ),
@@ -1761,7 +1770,7 @@ class ResearchAssistantAgentV4(
                 state["claims"] = []
                 state["verification"] = VerificationReport(
                     status="clarify",
-                    missing_fields=self._disambiguation_missing_fields(contract),
+                    missing_fields=disambiguation_missing_fields(contract),
                     recommended_action="clarify_ambiguous_entity",
                 )
         else:
@@ -2471,7 +2480,7 @@ class ResearchAssistantAgentV4(
             return []
         context_targets = [item for item in contract.targets[1:] if str(item).strip()]
         if context_targets:
-            matched = [option for option in options if self._ambiguity_option_matches_context(option=option, context_targets=context_targets)]
+            matched = [option for option in options if ambiguity_option_matches_context(option=option, context_targets=context_targets)]
             if len(matched) <= 1:
                 return []
             options = matched
@@ -2525,10 +2534,7 @@ class ResearchAssistantAgentV4(
                             if not str(note).startswith("ambiguity_option=")
                         ][:12],
                     },
-                    "candidate_options": [
-                        self._disambiguation_judge_option_payload(option=option)
-                        for option in options[:8]
-                    ],
+                    "candidate_options": [self._disambiguation_judge_payload(option) for option in options[:8]],
                     "output_schema": {
                         "decision": "auto_resolve | ask_human",
                         "selected_option_id": "string|null",
@@ -2550,201 +2556,10 @@ class ResearchAssistantAgentV4(
             logger.warning("disambiguation judge returned invalid payload: %s", exc)
             return None
 
-    def _disambiguation_judge_option_payload(self, *, option: dict[str, Any]) -> dict[str, Any]:
+    def _disambiguation_judge_payload(self, option: dict[str, Any]) -> dict[str, Any]:
         paper_id = str(option.get("paper_id", "") or "").strip()
         paper = self._candidate_from_paper_id(paper_id) if paper_id else None
-        metadata = dict(paper.metadata or {}) if paper is not None else {}
-        signals = self._disambiguation_ranking_signals(option=option, paper=paper)
-        return {
-            "option_id": str(option.get("option_id", "") or "").strip(),
-            "index": option.get("index"),
-            "kind": str(option.get("kind", "") or "").strip(),
-            "target": str(option.get("target", "") or "").strip(),
-            "label": str(option.get("label", "") or "").strip(),
-            "meaning": str(option.get("meaning", "") or "").strip(),
-            "paper_id": paper_id,
-            "title": str(option.get("title", "") or "").strip(),
-            "year": str(option.get("year", "") or "").strip(),
-            "snippet": truncate_context_text(str(option.get("snippet", "") or ""), limit=420),
-            "match_reason": str(option.get("match_reason", "") or (paper.match_reason if paper is not None else "") or "").strip(),
-            "evidence_relation": str(option.get("source_relation", "") or option.get("source", "") or "").strip(),
-            "source_requested_fields": clarification_string_list(option.get("source_requested_fields")),
-            "source_answer_slots": clarification_string_list(option.get("source_answer_slots")),
-            "paper_aliases": truncate_context_text(str(metadata.get("aliases", "") or ""), limit=220),
-            "paper_summary": truncate_context_text(
-                str(
-                    metadata.get("paper_card_text", "")
-                    or metadata.get("generated_summary", "")
-                    or metadata.get("abstract_note", "")
-                    or ""
-                ),
-                limit=420,
-            ),
-            "ranking_signals": signals,
-        }
-
-    def _disambiguation_ranking_signals(
-        self,
-        *,
-        option: dict[str, Any],
-        paper: CandidatePaper | None,
-    ) -> dict[str, Any]:
-        title = str(option.get("title", "") or "").strip()
-        target = str(option.get("target", "") or "").strip()
-        label = str(option.get("label", "") or "").strip()
-        meaning = str(option.get("meaning", "") or "").strip()
-        snippet = str(option.get("snippet", "") or "").strip()
-        aliases = str((paper.metadata or {}).get("aliases", "") or "") if paper is not None else ""
-        summary = (
-            str((paper.metadata or {}).get("paper_card_text", "") or "")
-            or str((paper.metadata or {}).get("generated_summary", "") or "")
-            or str((paper.metadata or {}).get("abstract_note", "") or "")
-            if paper is not None
-            else ""
-        )
-        context = "\n".join([title, aliases, label, meaning, snippet, summary])
-        title_alias_text = "\n".join([title, aliases])
-        title_alignment = self._candidate_title_alignment_score(
-            target=target,
-            label=label,
-            meaning=meaning,
-            title_alias_text=title_alias_text,
-        )
-        origin_score = self._candidate_origin_signal_score(context)
-        usage_score = self._candidate_usage_signal_score(context)
-        role = "ambiguous"
-        if title_alignment >= 0.75 and origin_score >= 0.35:
-            role = "direct_definition_or_origin"
-        elif usage_score >= max(0.35, origin_score):
-            role = "related_usage_or_citation"
-        elif title_alignment >= 0.75:
-            role = "strong_title_or_alias_alignment"
-        return {
-            "title_or_alias_alignment": round(title_alignment, 3),
-            "origin_or_direct_definition_signal": round(origin_score, 3),
-            "usage_or_citation_signal": round(usage_score, 3),
-            "candidate_role_hint": role,
-        }
-
-    @classmethod
-    def _candidate_title_alignment_score(
-        cls,
-        *,
-        target: str,
-        label: str,
-        meaning: str,
-        title_alias_text: str,
-    ) -> float:
-        title_key = normalize_lookup_text(title_alias_text)
-        if not title_key:
-            return 0.0
-        probes = [target, label, meaning]
-        scores: list[float] = []
-        for probe in probes:
-            probe_key = normalize_lookup_text(probe)
-            if not probe_key:
-                continue
-            if probe_key and probe_key in title_key:
-                scores.append(1.0)
-                continue
-            probe_tokens = cls._disambiguation_content_tokens(probe_key)
-            if not probe_tokens:
-                continue
-            title_tokens = set(cls._disambiguation_content_tokens(title_key))
-            if not title_tokens:
-                continue
-            overlap = len([token for token in probe_tokens if token in title_tokens])
-            if overlap:
-                scores.append(overlap / max(1, len(probe_tokens)))
-        return max(scores or [0.0])
-
-    @staticmethod
-    def _disambiguation_content_tokens(text: str) -> list[str]:
-        stopwords = {
-            "a",
-            "an",
-            "and",
-            "are",
-            "as",
-            "at",
-            "by",
-            "for",
-            "from",
-            "in",
-            "is",
-            "it",
-            "its",
-            "main",
-            "of",
-            "on",
-            "or",
-            "our",
-            "the",
-            "this",
-            "to",
-            "we",
-            "with",
-        }
-        tokens = re.findall(r"[a-z0-9]+", str(text or "").lower())
-        return [token for token in tokens if len(token) > 1 and token not in stopwords]
-
-    @staticmethod
-    def _candidate_origin_signal_score(text: str) -> float:
-        lowered = str(text or "").lower()
-        patterns = [
-            r"\bour\s+main\s+contribution\b",
-            r"\bwe\s+(?:propose|proposed|present|introduce|introduced|derive|develop)\b",
-            r"\bthis\s+paper\s+(?:proposes|introduces|presents|derives|develops)\b",
-            r"\bmain\s+contribution\b",
-            r"\bpropose\s+(?:a|an|the)?\b",
-            r"\bintroduce\s+(?:a|an|the)?\b",
-        ]
-        score = 0.0
-        for pattern in patterns:
-            if re.search(pattern, lowered):
-                score += 0.35
-        return min(score, 1.0)
-
-    @staticmethod
-    def _candidate_usage_signal_score(text: str) -> float:
-        lowered = str(text or "").lower()
-        patterns = [
-            r"\badopt(?:s|ed|ing)?\b",
-            r"\buse(?:s|d|ing)?\b",
-            r"\bfollowing\b",
-            r"\bbased\s+on\b",
-            r"\bextends?\b",
-            r"\bvariant\s+of\b",
-            r"\bin\s+recent\s+work\b",
-            r"\bproposed\s+by\b",
-            r"\bet\s+al\.\s+(?:proposed|introduced)\b",
-            r"\binclude(?:s|d|ing)?\b",
-        ]
-        score = 0.0
-        for pattern in patterns:
-            if re.search(pattern, lowered):
-                score += 0.25
-        return min(score, 1.0)
-
-    @staticmethod
-    def _selected_option_from_judge_decision(
-        *,
-        decision: DisambiguationJudgeDecision | None,
-        options: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        if decision is None:
-            return None
-        selected_option_id = str(decision.selected_option_id or "").strip()
-        if selected_option_id:
-            for option in options:
-                if str(option.get("option_id", "") or "").strip() == selected_option_id:
-                    return option
-        selected_paper_id = str(decision.selected_paper_id or "").strip()
-        if selected_paper_id:
-            for option in options:
-                if str(option.get("paper_id", "") or "").strip() == selected_paper_id:
-                    return option
-        return None
+        return disambiguation_judge_option_payload(option=option, paper=paper)
 
     def _judge_allows_auto_resolve(self, decision: DisambiguationJudgeDecision | None) -> bool:
         return (
@@ -2759,7 +2574,7 @@ class ResearchAssistantAgentV4(
         options: list[dict[str, Any]],
         decision: DisambiguationJudgeDecision | None,
     ) -> list[dict[str, Any]]:
-        selected = self._selected_option_from_judge_decision(decision=decision, options=options)
+        selected = selected_option_from_judge_decision(decision=decision, options=options)
         if (
             selected is None
             or decision is None
@@ -2792,19 +2607,6 @@ class ResearchAssistantAgentV4(
             )
         )
         return annotated
-
-    @staticmethod
-    def _disambiguation_judge_summary(
-        *,
-        options: list[dict[str, Any]],
-        judge_decision: DisambiguationJudgeDecision | None,
-    ) -> str:
-        if judge_decision is None:
-            return f"options={len(options)}, judge=unavailable"
-        return (
-            f"options={len(options)}, judge={judge_decision.decision}, "
-            f"confidence={float(judge_decision.confidence):.2f}"
-        )
 
     def _contract_with_auto_resolved_ambiguity(
         self,
@@ -2904,15 +2706,7 @@ class ResearchAssistantAgentV4(
             return False
         if note_values(notes=contract.notes, prefix="ambiguous_slot="):
             return True
-        return bool(research_plan_goals(contract) & self._disambiguation_goal_markers())
-
-    @staticmethod
-    def _disambiguation_goal_markers() -> set[str]:
-        return {"definition", "entity_type", "role_in_context", "mechanism", "formula"}
-
-    def _disambiguation_missing_fields(self, contract: QueryContract) -> list[str]:
-        ambiguous_slots = note_values(notes=contract.notes, prefix="ambiguous_slot=")
-        return ambiguous_slots or ["disambiguation"]
+        return bool(research_plan_goals(contract) & disambiguation_goal_markers())
 
     def _acronym_options_from_evidence(
         self,
@@ -2931,8 +2725,8 @@ class ResearchAssistantAgentV4(
             if paper is None:
                 continue
             text = " ".join([item.snippet, item.caption, item.title])
-            expansion = self._extract_acronym_expansion_from_text(text=text, acronym=target)
-            option_key = self._normalize_acronym_meaning(expansion) if expansion else normalize_lookup_text(f"{target_key}:{paper.paper_id}")
+            expansion = extract_acronym_expansion_from_text(text=text, acronym=target)
+            option_key = normalize_acronym_meaning(expansion) if expansion else normalize_lookup_text(f"{target_key}:{paper.paper_id}")
             if not option_key:
                 option_key = f"{target_key}:{paper.paper_id}"
             bucket = buckets.setdefault(
@@ -2974,7 +2768,9 @@ class ResearchAssistantAgentV4(
         if any(str(option.get("meaning", "")).strip().lower() != target.lower() for option in options):
             options = [option for option in options if str(option.get("meaning", "")).strip().lower() != target.lower()]
         for option in options:
-            option["context_text"] = self._ambiguity_option_context_text(option)
+            paper_id = str(option.get("paper_id", "") or "")
+            paper = paper_by_id.get(paper_id) or self._candidate_from_paper_id(paper_id)
+            option["context_text"] = ambiguity_option_context_text(option, paper=paper)
         options.sort(key=lambda item: (-float(item.get("score", 0.0)), str(item.get("title", ""))))
         return options
 
@@ -2990,7 +2786,7 @@ class ResearchAssistantAgentV4(
                 if not matches_target(text, target):
                     continue
                 score = 1.0
-                expansion = self._extract_acronym_expansion_from_text(text=text, acronym=target)
+                expansion = extract_acronym_expansion_from_text(text=text, acronym=target)
                 if expansion:
                     score += 6.0
                 if int(meta.get("formula_hint", 0) or 0):
@@ -3014,60 +2810,6 @@ class ResearchAssistantAgentV4(
                     return evidence
         evidence.sort(key=lambda item: (-item.score, item.title, item.page))
         return evidence[:limit]
-
-    @staticmethod
-    def _extract_acronym_expansion_from_text(*, text: str, acronym: str) -> str:
-        compact = " ".join(str(text or "").split())
-        if not compact or not acronym:
-            return ""
-        patterns = [
-            rf"([A-Za-z][A-Za-z\-/]+(?:\s+[A-Za-z][A-Za-z\-/]+){{1,8}})\s*\(\s*{re.escape(acronym)}\s*\)",
-            rf"{re.escape(acronym)}\s*(?:stands for|means|refers to|is short for)\s*([A-Za-z][A-Za-z\-/]+(?:\s+[A-Za-z][A-Za-z\-/]+){{1,8}})",
-        ]
-        stopwords = {"and", "or", "the", "with", "from", "into", "using", "based"}
-        for pattern in patterns:
-            match = re.search(pattern, compact, flags=re.IGNORECASE)
-            if not match:
-                continue
-            expansion = " ".join(match.group(1).strip(" ,.;:-").split())
-            expansion = re.sub(r"^and(?=[A-Z])", "", expansion).strip()
-            expansion = re.sub(r"^and\s+", "", expansion, flags=re.IGNORECASE).strip()
-            words = expansion.split()
-            while words and words[0].lower() in stopwords:
-                words.pop(0)
-            expansion = " ".join(words)
-            if len(expansion) >= 6:
-                return expansion
-        return ""
-
-    @staticmethod
-    def _normalize_acronym_meaning(text: str) -> str:
-        normalized = str(text or "").lower().replace("behaviour", "behavior")
-        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-        return " ".join(normalized.split())
-
-    def _ambiguity_option_context_text(self, option: dict[str, Any]) -> str:
-        paper_id = str(option.get("paper_id", "") or "")
-        paper = self._candidate_from_paper_id(paper_id) if paper_id else None
-        parts = [
-            str(option.get("meaning", "")),
-            str(option.get("title", "")),
-            str(option.get("snippet", "")),
-        ]
-        if paper is not None:
-            parts.extend(
-                [
-                    str(paper.metadata.get("aliases", "")),
-                    str(paper.metadata.get("paper_card_text", "")),
-                    str(paper.metadata.get("generated_summary", "")),
-                    str(paper.metadata.get("abstract_note", "")),
-                ]
-            )
-        return "\n".join(part for part in parts if part)
-
-    def _ambiguity_option_matches_context(self, *, option: dict[str, Any], context_targets: list[str]) -> bool:
-        text = str(option.get("context_text", "")) or self._ambiguity_option_context_text(option)
-        return any(matches_target(text, str(target)) for target in context_targets if str(target).strip())
 
     @staticmethod
     def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:
@@ -3285,7 +3027,7 @@ class ResearchAssistantAgentV4(
                 return {
                     "decision": "clarify",
                     "reason": "Multiple acronym meanings remain unresolved.",
-                    "missing_fields": self._disambiguation_missing_fields(contract),
+                    "missing_fields": disambiguation_missing_fields(contract),
                     "recommended_action": "clarify_ambiguous_entity",
                     "focus_titles": focus_titles,
                 }

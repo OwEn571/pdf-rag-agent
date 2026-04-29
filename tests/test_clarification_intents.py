@@ -2,20 +2,31 @@ from __future__ import annotations
 
 import json
 
-from app.domain.models import QueryContract
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
+    ambiguity_option_context_text,
+    ambiguity_option_matches_context,
     ambiguity_options_from_notes,
+    candidate_origin_signal_score,
+    candidate_title_alignment_score,
+    candidate_usage_signal_score,
     clarification_option_description,
     clarification_option_id,
     clarification_option_public_payload,
     clarification_string_list,
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
+    disambiguation_judge_option_payload,
+    disambiguation_judge_summary,
+    disambiguation_missing_fields,
+    extract_acronym_expansion_from_text,
     looks_like_clarification_choice_text,
+    normalize_acronym_meaning,
     option_from_clarification_choice,
     pending_clarification_selection_index,
     select_pending_clarification_option,
+    selected_option_from_judge_decision,
     selected_clarification_paper_id,
 )
 
@@ -163,3 +174,84 @@ def test_contract_from_selected_clarification_option_preserves_formula_slots() -
     assert contract.answer_slots == ["formula"]
     assert contract.requested_fields == ["formula", "variable_explanation", "source"]
     assert "selected_paper_id=paper-1" in contract.notes
+
+
+def test_disambiguation_ranking_signals_distinguish_origin_from_usage() -> None:
+    origin_score = candidate_origin_signal_score("Our main contribution is Direct Preference Optimization (DPO).")
+    usage_score = candidate_usage_signal_score("This paper adopts Direct Preference Optimization for tuning.")
+
+    assert origin_score >= 0.35
+    assert usage_score >= 0.25
+    assert candidate_title_alignment_score(
+        target="DPO",
+        label="Direct Preference Optimization",
+        meaning="Direct Preference Optimization",
+        title_alias_text="Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+    ) == 1.0
+
+
+def test_disambiguation_judge_payload_includes_metadata_and_signals() -> None:
+    paper = CandidatePaper(
+        paper_id="DPO",
+        title="Direct Preference Optimization",
+        match_reason="title match",
+        metadata={
+            "aliases": "DPO",
+            "generated_summary": "This paper proposes Direct Preference Optimization.",
+        },
+    )
+    option = {
+        "option_id": "dpo",
+        "target": "DPO",
+        "meaning": "Direct Preference Optimization",
+        "paper_id": "DPO",
+        "title": "Direct Preference Optimization",
+        "snippet": "Our main contribution is Direct Preference Optimization (DPO).",
+        "source_requested_fields": ("formula", "source"),
+    }
+
+    payload = disambiguation_judge_option_payload(option=option, paper=paper)
+
+    assert payload["paper_aliases"] == "DPO"
+    assert payload["match_reason"] == "title match"
+    assert payload["source_requested_fields"] == ["formula", "source"]
+    assert payload["ranking_signals"]["candidate_role_hint"] == "direct_definition_or_origin"
+
+
+def test_selected_option_and_judge_summary_are_stable() -> None:
+    options = [{"option_id": "a", "paper_id": "p1"}, {"option_id": "b", "paper_id": "p2"}]
+    decision = DisambiguationJudgeDecision(
+        decision="ask_human",
+        selected_option_id="b",
+        selected_paper_id="p2",
+        confidence=0.72,
+    )
+
+    assert selected_option_from_judge_decision(decision=decision, options=options) == options[1]
+    assert disambiguation_judge_summary(options=options, judge_decision=decision) == "options=2, judge=ask_human, confidence=0.72"
+    assert disambiguation_judge_summary(options=options, judge_decision=None) == "options=2, judge=unavailable"
+
+
+def test_acronym_helpers_extract_normalize_and_match_context() -> None:
+    expansion = extract_acronym_expansion_from_text(
+        text="Preference-Bridged Alignment (PBA) is used for personalized alignment.",
+        acronym="PBA",
+    )
+    paper = CandidatePaper(
+        paper_id="pba",
+        title="AlignX",
+        metadata={"aliases": "PBA", "generated_summary": "Preference Bridged Alignment is a method."},
+    )
+    option = {"meaning": expansion, "title": "AlignX", "snippet": "PBA is evaluated on PPAIR."}
+    option["context_text"] = ambiguity_option_context_text(option, paper=paper)
+
+    assert expansion == "Preference-Bridged Alignment"
+    assert normalize_acronym_meaning("Behaviour-based Alignment") == "behavior based alignment"
+    assert ambiguity_option_matches_context(option=option, context_targets=["PPAIR"])
+
+
+def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
+    contract = QueryContract(clean_query="PBA是什么", notes=["ambiguous_slot=target"])
+
+    assert disambiguation_missing_fields(contract) == ["target"]
+    assert disambiguation_missing_fields(QueryContract(clean_query="PBA是什么")) == ["disambiguation"]

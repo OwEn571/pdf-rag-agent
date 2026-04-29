@@ -5,8 +5,10 @@ import json
 import re
 from typing import Any
 
-from app.domain.models import QueryContract
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract
 from app.services.contract_normalization import normalize_lookup_text
+from app.services.query_shaping import matches_target
+from app.services.session_context_helpers import truncate_context_text
 
 
 CLARIFICATION_OPTION_SCHEMA_VERSION = "clarification_option.v1"
@@ -146,6 +148,281 @@ def ambiguity_options_from_notes(notes: list[str]) -> list[dict[str, Any]]:
         if isinstance(payload, dict) and payload.get("title"):
             options.append(payload)
     return options
+
+
+def disambiguation_content_tokens(text: str) -> list[str]:
+    stopwords = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "it",
+        "its",
+        "main",
+        "of",
+        "on",
+        "or",
+        "our",
+        "the",
+        "this",
+        "to",
+        "we",
+        "with",
+    }
+    tokens = re.findall(r"[a-z0-9]+", str(text or "").lower())
+    return [token for token in tokens if len(token) > 1 and token not in stopwords]
+
+
+def candidate_title_alignment_score(
+    *,
+    target: str,
+    label: str,
+    meaning: str,
+    title_alias_text: str,
+) -> float:
+    title_key = normalize_lookup_text(title_alias_text)
+    if not title_key:
+        return 0.0
+    probes = [target, label, meaning]
+    scores: list[float] = []
+    for probe in probes:
+        probe_key = normalize_lookup_text(probe)
+        if not probe_key:
+            continue
+        if probe_key and probe_key in title_key:
+            scores.append(1.0)
+            continue
+        probe_tokens = disambiguation_content_tokens(probe_key)
+        if not probe_tokens:
+            continue
+        title_tokens = set(disambiguation_content_tokens(title_key))
+        if not title_tokens:
+            continue
+        overlap = len([token for token in probe_tokens if token in title_tokens])
+        if overlap:
+            scores.append(overlap / max(1, len(probe_tokens)))
+    return max(scores or [0.0])
+
+
+def candidate_origin_signal_score(text: str) -> float:
+    lowered = str(text or "").lower()
+    patterns = [
+        r"\bour\s+main\s+contribution\b",
+        r"\bwe\s+(?:propose|proposed|present|introduce|introduced|derive|develop)\b",
+        r"\bthis\s+paper\s+(?:proposes|introduces|presents|derives|develops)\b",
+        r"\bmain\s+contribution\b",
+        r"\bpropose\s+(?:a|an|the)?\b",
+        r"\bintroduce\s+(?:a|an|the)?\b",
+    ]
+    score = 0.0
+    for pattern in patterns:
+        if re.search(pattern, lowered):
+            score += 0.35
+    return min(score, 1.0)
+
+
+def candidate_usage_signal_score(text: str) -> float:
+    lowered = str(text or "").lower()
+    patterns = [
+        r"\badopt(?:s|ed|ing)?\b",
+        r"\buse(?:s|d|ing)?\b",
+        r"\bfollowing\b",
+        r"\bbased\s+on\b",
+        r"\bextends?\b",
+        r"\bvariant\s+of\b",
+        r"\bin\s+recent\s+work\b",
+        r"\bproposed\s+by\b",
+        r"\bet\s+al\.\s+(?:proposed|introduced)\b",
+        r"\binclude(?:s|d|ing)?\b",
+    ]
+    score = 0.0
+    for pattern in patterns:
+        if re.search(pattern, lowered):
+            score += 0.25
+    return min(score, 1.0)
+
+
+def disambiguation_ranking_signals(
+    *,
+    option: dict[str, Any],
+    paper: CandidatePaper | None,
+) -> dict[str, Any]:
+    title = str(option.get("title", "") or "").strip()
+    target = str(option.get("target", "") or "").strip()
+    label = str(option.get("label", "") or "").strip()
+    meaning = str(option.get("meaning", "") or "").strip()
+    snippet = str(option.get("snippet", "") or "").strip()
+    aliases = str((paper.metadata or {}).get("aliases", "") or "") if paper is not None else ""
+    summary = (
+        str((paper.metadata or {}).get("paper_card_text", "") or "")
+        or str((paper.metadata or {}).get("generated_summary", "") or "")
+        or str((paper.metadata or {}).get("abstract_note", "") or "")
+        if paper is not None
+        else ""
+    )
+    context = "\n".join([title, aliases, label, meaning, snippet, summary])
+    title_alias_text = "\n".join([title, aliases])
+    title_alignment = candidate_title_alignment_score(
+        target=target,
+        label=label,
+        meaning=meaning,
+        title_alias_text=title_alias_text,
+    )
+    origin_score = candidate_origin_signal_score(context)
+    usage_score = candidate_usage_signal_score(context)
+    role = "ambiguous"
+    if title_alignment >= 0.75 and origin_score >= 0.35:
+        role = "direct_definition_or_origin"
+    elif usage_score >= max(0.35, origin_score):
+        role = "related_usage_or_citation"
+    elif title_alignment >= 0.75:
+        role = "strong_title_or_alias_alignment"
+    return {
+        "title_or_alias_alignment": round(title_alignment, 3),
+        "origin_or_direct_definition_signal": round(origin_score, 3),
+        "usage_or_citation_signal": round(usage_score, 3),
+        "candidate_role_hint": role,
+    }
+
+
+def disambiguation_judge_option_payload(*, option: dict[str, Any], paper: CandidatePaper | None) -> dict[str, Any]:
+    paper_id = str(option.get("paper_id", "") or "").strip()
+    metadata = dict(paper.metadata or {}) if paper is not None else {}
+    signals = disambiguation_ranking_signals(option=option, paper=paper)
+    return {
+        "option_id": str(option.get("option_id", "") or "").strip(),
+        "index": option.get("index"),
+        "kind": str(option.get("kind", "") or "").strip(),
+        "target": str(option.get("target", "") or "").strip(),
+        "label": str(option.get("label", "") or "").strip(),
+        "meaning": str(option.get("meaning", "") or "").strip(),
+        "paper_id": paper_id,
+        "title": str(option.get("title", "") or "").strip(),
+        "year": str(option.get("year", "") or "").strip(),
+        "snippet": truncate_context_text(str(option.get("snippet", "") or ""), limit=420),
+        "match_reason": str(option.get("match_reason", "") or (paper.match_reason if paper is not None else "") or "").strip(),
+        "evidence_relation": str(option.get("source_relation", "") or option.get("source", "") or "").strip(),
+        "source_requested_fields": clarification_string_list(option.get("source_requested_fields")),
+        "source_answer_slots": clarification_string_list(option.get("source_answer_slots")),
+        "paper_aliases": truncate_context_text(str(metadata.get("aliases", "") or ""), limit=220),
+        "paper_summary": truncate_context_text(
+            str(
+                metadata.get("paper_card_text", "")
+                or metadata.get("generated_summary", "")
+                or metadata.get("abstract_note", "")
+                or ""
+            ),
+            limit=420,
+        ),
+        "ranking_signals": signals,
+    }
+
+
+def selected_option_from_judge_decision(
+    *,
+    decision: DisambiguationJudgeDecision | None,
+    options: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if decision is None:
+        return None
+    selected_option_id = str(decision.selected_option_id or "").strip()
+    if selected_option_id:
+        for option in options:
+            if str(option.get("option_id", "") or "").strip() == selected_option_id:
+                return option
+    selected_paper_id = str(decision.selected_paper_id or "").strip()
+    if selected_paper_id:
+        for option in options:
+            if str(option.get("paper_id", "") or "").strip() == selected_paper_id:
+                return option
+    return None
+
+
+def disambiguation_judge_summary(
+    *,
+    options: list[dict[str, Any]],
+    judge_decision: DisambiguationJudgeDecision | None,
+) -> str:
+    if judge_decision is None:
+        return f"options={len(options)}, judge=unavailable"
+    return (
+        f"options={len(options)}, judge={judge_decision.decision}, "
+        f"confidence={float(judge_decision.confidence):.2f}"
+    )
+
+
+def disambiguation_goal_markers() -> set[str]:
+    return {"definition", "entity_type", "role_in_context", "mechanism", "formula"}
+
+
+def disambiguation_missing_fields(contract: QueryContract) -> list[str]:
+    ambiguous_slots = [
+        str(item).removeprefix("ambiguous_slot=")
+        for item in contract.notes
+        if str(item).startswith("ambiguous_slot=")
+    ]
+    return ambiguous_slots or ["disambiguation"]
+
+
+def extract_acronym_expansion_from_text(*, text: str, acronym: str) -> str:
+    compact = " ".join(str(text or "").split())
+    if not compact or not acronym:
+        return ""
+    patterns = [
+        rf"([A-Za-z][A-Za-z\-/]+(?:\s+[A-Za-z][A-Za-z\-/]+){{1,8}})\s*\(\s*{re.escape(acronym)}\s*\)",
+        rf"{re.escape(acronym)}\s*(?:stands for|means|refers to|is short for)\s*([A-Za-z][A-Za-z\-/]+(?:\s+[A-Za-z][A-Za-z\-/]+){{1,8}})",
+    ]
+    stopwords = {"and", "or", "the", "with", "from", "into", "using", "based"}
+    for pattern in patterns:
+        match = re.search(pattern, compact, flags=re.IGNORECASE)
+        if not match:
+            continue
+        expansion = " ".join(match.group(1).strip(" ,.;:-").split())
+        expansion = re.sub(r"^and(?=[A-Z])", "", expansion).strip()
+        expansion = re.sub(r"^and\s+", "", expansion, flags=re.IGNORECASE).strip()
+        words = expansion.split()
+        while words and words[0].lower() in stopwords:
+            words.pop(0)
+        expansion = " ".join(words)
+        if len(expansion) >= 6:
+            return expansion
+    return ""
+
+
+def normalize_acronym_meaning(text: str) -> str:
+    normalized = str(text or "").lower().replace("behaviour", "behavior")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def ambiguity_option_context_text(option: dict[str, Any], *, paper: CandidatePaper | None = None) -> str:
+    parts = [
+        str(option.get("meaning", "")),
+        str(option.get("title", "")),
+        str(option.get("snippet", "")),
+    ]
+    if paper is not None:
+        parts.extend(
+            [
+                str(paper.metadata.get("aliases", "")),
+                str(paper.metadata.get("paper_card_text", "")),
+                str(paper.metadata.get("generated_summary", "")),
+                str(paper.metadata.get("abstract_note", "")),
+            ]
+        )
+    return "\n".join(part for part in parts if part)
+
+
+def ambiguity_option_matches_context(*, option: dict[str, Any], context_targets: list[str]) -> bool:
+    text = str(option.get("context_text", ""))
+    return any(matches_target(text, str(target)) for target in context_targets if str(target).strip())
 
 
 def selected_clarification_paper_id(contract: QueryContract) -> str:
