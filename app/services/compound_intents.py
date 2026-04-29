@@ -3,16 +3,36 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.contract_normalization import normalize_lookup_text
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.query_shaping import extract_targets
 
 
-LIBRARY_COMPOUND_SCOPE_MARKERS = ["论文库", "知识库"]
-LIBRARY_COMPOUND_COUNT_MARKERS = ["多少", "几篇", "有哪些", "列表"]
-LIBRARY_COMPOUND_RECOMMEND_MARKERS = ["推荐", "值得", "哪篇"]
+COMPOUND_INTENT_MARKERS: dict[str, MarkerProfile] = {
+    "library_scope": ("论文库", "知识库"),
+    "library_count": ("多少", "几篇", "有哪些", "列表"),
+    "library_recommendation": ("推荐", "值得", "哪篇"),
+    "comparison": ("两者", "区别", "比较", "对比", "不同"),
+    "compound": (
+        "分别",
+        "各自",
+        "同时",
+        "顺便",
+        "比较",
+        "对比",
+        "区别",
+        "不同",
+        "又",
+        "以及",
+        "和",
+        " vs ",
+        " versus ",
+    ),
+    "compound_task": ("公式", "结果", "实验", "指标", "是什么", "核心结论", "figure", "图"),
+}
 
-COMPARISON_CUES = ["两者", "区别", "比较", "对比", "不同"]
-COMPOUND_CUES = ["分别", "各自", "同时", "顺便", "比较", "对比", "区别", "不同", "又", "以及", "和", " vs ", " versus "]
-COMPOUND_TASK_CUES = ["公式", "结果", "实验", "指标", "是什么", "核心结论", "figure", "图"]
+
+def _matches_text(text: str, markers: MarkerProfile) -> bool:
+    return query_matches_any(text, text, markers)
 
 
 def should_try_compound_decomposition_heuristic(
@@ -26,20 +46,26 @@ def should_try_compound_decomposition_heuristic(
         return False
     if (
         (
-            any(marker in clean_query for marker in LIBRARY_COMPOUND_SCOPE_MARKERS)
+            _matches_text(clean_query, COMPOUND_INTENT_MARKERS["library_scope"])
             or "zotero" in normalized_query
         )
-        and any(marker in clean_query for marker in LIBRARY_COMPOUND_COUNT_MARKERS)
-        and any(marker in clean_query for marker in LIBRARY_COMPOUND_RECOMMEND_MARKERS)
+        and _matches_text(clean_query, COMPOUND_INTENT_MARKERS["library_count"])
+        and _matches_text(clean_query, COMPOUND_INTENT_MARKERS["library_recommendation"])
     ):
         return True
-    if any(cue in normalized_query or cue in clean_query for cue in COMPARISON_CUES) and has_memory_context:
+    if (
+        query_matches_any(normalized_query, clean_query, COMPOUND_INTENT_MARKERS["comparison"])
+        and has_memory_context
+    ):
         return True
     if target_count < 2:
         return False
-    if any(cue in normalized_query for cue in COMPOUND_CUES) or any(cue in clean_query for cue in COMPOUND_CUES):
+    if query_matches_any(normalized_query, clean_query, COMPOUND_INTENT_MARKERS["compound"]):
         return True
-    return sum(1 for cue in COMPOUND_TASK_CUES if cue in normalized_query or cue in clean_query) >= 2
+    return (
+        sum(1 for cue in COMPOUND_INTENT_MARKERS["compound_task"] if cue in normalized_query or cue in clean_query)
+        >= 2
+    )
 
 
 def should_try_compound_decomposition(

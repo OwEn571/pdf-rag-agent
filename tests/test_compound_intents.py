@@ -1,7 +1,22 @@
 from __future__ import annotations
 
 from app.domain.models import SessionContext
-from app.services.compound_intents import should_try_compound_decomposition, should_try_compound_decomposition_heuristic
+from app.services.compound_intents import (
+    COMPOUND_INTENT_MARKERS,
+    should_try_compound_decomposition,
+    should_try_compound_decomposition_heuristic,
+)
+from app.services.intent_marker_matching import query_matches_any
+
+
+def test_compound_intent_markers_use_centralized_profiles() -> None:
+    assert query_matches_any(
+        "dpo 和 ppo 分别",
+        "DPO 和 PPO 分别",
+        COMPOUND_INTENT_MARKERS["compound"],
+    )
+    assert query_matches_any("两者区别", "两者区别", COMPOUND_INTENT_MARKERS["comparison"])
+    assert not query_matches_any("随便聊聊", "随便聊聊", COMPOUND_INTENT_MARKERS["compound_task"])
 
 
 def test_compound_intent_detects_library_count_plus_recommendation() -> None:
