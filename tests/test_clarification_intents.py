@@ -7,6 +7,7 @@ from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
+    ambiguity_clarification_question,
     ambiguity_options_from_notes,
     clarification_tracking_key,
     candidate_origin_signal_score,
@@ -367,3 +368,32 @@ def test_contract_from_pending_clarification_resolves_choice_payload_and_text() 
     assert by_text is not None
     assert "selected_paper_id=p2" in by_text.notes
     assert contract_from_pending_clarification(clean_query="没有明确选择", session=session) is None
+
+
+def test_ambiguity_clarification_question_renders_contract_or_pending_options() -> None:
+    contract = contract_with_ambiguity_options(
+        contract=QueryContract(clean_query="PBA是什么", relation="entity_definition", targets=["PBA"]),
+        options=[
+            {
+                "title": "AlignX",
+                "year": "2025",
+                "meaning": "Preference Bridged Alignment",
+                "display_label": "推荐候选",
+                "display_reason": "title match",
+            }
+        ],
+    )
+
+    question = ambiguity_clarification_question(contract=contract, session=SessionContext(session_id="s1"))
+
+    assert "`PBA` 在本地论文库里有多个可能含义" in question
+    assert "推荐候选：Preference Bridged Alignment，见《AlignX》（2025）：title match" in question
+
+    pending = SessionContext(
+        session_id="s1",
+        pending_clarification_type="ambiguity",
+        pending_clarification_target="PBA",
+        pending_clarification_options=[{"title": "AlignX", "meaning": "Preference Bridged Alignment"}],
+    )
+    assert ambiguity_clarification_question(contract=QueryContract(clean_query="继续", targets=["PBA"]), session=pending)
+    assert ambiguity_clarification_question(contract=QueryContract(clean_query="继续", targets=["DPO"]), session=pending) == ""

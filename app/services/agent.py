@@ -42,6 +42,7 @@ from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
+    ambiguity_clarification_question,
     ambiguity_options_from_notes,
     clarification_tracking_key,
     clarification_option_public_payload,
@@ -3310,40 +3311,9 @@ class ResearchAssistantAgentV4(
             return ""
 
     def _clarification_question(self, contract: QueryContract, session: SessionContext) -> str:
-        ambiguity_options = ambiguity_options_from_notes(contract.notes)
-        if (
-            not ambiguity_options
-            and session.pending_clarification_type == "ambiguity"
-            and session.pending_clarification_options
-            and (
-                not contract.targets
-                or not session.pending_clarification_target
-                or normalize_lookup_text(session.pending_clarification_target)
-                in {normalize_lookup_text(target) for target in contract.targets}
-            )
-        ):
-            ambiguity_options = list(session.pending_clarification_options)
-        if ambiguity_options:
-            target = contract.targets[0] if contract.targets else "这个缩写"
-            ambiguity_options = normalize_clarification_options(
-                ambiguity_options,
-                contract=contract,
-                target=target,
-                kind="acronym_meaning",
-                source="clarification_question",
-            )
-            lines = [f"`{target}` 在本地论文库里有多个可能含义，我不应该继续猜。你想问哪一个？"]
-            for index, option in enumerate(ambiguity_options, start=1):
-                display_label = str(option.get("display_label", "") or "").strip()
-                base_label = str(option.get("label", "") or option.get("meaning", "") or target).strip()
-                meaning = f"{display_label}：{base_label}" if display_label and base_label else (display_label or base_label)
-                title = str(option.get("display_title", "") or option.get("title", "")).strip()
-                year = str(option.get("year", "")).strip()
-                suffix = f"（{year}）" if year else ""
-                reason = str(option.get("display_reason", "") or "").strip()
-                reason_suffix = f"：{reason}" if reason else ""
-                lines.append(f"{index}. {meaning}，见《{title}》{suffix}{reason_suffix}")
-            return "\n".join(lines)
+        ambiguity_question = ambiguity_clarification_question(contract=contract, session=session)
+        if ambiguity_question:
+            return ambiguity_question
         requested = {str(item) for item in contract.requested_fields}
         query_lower = str(contract.clean_query or "").lower()
         targets = [str(item).strip() for item in contract.targets if str(item).strip()]
