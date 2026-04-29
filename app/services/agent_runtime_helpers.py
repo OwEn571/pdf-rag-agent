@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from app.domain.models import QueryContract, VerificationReport
+from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
 from app.services.confidence import (
     confidence_from_contract,
     confidence_from_verification_report,
@@ -10,6 +11,8 @@ from app.services.confidence import (
     should_ask_human,
 )
 from app.services.tool_registry_helpers import tool_inputs_by_name
+
+NegativeCorrectionFn = Callable[[str], bool]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -23,6 +26,12 @@ def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str,
         "tool_inputs": tool_inputs_by_name(agent_plan),
         "current_tool_input": {},
     }
+
+
+def conversation_runtime_actions(*, contract: QueryContract, agent_plan: dict[str, Any]) -> list[str]:
+    raw_actions = agent_plan.get("actions", []) if isinstance(agent_plan, dict) else []
+    planned_actions = [str(item) for item in list(raw_actions or [])]
+    return conversation_tool_sequence(relation=contract.relation, planned_actions=planned_actions)
 
 
 def research_runtime_state(
@@ -47,6 +56,22 @@ def research_runtime_state(
         "tool_inputs": tool_inputs_by_name(agent_plan),
         "current_tool_input": {},
     }
+
+
+def research_runtime_actions(
+    *,
+    contract: QueryContract,
+    agent_plan: dict[str, Any],
+    web_enabled: bool,
+    is_negative_correction_query: NegativeCorrectionFn,
+) -> list[str]:
+    raw_actions = agent_plan.get("actions", []) if isinstance(agent_plan, dict) else []
+    return research_tool_sequence(
+        planned_actions=raw_actions if isinstance(raw_actions, list) else [],
+        use_web_search=web_enabled,
+        needs_reflection="exclude_previous_focus" in contract.notes
+        or is_negative_correction_query(contract.clean_query),
+    )
 
 
 def agent_loop_summary(actions: list[str]) -> str:
@@ -82,6 +107,14 @@ def configured_max_steps(agent_settings: Any, *, fallback: int) -> int:
     except (TypeError, ValueError):
         parsed = fallback
     return max(1, parsed)
+
+
+def dequeue_action(*, queue: list[str], executed: set[str]) -> str | None:
+    while queue:
+        action = queue.pop(0)
+        if action not in executed:
+            return action
+    return None
 
 
 def contract_needs_human_clarification(contract: QueryContract, agent_settings: Any) -> bool:

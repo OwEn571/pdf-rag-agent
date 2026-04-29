@@ -7,10 +7,13 @@ from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     configured_max_steps,
     contract_needs_human_clarification,
+    conversation_runtime_actions,
     conversation_runtime_state,
+    dequeue_action,
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
+    research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
     verification_execution_step,
@@ -51,6 +54,33 @@ def test_runtime_helpers_build_initial_conversation_and_research_state() -> None
     assert agent_loop_summary(["read_memory", "compose"]) == "read_memory -> compose"
     assert tool_loop_ready_tool(["search_corpus", "compose"]) == "search_corpus"
     assert tool_loop_ready_tool(["compose"]) == "compose"
+
+
+def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:
+    conversation_contract = QueryContract(clean_query="x", interaction_mode="conversation", relation="greeting")
+    research_contract = QueryContract(clean_query="DPO 是什么", relation="entity_definition")
+    queue = ["read_memory", "compose"]
+
+    assert conversation_runtime_actions(
+        contract=conversation_contract,
+        agent_plan={"actions": ["read_memory", "not_a_tool", "compose"]},
+    ) == ["read_memory", "compose"]
+    assert conversation_runtime_actions(contract=conversation_contract, agent_plan={"actions": "bad"}) == []
+    assert research_runtime_actions(
+        contract=research_contract,
+        agent_plan={"actions": ["search_corpus", "not_a_tool", "compose"]},
+        web_enabled=False,
+        is_negative_correction_query=lambda _: False,
+    ) == ["search_corpus", "compose"]
+    assert research_runtime_actions(
+        contract=research_contract,
+        agent_plan={"actions": "bad"},
+        web_enabled=True,
+        is_negative_correction_query=lambda _: True,
+    ) == []
+    assert dequeue_action(queue=queue, executed={"read_memory"}) == "compose"
+    assert queue == []
+    assert dequeue_action(queue=[], executed=set()) is None
 
 
 def test_runtime_helpers_detect_clarification_need_from_contract_confidence() -> None:

@@ -10,17 +10,18 @@ from app.services.agent_tool_registries import (
 from app.services.agent_tools import (
     AgentToolExecutor,
     conversation_execution_tool_names,
-    conversation_tool_sequence,
     research_execution_tool_names,
-    research_tool_sequence,
 )
 from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     configured_max_steps,
+    conversation_runtime_actions,
     conversation_runtime_state,
+    dequeue_action,
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
+    research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
     verification_execution_step,
@@ -48,8 +49,7 @@ class AgentRuntime:
         emit: EmitFn,
         execution_steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        planned_actions = [str(item) for item in list(agent_plan.get("actions", []) or [])]
-        actions = conversation_tool_sequence(relation=contract.relation, planned_actions=planned_actions)
+        actions = conversation_runtime_actions(contract=contract, agent_plan=agent_plan)
         state = conversation_runtime_state(contract=contract, agent_plan=agent_plan)
         emit(
             "observation",
@@ -110,12 +110,11 @@ class AgentRuntime:
         emit("plan", plan.model_dump())
         execution_steps.append({"node": "agent_tool:build_research_plan", "summary": ",".join(plan.solver_sequence)})
 
-        raw_actions = agent_plan.get("actions", []) if isinstance(agent_plan, dict) else []
-        actions = research_tool_sequence(
-            planned_actions=raw_actions if isinstance(raw_actions, list) else [],
-            use_web_search=web_enabled,
-            needs_reflection="exclude_previous_focus" in contract.notes
-            or self.agent._is_negative_correction_query(contract.clean_query),
+        actions = research_runtime_actions(
+            contract=contract,
+            agent_plan=agent_plan,
+            web_enabled=web_enabled,
+            is_negative_correction_query=self.agent._is_negative_correction_query,
         )
         emit(
             "observation",
@@ -193,7 +192,7 @@ class AgentRuntime:
             fallback=max_steps,
         )
         for index in range(1, max_step_count + 1):
-            action = self._dequeue_action(queue=queue, executed=executor.executed)
+            action = dequeue_action(queue=queue, executed=executor.executed)
             if action is None:
                 action = self._planner_next_action(
                     contract=contract,
@@ -220,14 +219,6 @@ class AgentRuntime:
             executed_order.append(action)
             if should_stop or stop_condition(executor.executed):
                 break
-
-    @staticmethod
-    def _dequeue_action(*, queue: list[str], executed: set[str]) -> str | None:
-        while queue:
-            action = queue.pop(0)
-            if action not in executed:
-                return action
-        return None
 
     def _planner_next_action(
         self,
