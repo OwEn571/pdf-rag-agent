@@ -4,7 +4,56 @@ import json
 
 from app.domain.models import QueryContract, SessionContext
 from app.services.contract_normalization import normalize_lookup_text, normalize_modalities
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.research_planning import research_plan_goals
+
+
+FOLLOWUP_ROUTING_MARKERS: dict[str, MarkerProfile] = {
+    "formula_focus": ("公式", "objective", "loss", "advantage", "变量", "推导"),
+    "detail_focus": (
+        "具体",
+        "细节",
+        "详细",
+        "原理",
+        "机制",
+        "怎么",
+        "如何",
+        "工作",
+        "流程",
+        "样子",
+        "what is it like",
+    ),
+    "vague_patterns": (
+        "具体是什么样",
+        "具体是怎样",
+        "具体呢",
+        "详细一点",
+        "展开讲讲",
+        "具体说说",
+        "再具体一点",
+        "怎么工作的",
+        "如何工作的",
+        "工作原理",
+    ),
+    "vague_short": ("具体", "详细", "怎么", "如何", "原理", "机制"),
+    "contextual_challenge": (
+        "最早",
+        "起源",
+        "最初",
+        "首次",
+        "第一个",
+        "第一篇",
+        "提出",
+        "出处",
+        "来源",
+        "证据",
+        "不对",
+        "不是",
+        "确定",
+        "真的吗",
+    ),
+    "contextual_short": ("这里", "这个", "那篇", "上一条", "上一轮"),
+}
 
 
 class FollowupRoutingMixin:
@@ -243,12 +292,10 @@ class FollowupRoutingMixin:
         generic_fields = {"definition", "applications", "key_features", "answer", "summary"}
         current_keys = {normalize_lookup_text(item) for item in current_fields if item}
         previous_keys = {normalize_lookup_text(item) for item in previous_fields if item}
-        formula_cues = {"公式", "objective", "loss", "advantage", "变量", "推导"}
-        detail_cues = {"具体", "细节", "详细", "原理", "机制", "怎么", "如何", "工作", "流程", "样子", "what is it like"}
-        if any(cue in normalized_query for cue in formula_cues):
+        if query_matches_any(normalized_query, "", FOLLOWUP_ROUTING_MARKERS["formula_focus"]):
             resolved_query = f"{target} 的目标函数、关键公式和变量含义是什么？" if target else query
             return ["formula", "objective", "variable_explanation"], resolved_query
-        if any(cue in normalized_query for cue in detail_cues) or (
+        if query_matches_any(normalized_query, "", FOLLOWUP_ROUTING_MARKERS["detail_focus"]) or (
             self._is_vague_followup_query(query) and current_keys <= generic_fields and previous_keys <= generic_fields
         ):
             resolved_query = f"{target} 的具体机制、工作流程和奖励/优化目标是什么？" if target else query
@@ -260,45 +307,21 @@ class FollowupRoutingMixin:
         normalized = " ".join(str(query or "").lower().split())
         if not normalized:
             return False
-        vague_patterns = [
-            "具体是什么样",
-            "具体是怎样",
-            "具体呢",
-            "详细一点",
-            "展开讲讲",
-            "具体说说",
-            "再具体一点",
-            "怎么工作的",
-            "如何工作的",
-            "工作原理",
-        ]
-        if any(token in normalized for token in vague_patterns):
+        if query_matches_any(normalized, "", FOLLOWUP_ROUTING_MARKERS["vague_patterns"]):
             return True
-        return len(normalized) <= 12 and any(token in normalized for token in ["具体", "详细", "怎么", "如何", "原理", "机制"])
+        return len(normalized) <= 12 and query_matches_any(
+            normalized, "", FOLLOWUP_ROUTING_MARKERS["vague_short"]
+        )
 
     @staticmethod
     def _looks_like_contextual_followup_query(query: str) -> bool:
         normalized = " ".join(str(query or "").lower().split())
         if not normalized:
             return False
-        challenge_tokens = [
-            "最早",
-            "起源",
-            "最初",
-            "首次",
-            "第一个",
-            "第一篇",
-            "提出",
-            "出处",
-            "来源",
-            "证据",
-            "不对",
-            "不是",
-            "确定",
-            "真的吗",
-        ]
-        if any(token in normalized for token in challenge_tokens):
+        if query_matches_any(normalized, "", FOLLOWUP_ROUTING_MARKERS["contextual_challenge"]):
             return True
-        if len(normalized) <= 18 and any(token in normalized for token in ["这里", "这个", "那篇", "上一条", "上一轮"]):
+        if len(normalized) <= 18 and query_matches_any(
+            normalized, "", FOLLOWUP_ROUTING_MARKERS["contextual_short"]
+        ):
             return True
         return False
