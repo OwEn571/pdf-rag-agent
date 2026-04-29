@@ -96,6 +96,48 @@ def followup_seed_selector_human_prompt(
     )
 
 
+def resolve_followup_seed_papers(
+    *,
+    contract: QueryContract,
+    candidates: list[CandidatePaper],
+    active_titles: list[str],
+    clients: Any,
+    paper_summary_text: PaperText,
+) -> list[CandidatePaper]:
+    if not candidates:
+        return []
+    by_id = {item.paper_id: item for item in candidates}
+    if getattr(clients, "chat", None) is not None:
+        payload = clients.invoke_json(
+            system_prompt=followup_seed_selector_system_prompt(),
+            human_prompt=followup_seed_selector_human_prompt(
+                contract=contract,
+                active_titles=active_titles,
+                candidates=candidates,
+                paper_summary_text=paper_summary_text,
+            ),
+            fallback={},
+        )
+        seed_ids = payload.get("seed_paper_ids", []) if isinstance(payload, dict) else []
+        if isinstance(seed_ids, list):
+            selected = [by_id[str(item)] for item in seed_ids if str(item) in by_id]
+            if selected:
+                return selected[:2]
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            -followup_seed_score(
+                contract=contract,
+                paper=item,
+                active_titles=active_titles,
+                paper_summary_text=paper_summary_text,
+            ),
+            item.title,
+        ),
+    )
+    return ranked[:1]
+
+
 def followup_candidate_ranker_system_prompt() -> str:
     return (
         "你是论文关系分析器。"

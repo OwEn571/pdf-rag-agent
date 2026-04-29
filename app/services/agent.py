@@ -142,13 +142,11 @@ from app.services.followup_candidate_helpers import (
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
-    followup_seed_selector_human_prompt,
-    followup_seed_selector_system_prompt,
-    followup_seed_score,
     followup_validator_assessment_from_payload,
     merge_followup_rankings,
     paper_anchor_text,
     rank_followup_candidates_fallback,
+    resolve_followup_seed_papers,
     selected_followup_candidate_title,
 )
 from app.services.figure_intents import figure_signal_score
@@ -2275,38 +2273,13 @@ class ResearchAssistantAgentV4(
         candidates: list[CandidatePaper],
         session: SessionContext,
     ) -> list[CandidatePaper]:
-        if not candidates:
-            return []
-        by_id = {item.paper_id: item for item in candidates}
-        if self.clients.chat is not None:
-            payload = self.clients.invoke_json(
-                system_prompt=followup_seed_selector_system_prompt(),
-                human_prompt=followup_seed_selector_human_prompt(
-                    contract=contract,
-                    active_titles=session.effective_active_research().titles,
-                    candidates=candidates,
-                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                ),
-                fallback={},
-            )
-            seed_ids = payload.get("seed_paper_ids", []) if isinstance(payload, dict) else []
-            if isinstance(seed_ids, list):
-                selected = [by_id[str(item)] for item in seed_ids if str(item) in by_id]
-                if selected:
-                    return selected[:2]
-        ranked = sorted(
-            candidates,
-            key=lambda item: (
-                -followup_seed_score(
-                    contract=contract,
-                    paper=item,
-                    active_titles=session.effective_active_research().titles,
-                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                ),
-                item.title,
-            ),
+        return resolve_followup_seed_papers(
+            contract=contract,
+            candidates=candidates,
+            active_titles=session.effective_active_research().titles,
+            clients=self.clients,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
         )
-        return ranked[:1]
 
     def _expand_followup_candidate_pool(
         self,

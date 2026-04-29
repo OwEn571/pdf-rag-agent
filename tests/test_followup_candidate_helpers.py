@@ -29,6 +29,7 @@ from app.services.followup_candidate_helpers import (
     paper_relationship_brief,
     rank_followup_candidates_fallback,
     relationship_evidence_ids_from_payload,
+    resolve_followup_seed_papers,
     selected_followup_candidate_title,
 )
 
@@ -286,6 +287,53 @@ def test_followup_seed_score_boosts_active_target_intro_and_older_year() -> None
     )
 
     assert score > 5.0
+
+
+def test_resolve_followup_seed_papers_uses_llm_selection_when_available() -> None:
+    class Clients:
+        chat = object()
+
+        def invoke_json(self, *, system_prompt: str, human_prompt: str, fallback: object) -> object:
+            assert "种子论文定位器" in system_prompt
+            assert "seed-new" in human_prompt
+            return {"seed_paper_ids": ["seed-old", "missing"]}
+
+    seed_old = CandidatePaper(paper_id="seed-old", title="Old Seed", year="2020", score=0.1)
+    seed_new = CandidatePaper(paper_id="seed-new", title="New Candidate", year="2025", score=9.0)
+
+    selected = resolve_followup_seed_papers(
+        contract=QueryContract(clean_query="Old Seed 后续工作", targets=["Old Seed"]),
+        candidates=[seed_new, seed_old],
+        active_titles=[],
+        clients=Clients(),
+        paper_summary_text=lambda paper_id: f"summary {paper_id}",
+    )
+
+    assert selected == [seed_old]
+
+
+def test_resolve_followup_seed_papers_falls_back_to_seed_score() -> None:
+    class Clients:
+        chat = None
+
+    weak = CandidatePaper(paper_id="weak", title="Weak Candidate", year="2025", score=3.0)
+    intro = CandidatePaper(
+        paper_id="intro",
+        title="AlignX",
+        year="2024",
+        score=1.0,
+        metadata={"paper_card_text": "We introduce AlignX."},
+    )
+
+    selected = resolve_followup_seed_papers(
+        contract=QueryContract(clean_query="AlignX 后续工作", targets=["AlignX"]),
+        candidates=[weak, intro],
+        active_titles=["AlignX"],
+        clients=Clients(),
+        paper_summary_text=lambda paper_id: "This paper introduces AlignX." if paper_id == "intro" else "",
+    )
+
+    assert selected == [intro]
 
 
 def test_followup_relationship_assessment_does_not_mark_loose_topic_as_direct() -> None:
