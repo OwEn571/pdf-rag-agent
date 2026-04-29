@@ -20,6 +20,7 @@ from app.services.evidence_presentation import (
     safe_year,
 )
 from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.query_shaping import matches_target
 from app.services.schema_claim_helpers import (
@@ -46,6 +47,11 @@ from app.services.visual_claim_helpers import (
     table_vlm_human_content,
     table_vlm_system_prompt,
 )
+
+
+SOLVER_PIPELINE_MARKERS: dict[str, MarkerProfile] = {
+    "origin_intro": ("introduce", "introduces", "introduced", "propose", "proposes", "proposed"),
+}
 
 
 class SolverPipelineMixin:
@@ -395,7 +401,7 @@ class SolverPipelineMixin:
             for item in support:
                 score += float(item.score)
                 snippet = item.snippet.lower()
-                if any(token in snippet for token in ["introduce", "introduces", "introduced", "propose", "proposes", "proposed"]):
+                if query_matches_any(snippet, "", SOLVER_PIPELINE_MARKERS["origin_intro"]):
                     score += 1.5
                 if " is a " in snippet or " is an " in snippet:
                     score += 0.8
