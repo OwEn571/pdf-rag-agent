@@ -4,6 +4,22 @@ import json
 import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
+
+
+CONCEPT_REASONING_MARKERS: dict[str, MarkerProfile] = {
+    "category_rl": ("on-policy", "policy optimization", "reinforcement learning", "rlhf", "reward model"),
+    "category_dataset": ("dataset", "benchmark", "数据集"),
+    "category_framework": ("framework", "platform", "system", "架构"),
+    "category_objective": ("loss", "objective", "偏好优化", "优化目标"),
+    "detail_human_feedback": ("rlhf", "human feedback", "人类反馈"),
+    "detail_policy_optimization": ("policy optimization", "策略优化"),
+    "detail_retrieval_generation": (
+        "retrieval- augmented generation",
+        "retrieval augmented generation",
+        "retrieval-augmented generation",
+    ),
+}
 
 
 class ConceptReasoningMixin:
@@ -202,13 +218,13 @@ class ConceptReasoningMixin:
     @staticmethod
     def _infer_concept_category(*, target: str, evidence: list[EvidenceBlock], expansion: str) -> str:
         joined = "\n".join(item.snippet for item in evidence[:4]).lower()
-        if any(token in joined for token in ["on-policy", "policy optimization", "reinforcement learning", "rlhf", "reward model"]):
+        if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["category_rl"]):
             return "强化学习算法"
-        if any(token in joined for token in ["dataset", "benchmark", "数据集"]):
+        if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["category_dataset"]):
             return "数据集/benchmark"
-        if any(token in joined for token in ["framework", "platform", "system", "架构"]):
+        if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["category_framework"]):
             return "框架/系统"
-        if any(token in joined for token in ["loss", "objective", "偏好优化", "优化目标"]):
+        if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["category_objective"]):
             return "训练目标/优化方法"
         if expansion and "optimization" in expansion.lower():
             return "训练目标/优化方法"
@@ -230,14 +246,14 @@ class ConceptReasoningMixin:
         if category == "强化学习算法":
             if "on-policy" in joined:
                 details.append("它属于 on-policy 方法")
-            if any(token in joined for token in ["rlhf", "human feedback", "人类反馈"]):
+            if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["detail_human_feedback"]):
                 details.append("常用于 RLHF / LLM 对齐场景")
             if "reward model" in joined:
                 details.append("通常围绕奖励模型信号更新策略")
-            if any(token in joined for token in ["policy optimization", "策略优化"]):
+            if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["detail_policy_optimization"]):
                 details.append("核心目标是稳定地优化策略")
         elif category in {"框架/系统", "概念/方法"}:
-            if any(token in joined for token in ["retrieval- augmented generation", "retrieval augmented generation", "retrieval-augmented generation"]):
+            if query_matches_any(joined, "", CONCEPT_REASONING_MARKERS["detail_retrieval_generation"]):
                 details.append("核心思路是先检索相关信息，再结合生成模型组织回答")
             elif "retrieval" in joined and "generation" in joined:
                 details.append("它把检索和生成结合在同一个回答链路里")
