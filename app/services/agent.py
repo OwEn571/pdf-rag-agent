@@ -27,7 +27,6 @@ from app.domain.models import (
     QueryContract,
     ResearchPlan,
     SessionContext,
-    SessionTurn,
     VerificationReport,
 )
 from app.services.agent_context import AgentRunContext
@@ -144,6 +143,11 @@ from app.services.agent_mixins import (
 )
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import SessionStore
+from app.services.session_context_helpers import (
+    session_conversation_context,
+    session_llm_history_messages,
+    truncate_context_text,
+)
 
 logger = logging.getLogger(__name__)
 ALLOWED_SUBPROCESS_COMMANDS = {"pdftoppm"}
@@ -2342,48 +2346,11 @@ class ResearchAssistantAgentV4(
     def _session_conversation_context(self, session: SessionContext, *, max_chars: int = 24000) -> dict[str, Any]:
         """Return the retained conversation as the LLM-facing working memory."""
 
-        def turn_payload(turn: SessionTurn, *, answer_limit: int) -> dict[str, Any]:
-            return {
-                "user_query": turn.query,
-                "assistant_answer": self._truncate_context_text(turn.answer, limit=answer_limit),
-                "query_contract": {
-                    "relation": turn.relation,
-                    "interaction_mode": turn.interaction_mode,
-                    "clean_query": turn.clean_query,
-                    "targets": turn.targets,
-                    "answer_slots": turn.answer_slots,
-                    "requested_fields": turn.requested_fields,
-                    "required_modalities": turn.required_modalities,
-                    "answer_shape": turn.answer_shape,
-                    "precision_requirement": turn.precision_requirement,
-                },
-                "citation_titles": turn.titles,
-            }
-
-        answer_limit = 1800
-        payload = {
-            "summary_of_compressed_older_turns": session.summary,
-            "active_research_context": session.active_research_context_payload(),
-            "pending_clarification": {
-                "type": session.pending_clarification_type,
-                "target": session.pending_clarification_target,
-                "options": session.pending_clarification_options,
-            },
-            "working_memory": session.working_memory,
-            "persistent_learnings": self._persistent_learnings_context(),
-            "turns": [turn_payload(turn, answer_limit=answer_limit) for turn in session.turns],
-        }
-        serialized = json.dumps(payload, ensure_ascii=False)
-        if len(serialized) <= max_chars:
-            return payload
-
-        compact_turns: list[dict[str, Any]] = []
-        for index, turn in enumerate(session.turns):
-            limit = 900 if index >= max(0, len(session.turns) - 4) else 280
-            compact_turns.append(turn_payload(turn, answer_limit=limit))
-        payload["turns"] = compact_turns
-        payload["context_compression_note"] = "Older answers were shortened because the raw conversation context was near the prompt budget."
-        return payload
+        return session_conversation_context(
+            session,
+            persistent_learnings=self._persistent_learnings_context(),
+            max_chars=max_chars,
+        )
 
     def _persistent_learnings_context(self) -> str:
         try:
@@ -2401,41 +2368,11 @@ class ResearchAssistantAgentV4(
     ) -> list[dict[str, str]]:
         """Render recent turns as real chat messages for context-aware LLM calls."""
 
-        messages: list[dict[str, str]] = []
-        if session.summary:
-            messages.append(
-                {
-                    "role": "human",
-                    "content": "以下是更早对话的压缩摘要，请用于解析后续指代，不要把摘要当成新问题：\n" + session.summary,
-                }
-            )
-        for turn in session.turns[-max_turns:]:
-            user_query = str(turn.query or "").strip()
-            if user_query:
-                messages.append({"role": "user", "content": user_query})
-            answer = self._truncate_context_text(turn.answer, limit=answer_limit)
-            metadata = {
-                "relation": turn.relation,
-                "interaction_mode": turn.interaction_mode,
-                "targets": turn.targets,
-                "answer_slots": turn.answer_slots,
-                "requested_fields": turn.requested_fields,
-                "citation_titles": turn.titles,
-            }
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer + "\n\n[上一轮工具上下文]\n" + json.dumps(metadata, ensure_ascii=False),
-                }
-            )
-        return messages
+        return session_llm_history_messages(session, max_turns=max_turns, answer_limit=answer_limit)
 
     @staticmethod
     def _truncate_context_text(text: str, *, limit: int) -> str:
-        compact = str(text or "").strip()
-        if len(compact) <= limit:
-            return compact
-        return compact[: max(0, limit - 3)].rstrip() + "..."
+        return truncate_context_text(text, limit=limit)
 
     def _remember_research_outcome(
         self,
