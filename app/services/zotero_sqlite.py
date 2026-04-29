@@ -11,8 +11,16 @@ from urllib.parse import urlparse
 from urllib.parse import unquote
 
 from app.core.config import Settings
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 
 logger = logging.getLogger(__name__)
+PAPERLIKE_WEBPAGE_TITLE_MARKERS: MarkerProfile = (
+    "survey",
+    "benchmark",
+    "transformer",
+    "alignment",
+    "reasoning",
+)
 
 ATTACHMENT_SQL = """
 SELECT
@@ -332,7 +340,7 @@ class ZoteroSQLiteReader:
         if website_title in {"arxiv.org", "openreview", "acl anthology"}:
             return True
         title = record.title.lower().strip()
-        if any(marker in title for marker in ("survey", "benchmark", "transformer", "alignment", "reasoning")) and record.abstract_note:
+        if query_matches_any(title, "", PAPERLIKE_WEBPAGE_TITLE_MARKERS) and record.abstract_note:
             return True
         return False
 
