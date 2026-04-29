@@ -54,6 +54,9 @@ class AgentEvidenceSearchResult:
     evidence: list[EvidenceBlock]
     query: str
     limit: int
+    tool_call_arguments: dict[str, Any]
+    observation_summary: str
+    observation_payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -348,7 +351,24 @@ def search_agent_evidence(
     selected_paper_id = selected_clarification_paper_id(contract)
     if selected_paper_id:
         evidence = [item for item in evidence if item.paper_id == selected_paper_id]
-    return AgentEvidenceSearchResult(evidence=evidence, query=evidence_query, limit=evidence_limit)
+    return AgentEvidenceSearchResult(
+        evidence=evidence,
+        query=evidence_query,
+        limit=evidence_limit,
+        tool_call_arguments={
+            "stage": "search_evidence",
+            "query": evidence_query,
+            "paper_ids": paper_ids,
+            "limit": evidence_limit,
+            "modalities": contract.required_modalities,
+        },
+        observation_summary=f"evidence={len(evidence)}",
+        observation_payload={
+            "stage": "search_evidence",
+            "evidence_count": len(evidence),
+            "block_types": list(dict.fromkeys(item.block_type for item in evidence[:12])),
+        },
+    )
 
 
 def search_agent_candidate_papers(

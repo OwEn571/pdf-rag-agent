@@ -879,17 +879,7 @@ class ResearchAssistantAgentV4(
                 limit=limit,
             ),
         )
-        self._emit_agent_tool_call(
-            emit=emit,
-            tool="search_corpus",
-            arguments={
-                "stage": "search_evidence",
-                "query": result.query,
-                "paper_ids": [item.paper_id for item in screened_papers],
-                "limit": result.limit,
-                "modalities": contract.required_modalities,
-            },
-        )
+        self._emit_agent_tool_call(emit=emit, tool="search_corpus", arguments=result.tool_call_arguments)
         evidence = result.evidence
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
@@ -897,12 +887,8 @@ class ResearchAssistantAgentV4(
             emit=emit,
             execution_steps=execution_steps,
             tool="search_corpus",
-            summary=f"evidence={len(evidence)}",
-            payload={
-                "stage": "search_evidence",
-                "evidence_count": len(evidence),
-                "block_types": list(dict.fromkeys(item.block_type for item in evidence[:12])),
-            },
+            summary=result.observation_summary,
+            payload=result.observation_payload,
         )
 
     def _agent_web_search(

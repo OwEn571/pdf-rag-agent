@@ -263,6 +263,19 @@ def test_runtime_helpers_search_agent_evidence_uses_precomputed_when_available()
     assert result.evidence == precomputed
     assert result.query == "custom DPO"
     assert result.limit == 3
+    assert result.tool_call_arguments == {
+        "stage": "search_evidence",
+        "query": "custom DPO",
+        "paper_ids": ["p1"],
+        "limit": 3,
+        "modalities": ["page_text"],
+    }
+    assert result.observation_summary == "evidence=1"
+    assert result.observation_payload == {
+        "stage": "search_evidence",
+        "evidence_count": 1,
+        "block_types": ["page_text"],
+    }
     assert calls == []
 
 
@@ -490,6 +503,8 @@ def test_runtime_helpers_search_agent_evidence_concept_fallback_filters_selectio
     assert calls and "PBA" in calls[0][0]
     assert calls[0][1] == 8
     assert [item.doc_id for item in result.evidence] == ["selected"]
+    assert result.tool_call_arguments["paper_ids"] == ["p1", "p2"]
+    assert result.observation_payload["block_types"] == ["page_text"]
 
 
 def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates() -> None:
