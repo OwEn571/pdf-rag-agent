@@ -14,21 +14,18 @@ from app.services.agent_tools import (
 )
 from app.services.agent_runtime_helpers import (
     agent_loop_summary,
-    configured_max_steps,
     conversation_runtime_actions,
     conversation_runtime_state,
-    dequeue_action,
+    execute_tool_loop,
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
-    planner_next_action,
     research_runtime_actions,
     research_runtime_state,
     tool_loop_ready_tool,
     verification_execution_step,
 )
 from app.services.tool_registry_helpers import (
-    tool_input_from_state,
     tool_loop_ready_observation,
 )
 
@@ -68,7 +65,8 @@ class AgentRuntime:
             execution_steps=execution_steps,
         )
         executor = AgentToolExecutor(tools)
-        self._execute_tool_loop(
+        execute_tool_loop(
+            agent=self.agent,
             contract=contract,
             session=session,
             state=state,
@@ -138,7 +136,8 @@ class AgentRuntime:
             execution_steps=execution_steps,
         )
         executor = AgentToolExecutor(tools)
-        self._execute_tool_loop(
+        execute_tool_loop(
+            agent=self.agent,
             contract=contract,
             session=session,
             state=state,
@@ -171,53 +170,3 @@ class AgentRuntime:
         emit("confidence", confidence)
         execution_steps.append(verification_execution_step(verification))
         return state
-
-    def _execute_tool_loop(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        state: dict[str, Any],
-        executor: AgentToolExecutor,
-        planned_actions: list[str],
-        allowed_tools: set[str],
-        emit: EmitFn,
-        fallback_next: Callable[[set[str]], str | None],
-        stop_condition: Callable[[set[str]], bool],
-        max_steps: int = 8,
-    ) -> None:
-        queue = [action for action in planned_actions if action in allowed_tools]
-        executed_order: list[str] = []
-        max_step_count = configured_max_steps(
-            getattr(self.agent, "agent_settings", None),
-            fallback=max_steps,
-        )
-        for index in range(1, max_step_count + 1):
-            action = dequeue_action(queue=queue, executed=executor.executed)
-            if action is None:
-                action = planner_next_action(
-                    agent=self.agent,
-                    contract=contract,
-                    session=session,
-                    state=state,
-                    executed_actions=executed_order,
-                    allowed_tools=allowed_tools,
-                )
-            if action is None:
-                action = fallback_next(executor.executed)
-            if action is None or action not in allowed_tools:
-                break
-            tool_input = tool_input_from_state(state, action)
-            state["current_tool_input"] = tool_input
-            self.agent._emit_agent_step(
-                emit=emit,
-                index=index,
-                action=action,
-                contract=state.get("contract", contract),
-                state=state,
-                arguments=tool_input,
-            )
-            should_stop = executor.run(action)
-            executed_order.append(action)
-            if should_stop or stop_condition(executor.executed):
-                break

@@ -10,6 +10,7 @@ from app.services.agent_runtime_helpers import (
     conversation_runtime_actions,
     conversation_runtime_state,
     dequeue_action,
+    execute_tool_loop,
     finalize_research_verification,
     next_conversation_action,
     next_research_action,
@@ -125,6 +126,54 @@ def test_runtime_helpers_choose_planner_next_action() -> None:
         )
         is None
     )
+
+
+def test_runtime_helpers_execute_tool_loop_runs_planned_and_fallback_actions() -> None:
+    contract = QueryContract(clean_query="x")
+    session = SimpleNamespace()
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    class Agent:
+        agent_settings = SimpleNamespace(max_agent_steps=4)
+
+        def _emit_agent_step(self, **kwargs: object) -> None:
+            steps.append(kwargs)
+
+    class Executor:
+        def __init__(self) -> None:
+            self.executed: set[str] = set()
+            self.runs: list[str] = []
+
+        def run(self, action: str) -> bool:
+            self.executed.add(action)
+            self.runs.append(action)
+            return False
+
+    executor = Executor()
+    state = {
+        "contract": contract,
+        "tool_inputs": {"read_memory": {"reason": "context"}, "compose": {"style": "short"}},
+    }
+
+    execute_tool_loop(
+        agent=Agent(),
+        contract=contract,
+        session=session,
+        state=state,
+        executor=executor,
+        planned_actions=["read_memory"],
+        allowed_tools={"read_memory", "compose"},
+        emit=lambda event, payload: events.append((event, payload)),
+        fallback_next=lambda executed: "compose" if "compose" not in executed else None,
+        stop_condition=lambda executed: "compose" in executed,
+    )
+
+    assert executor.runs == ["read_memory", "compose"]
+    assert state["current_tool_input"] == {"style": "short"}
+    assert [step["action"] for step in steps] == ["read_memory", "compose"]
+    assert steps[0]["arguments"] == {"reason": "context"}
+    assert steps[1]["arguments"] == {"style": "short"}
 
 
 def test_runtime_helpers_detect_clarification_need_from_contract_confidence() -> None:

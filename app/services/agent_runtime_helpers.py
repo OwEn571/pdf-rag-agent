@@ -10,9 +10,12 @@ from app.services.confidence import (
     confidence_payload,
     should_ask_human,
 )
-from app.services.tool_registry_helpers import tool_inputs_by_name
+from app.services.tool_registry_helpers import tool_input_from_state, tool_inputs_by_name
 
 NegativeCorrectionFn = Callable[[str], bool]
+EmitFn = Callable[[str, dict[str, Any]], None]
+FallbackNextFn = Callable[[set[str]], str | None]
+StopConditionFn = Callable[[set[str]], bool]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -137,6 +140,57 @@ def planner_next_action(
         executed_actions=executed_actions,
         allowed_tools=allowed_tools,
     )
+
+
+def execute_tool_loop(
+    *,
+    agent: Any,
+    contract: QueryContract,
+    session: SessionContext,
+    state: dict[str, Any],
+    executor: Any,
+    planned_actions: list[str],
+    allowed_tools: set[str],
+    emit: EmitFn,
+    fallback_next: FallbackNextFn,
+    stop_condition: StopConditionFn,
+    max_steps: int = 8,
+) -> None:
+    queue = [action for action in planned_actions if action in allowed_tools]
+    executed_order: list[str] = []
+    max_step_count = configured_max_steps(
+        getattr(agent, "agent_settings", None),
+        fallback=max_steps,
+    )
+    for index in range(1, max_step_count + 1):
+        action = dequeue_action(queue=queue, executed=executor.executed)
+        if action is None:
+            action = planner_next_action(
+                agent=agent,
+                contract=contract,
+                session=session,
+                state=state,
+                executed_actions=executed_order,
+                allowed_tools=allowed_tools,
+            )
+        if action is None:
+            action = fallback_next(executor.executed)
+        if action is None or action not in allowed_tools:
+            break
+        tool_input = tool_input_from_state(state, action)
+        state["current_tool_input"] = tool_input
+        agent._emit_agent_step(
+            emit=emit,
+            index=index,
+            action=action,
+            contract=state.get("contract", contract),
+            state=state,
+            arguments=tool_input,
+        )
+        should_stop = executor.run(action)
+        executed_order.append(action)
+        if should_stop or stop_condition(executor.executed):
+            break
 
 
 def contract_needs_human_clarification(contract: QueryContract, agent_settings: Any) -> bool:
