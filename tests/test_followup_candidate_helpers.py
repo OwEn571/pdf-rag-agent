@@ -4,6 +4,7 @@ import json
 
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
+    FOLLOWUP_CANDIDATE_MARKERS,
     candidate_title_matches,
     expand_followup_candidate_pool,
     extract_followup_keyphrases,
@@ -235,6 +236,7 @@ def test_followup_reason_fallback_truncates_summary_and_mentions_seed() -> None:
 def test_infer_followup_relation_type_uses_summary_and_strict_flag() -> None:
     paper = CandidatePaper(paper_id="candidate", title="Candidate Paper")
 
+    assert "strict_direct" in FOLLOWUP_CANDIDATE_MARKERS
     assert (
         infer_followup_relation_type(
             paper=paper,

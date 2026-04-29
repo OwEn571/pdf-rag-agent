@@ -16,6 +16,7 @@ from app.services.followup_relationship_intents import (
     has_followup_support_relation_signal,
     target_relation_cue_near_text,
 )
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.query_shaping import matches_target
 
 PaperText = Callable[[str], str]
@@ -24,6 +25,14 @@ ConfidenceCoercer = Callable[[Any], float]
 EvidenceExpander = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
 PaperSearch = Callable[[str, QueryContract, int], list[CandidatePaper]]
 SelectedAssessment = Callable[[CandidatePaper], dict[str, Any]]
+
+
+FOLLOWUP_CANDIDATE_MARKERS: dict[str, MarkerProfile] = {
+    "strict_direct": ("uses", "using", "evaluate", "evaluates", "benchmark", "dataset"),
+    "dataset_continuation": ("dataset", "benchmark", "evaluation"),
+    "transfer_extension": ("transfer", "cross-task", "cross model"),
+    "method_extension": ("reasoning", "behavioral", "preference inference"),
+}
 
 
 def selected_followup_candidate_title(contract: QueryContract) -> str:
@@ -415,15 +424,15 @@ def infer_followup_relation_type(
     strict: bool = False,
 ) -> str:
     summary = paper_summary_text(paper.paper_id).lower()
-    if strict and any(token in summary for token in ["uses", "using", "evaluate", "evaluates", "benchmark", "dataset"]):
+    if strict and query_matches_any(summary, "", FOLLOWUP_CANDIDATE_MARKERS["strict_direct"]):
         return "直接使用/评测证据"
     if strict:
         return "直接后续/扩展证据"
-    if any(token in summary for token in ["dataset", "benchmark", "evaluation"]):
+    if query_matches_any(summary, "", FOLLOWUP_CANDIDATE_MARKERS["dataset_continuation"]):
         return "dataset/benchmark continuation"
-    if any(token in summary for token in ["transfer", "cross-task", "cross model"]):
+    if query_matches_any(summary, "", FOLLOWUP_CANDIDATE_MARKERS["transfer_extension"]):
         return "transfer extension"
-    if any(token in summary for token in ["reasoning", "behavioral", "preference inference"]):
+    if query_matches_any(summary, "", FOLLOWUP_CANDIDATE_MARKERS["method_extension"]):
         return "method/model extension"
     return "related continuation"
 
