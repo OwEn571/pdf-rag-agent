@@ -46,8 +46,11 @@ from app.services.clarification_intents import (
     clarification_option_id,
     clarification_option_public_payload,
     clarification_string_list,
-    looks_like_clarification_choice_text,
-    pending_clarification_selection_index,
+    contract_from_selected_clarification_option,
+    contract_with_ambiguity_options,
+    option_from_clarification_choice,
+    select_pending_clarification_option,
+    selected_clarification_paper_id,
 )
 from app.services.citation_ranking import (
     extract_citation_count_from_evidence,
@@ -1289,7 +1292,7 @@ class ResearchAssistantAgentV4(
         forced_contract = contract
         if options:
             selected = options[0]
-            forced_contract = self._contract_from_selected_clarification_option(
+            forced_contract = contract_from_selected_clarification_option(
                 clean_query=contract.clean_query,
                 target=contract.targets[0] if contract.targets else str(selected.get("target", "") or ""),
                 selected=selected,
@@ -1463,7 +1466,7 @@ class ResearchAssistantAgentV4(
                 )
             state["contract"] = fallback_contract
             contract = fallback_contract
-        selected_paper_id = self._selected_clarification_paper_id(contract)
+        selected_paper_id = selected_clarification_paper_id(contract)
         if selected_paper_id:
             selected = [item for item in candidate_papers if item.paper_id == selected_paper_id]
             if not selected:
@@ -1503,7 +1506,7 @@ class ResearchAssistantAgentV4(
         candidate_papers: list[CandidatePaper],
         excluded_titles: set[str],
     ) -> tuple[list[CandidatePaper], list[EvidenceBlock] | None]:
-        selected_paper_id = self._selected_clarification_paper_id(contract)
+        selected_paper_id = selected_clarification_paper_id(contract)
         if selected_paper_id:
             selected = [item for item in candidate_papers if item.paper_id == selected_paper_id]
             if not selected:
@@ -1607,7 +1610,7 @@ class ResearchAssistantAgentV4(
             )
         if excluded_titles:
             evidence = self._filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
-        selected_paper_id = self._selected_clarification_paper_id(contract)
+        selected_paper_id = selected_clarification_paper_id(contract)
         if selected_paper_id:
             evidence = [item for item in evidence if item.paper_id == selected_paper_id]
         state["evidence"] = evidence
@@ -1753,7 +1756,7 @@ class ResearchAssistantAgentV4(
                     options=ambiguity_options,
                     decision=judge_decision,
                 )
-                contract = self._contract_with_ambiguity_options(contract=contract, options=ambiguity_options)
+                contract = contract_with_ambiguity_options(contract=contract, options=ambiguity_options)
                 state["contract"] = contract
                 state["claims"] = []
                 state["verification"] = VerificationReport(
@@ -1887,7 +1890,7 @@ class ResearchAssistantAgentV4(
                 broader_candidates,
                 excluded_titles=excluded_titles,
             )
-        selected_paper_id = self._selected_clarification_paper_id(contract)
+        selected_paper_id = selected_clarification_paper_id(contract)
         if selected_paper_id:
             selected = [item for item in broader_candidates if item.paper_id == selected_paper_id]
             if not selected:
@@ -2065,7 +2068,7 @@ class ResearchAssistantAgentV4(
         return apply_conversation_memory_to_contract(
             contract=refined_contract,
             session=session,
-            selected_clarification_paper_id=self._selected_clarification_paper_id(refined_contract),
+            selected_clarification_paper_id=selected_clarification_paper_id(refined_contract),
         )
 
     def _normalize_conversation_tool_contract(
@@ -2273,7 +2276,7 @@ class ResearchAssistantAgentV4(
         goals = research_plan_goals(contract)
         if contract.interaction_mode != "research" or "formula" not in goals or not contract.targets:
             return contract
-        if self._selected_clarification_paper_id(contract) or "exclude_previous_focus" in contract.notes:
+        if selected_clarification_paper_id(contract) or "exclude_previous_focus" in contract.notes:
             return contract
         active = session.effective_active_research()
         context_text = " ".join([*active.titles, *active.targets]).strip()
@@ -2297,7 +2300,7 @@ class ResearchAssistantAgentV4(
         return formula_contextual_paper_contract(contract=contract, paper=paper, target=target)
 
     def _resolve_paper_scope_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
+        if contract.interaction_mode != "research" or selected_clarification_paper_id(contract):
             return contract
         active = session.effective_active_research()
         if not active.has_content() or not active.targets:
@@ -2310,7 +2313,7 @@ class ResearchAssistantAgentV4(
         return paper_scope_correction_contract(contract=contract, active=active, paper=paper)
 
     def _resolve_contextual_active_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
+        if contract.interaction_mode != "research" or selected_clarification_paper_id(contract):
             return contract
         if "exclude_previous_focus" in contract.notes or is_negative_correction_query(contract.clean_query):
             return contract
@@ -2340,9 +2343,9 @@ class ResearchAssistantAgentV4(
     ) -> QueryContract | None:
         if session.pending_clarification_type != "ambiguity" or not session.pending_clarification_options:
             return None
-        selected = self._option_from_clarification_choice(clarification_choice, session.pending_clarification_options)
+        selected = option_from_clarification_choice(clarification_choice, session.pending_clarification_options)
         if selected is None:
-            selected = self._select_pending_clarification_option(
+            selected = select_pending_clarification_option(
                 clean_query=clean_query,
                 options=session.pending_clarification_options,
             )
@@ -2351,7 +2354,7 @@ class ResearchAssistantAgentV4(
         target = session.pending_clarification_target or str(selected.get("target", "") or "").strip()
         if not target:
             target = " ".join(extract_targets(clean_query)[:1])
-        return self._contract_from_selected_clarification_option(
+        return contract_from_selected_clarification_option(
             clean_query=clean_query,
             target=target,
             selected=selected,
@@ -2367,56 +2370,13 @@ class ResearchAssistantAgentV4(
         resolution_note: str = "resolved_human_choice",
         resolution_subject: str = "用户选择的含义是",
     ) -> QueryContract:
-        selected_target = str(selected.get("target", "") or "").strip()
-        target = target or selected_target
-        meaning = str(selected.get("meaning", "") or selected.get("label", "") or target).strip()
-        title = str(selected.get("title", "") or "").strip()
-        notes = [
-            resolution_note,
-            "selected_ambiguity_option=" + json.dumps(selected, ensure_ascii=False),
-        ]
-        notes.extend(notes_extra or [])
-        paper_id = str(selected.get("paper_id", "") or "").strip()
-        if paper_id:
-            notes.append(f"selected_paper_id={paper_id}")
-        raw_requested = selected.get("source_requested_fields", [])
-        source_requested = [str(item).strip() for item in raw_requested if str(item).strip()] if isinstance(raw_requested, list) else []
-        raw_slots = selected.get("source_answer_slots", [])
-        source_answer_slots = [str(item).strip() for item in raw_slots if str(item).strip()] if isinstance(raw_slots, list) else []
-        source_relation = str(selected.get("source_relation", "") or selected.get("relation", "") or "").strip()
-        is_formula_choice = source_relation == "formula_lookup" or "formula" in source_requested or "formula" in source_answer_slots
-        if is_formula_choice:
-            answer_slots = source_answer_slots or (["formula"] if "formula" in source_requested else [])
-            rewritten = f"{target} 的公式是什么？{resolution_subject} {meaning}"
-            if title:
-                rewritten += f"，来源论文是《{title}》"
-            return QueryContract(
-                clean_query=rewritten,
-                interaction_mode="research",
-                relation="formula_lookup",
-                targets=[target] if target else [],
-                answer_slots=answer_slots,
-                requested_fields=["formula", "variable_explanation", "source"],
-                required_modalities=["page_text", "table"],
-                answer_shape="bullets",
-                precision_requirement="exact",
-                continuation_mode="followup",
-                notes=notes,
-            )
-        rewritten = f"{target} 是什么？{resolution_subject} {meaning}"
-        if title:
-            rewritten += f"，来源论文是《{title}》"
-        return QueryContract(
-            clean_query=rewritten,
-            interaction_mode="research",
-            relation="entity_definition",
-            targets=[target] if target else [],
-            requested_fields=["definition", "mechanism", "role_in_context"],
-            required_modalities=["page_text", "paper_card", "table"],
-            answer_shape="narrative",
-            precision_requirement="high",
-            continuation_mode="followup",
-            notes=notes,
+        return contract_from_selected_clarification_option(
+            clean_query=clean_query,
+            target=target,
+            selected=selected,
+            notes_extra=notes_extra,
+            resolution_note=resolution_note,
+            resolution_subject=resolution_subject,
         )
 
     def _next_clarification_attempt(
@@ -2468,93 +2428,6 @@ class ResearchAssistantAgentV4(
             ]
         )
 
-    @staticmethod
-    def _selected_clarification_paper_id(contract: QueryContract) -> str:
-        for note in contract.notes:
-            raw = str(note or "")
-            if raw.startswith("selected_paper_id="):
-                return raw.split("=", 1)[1].strip()
-            if not raw.startswith("selected_ambiguity_option="):
-                continue
-            try:
-                payload = json.loads(raw.split("=", 1)[1])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                paper_id = str(payload.get("paper_id", "") or "").strip()
-                if paper_id:
-                    return paper_id
-        return ""
-
-    @staticmethod
-    def _option_from_clarification_choice(
-        choice: dict[str, Any] | None,
-        options: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        if not isinstance(choice, dict) or not options:
-            return None
-        option_id = str(choice.get("option_id", "") or "").strip()
-        if option_id:
-            for option in options:
-                if str(option.get("option_id", "") or "").strip() == option_id:
-                    return option
-        raw_index = choice.get("index")
-        try:
-            index = int(raw_index)
-        except (TypeError, ValueError):
-            index = -1
-        if 0 <= index < len(options):
-            return options[index]
-        paper_id = str(choice.get("paper_id", "") or "").strip()
-        meaning = str(choice.get("meaning", "") or "").strip().lower()
-        label = str(choice.get("label", "") or "").strip().lower()
-        for option in options:
-            if paper_id and str(option.get("paper_id", "") or "").strip() == paper_id:
-                return option
-            if meaning and str(option.get("meaning", "") or "").strip().lower() == meaning:
-                return option
-            if label and str(option.get("label", "") or "").strip().lower() == label:
-                return option
-        return None
-
-    def _select_pending_clarification_option(
-        self,
-        *,
-        clean_query: str,
-        options: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        index = pending_clarification_selection_index(clean_query)
-        if index is not None and 0 <= index < len(options):
-            return options[index]
-        normalized_query = normalize_lookup_text(clean_query)
-        if not normalized_query:
-            return None
-        for option in options:
-            meaning = normalize_lookup_text(str(option.get("meaning", "")))
-            label = normalize_lookup_text(str(option.get("label", "")))
-            title = normalize_lookup_text(str(option.get("title", "")))
-            if meaning and normalized_query == meaning:
-                return option
-            if label and normalized_query == label:
-                return option
-            if (
-                meaning
-                and len(meaning) >= 10
-                and meaning in normalized_query
-                and looks_like_clarification_choice_text(normalized_query)
-            ):
-                return option
-            if (
-                label
-                and len(label) >= 10
-                and label in normalized_query
-                and looks_like_clarification_choice_text(normalized_query)
-            ):
-                return option
-            if title and len(normalized_query) >= 6 and normalized_query in title:
-                return option
-        return None
-
     def _disambiguation_options_from_evidence(
         self,
         *,
@@ -2565,7 +2438,7 @@ class ResearchAssistantAgentV4(
     ) -> list[dict[str, Any]]:
         if not self._contract_needs_evidence_disambiguation(contract):
             return []
-        if "resolved_human_choice" in contract.notes or self._selected_clarification_paper_id(contract):
+        if "resolved_human_choice" in contract.notes or selected_clarification_paper_id(contract):
             return []
         target = str(contract.targets[0] or "").strip()
         if not is_negative_correction_query(contract.clean_query) and "exclude_previous_focus" not in contract.notes:
@@ -3198,11 +3071,7 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:
-        notes = [note for note in contract.notes if not str(note).startswith("ambiguity_option=")]
-        for option in options[:4]:
-            payload = clarification_option_public_payload(option)
-            notes.append("ambiguity_option=" + json.dumps(payload, ensure_ascii=False))
-        return contract.model_copy(update={"notes": notes})
+        return contract_with_ambiguity_options(contract=contract, options=options)
 
     def _clarification_options(self, contract: QueryContract) -> list[dict[str, Any]]:
         options = ambiguity_options_from_notes(contract.notes)

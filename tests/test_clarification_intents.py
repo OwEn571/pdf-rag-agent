@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from app.domain.models import QueryContract
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_options_from_notes,
@@ -9,8 +10,13 @@ from app.services.clarification_intents import (
     clarification_option_id,
     clarification_option_public_payload,
     clarification_string_list,
+    contract_from_selected_clarification_option,
+    contract_with_ambiguity_options,
     looks_like_clarification_choice_text,
+    option_from_clarification_choice,
     pending_clarification_selection_index,
+    select_pending_clarification_option,
+    selected_clarification_paper_id,
 )
 
 
@@ -87,3 +93,73 @@ def test_ambiguity_options_from_notes_reads_valid_payloads_only() -> None:
     ]
 
     assert ambiguity_options_from_notes(notes) == [valid]
+
+
+def test_selected_clarification_paper_id_reads_direct_and_payload_notes() -> None:
+    direct = QueryContract(clean_query="x", notes=["selected_paper_id=p1"])
+    payload = QueryContract(
+        clean_query="x",
+        notes=["selected_ambiguity_option=" + json.dumps({"paper_id": "p2"})],
+    )
+
+    assert selected_clarification_paper_id(direct) == "p1"
+    assert selected_clarification_paper_id(payload) == "p2"
+    assert selected_clarification_paper_id(QueryContract(clean_query="x", notes=["selected_ambiguity_option=bad"])) == ""
+
+
+def test_option_from_clarification_choice_matches_id_index_and_fields() -> None:
+    options = [
+        {"option_id": "a", "paper_id": "p1", "meaning": "Alpha", "label": "First"},
+        {"option_id": "b", "paper_id": "p2", "meaning": "Beta", "label": "Second"},
+    ]
+
+    assert option_from_clarification_choice({"option_id": "b"}, options) == options[1]
+    assert option_from_clarification_choice({"index": 0}, options) == options[0]
+    assert option_from_clarification_choice({"paper_id": "p2"}, options) == options[1]
+    assert option_from_clarification_choice({"meaning": "alpha"}, options) == options[0]
+    assert option_from_clarification_choice({"label": "second"}, options) == options[1]
+    assert option_from_clarification_choice({"option_id": "missing"}, options) is None
+
+
+def test_select_pending_clarification_option_matches_textual_choice() -> None:
+    options = [
+        {"meaning": "Direct Preference Optimization", "label": "DPO", "title": "DPO Paper"},
+        {"meaning": "Preference Bridged Alignment", "label": "PBA", "title": "PBA Paper"},
+    ]
+
+    assert select_pending_clarification_option(clean_query="第二个", options=options) == options[1]
+    assert select_pending_clarification_option(clean_query="我说的是 Direct Preference Optimization", options=options) == options[0]
+    assert select_pending_clarification_option(clean_query="PBA Paper", options=options) == options[1]
+    assert select_pending_clarification_option(clean_query="没有选择", options=options) is None
+
+
+def test_contract_with_ambiguity_options_replaces_old_option_notes() -> None:
+    contract = QueryContract(clean_query="x", notes=["keep", "ambiguity_option=" + json.dumps({"title": "Old"})])
+    option = {"option_id": "new", "kind": "acronym_meaning", "title": "New", "debug": "drop"}
+
+    updated = contract_with_ambiguity_options(contract=contract, options=[option])
+
+    assert updated.notes[0] == "keep"
+    assert len([note for note in updated.notes if note.startswith("ambiguity_option=")]) == 1
+    payload = json.loads(updated.notes[1].split("=", 1)[1])
+    assert payload["title"] == "New"
+    assert "debug" not in payload
+
+
+def test_contract_from_selected_clarification_option_preserves_formula_slots() -> None:
+    contract = contract_from_selected_clarification_option(
+        clean_query="选第二个",
+        target="PBA",
+        selected={
+            "meaning": "Preference Bridged Alignment",
+            "title": "AlignX",
+            "paper_id": "paper-1",
+            "source_relation": "formula_lookup",
+            "source_answer_slots": ["formula"],
+        },
+    )
+
+    assert contract.relation == "formula_lookup"
+    assert contract.answer_slots == ["formula"]
+    assert contract.requested_fields == ["formula", "variable_explanation", "source"]
+    assert "selected_paper_id=paper-1" in contract.notes
