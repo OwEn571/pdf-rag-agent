@@ -369,17 +369,17 @@ class ResearchAssistantAgentV4(
         citations: list[AssistantCitation] | None = None,
     ) -> dict[str, Any]:
         notes = [str(item) for item in list(contract.notes or [])]
-        answer_slots = self._contract_answer_slots(contract)
-        ambiguous_slots = self._note_values(notes=notes, prefix="ambiguous_slot=")
-        topic_state = self._contract_topic_state(contract)
+        answer_slots = contract_answer_slots(contract)
+        ambiguous_slots = note_values(notes=notes, prefix="ambiguous_slot=")
+        topic_state = contract_topic_state(contract)
         planned_raw = list((tool_plan or {}).get("actions", []) or [])
-        observed_raw = self._observed_tool_names(execution_steps or [])
+        observed_raw = observed_tool_names(execution_steps or [])
         planned = self._canonical_tools(planned_raw)
         observed = self._canonical_tools(observed_raw)
         verification_status = str((verification_report or {}).get("status") or "")
         verifier_confidence = confidence_payload(confidence_from_verification_report(verification_report or {}))
-        selected_paper_id = self._note_value(notes=notes, prefix="selected_paper_id=")
-        selected_title = self._note_value(notes=notes, prefix="memory_title=")
+        selected_paper_id = note_value(notes=notes, prefix="selected_paper_id=")
+        selected_title = note_value(notes=notes, prefix="memory_title=")
         binding_sources = [
             note
             for note in notes
@@ -394,7 +394,7 @@ class ResearchAssistantAgentV4(
         ]
         contract_context = {
             "topic_state": topic_state,
-            "target_aliases": self._note_values(notes=notes, prefix="target_alias="),
+            "target_aliases": note_values(notes=notes, prefix="target_alias="),
             "selected_paper_id": selected_paper_id,
             "selected_title": selected_title,
             "binding_sources": binding_sources,
@@ -412,8 +412,8 @@ class ResearchAssistantAgentV4(
         canonical_tool_names = all_agent_tool_names()
         summary = {
             "intent": {
-                "kind": self._note_value(notes=notes, prefix="intent_kind=") or self._intent_kind_from_contract(contract),
-                "confidence": self._note_float(notes=notes, prefix="intent_confidence="),
+                "kind": note_value(notes=notes, prefix="intent_kind=") or intent_kind_from_contract(contract),
+                "confidence": note_float(notes=notes, prefix="intent_confidence="),
                 "goal": contract.clean_query,
                 "mode": contract.interaction_mode,
                 "relation": contract.relation,
@@ -424,7 +424,7 @@ class ResearchAssistantAgentV4(
                 "needs_web": bool(contract.allow_web_search),
                 "refers_previous_turn": contract.continuation_mode == "followup",
                 "topic_state": topic_state,
-                "active_topic": self._note_value(notes=notes, prefix="active_topic="),
+                "active_topic": note_value(notes=notes, prefix="active_topic="),
             },
             "tool_loop": {
                 "mode": "react_loop",
@@ -451,44 +451,12 @@ class ResearchAssistantAgentV4(
         return summary
 
     @staticmethod
-    def _note_value(*, notes: list[str], prefix: str) -> str:
-        return note_value(notes=notes, prefix=prefix)
-
-    @staticmethod
-    def _note_float(*, notes: list[str], prefix: str) -> float | None:
-        return note_float(notes=notes, prefix=prefix)
-
-    @staticmethod
-    def _note_values(*, notes: list[str], prefix: str) -> list[str]:
-        return note_values(notes=notes, prefix=prefix)
-
-    @staticmethod
-    def _contract_answer_slots(contract: QueryContract) -> list[str]:
-        return contract_answer_slots(contract)
-
-    @staticmethod
-    def _contract_topic_state(contract: QueryContract) -> str:
-        return contract_topic_state(contract)
-
-    @staticmethod
-    def _contract_allows_active_context_override(contract: QueryContract) -> bool:
-        return contract_allows_active_context_override(contract)
-
-    @staticmethod
-    def _observed_tool_names(execution_steps: list[dict[str, Any]]) -> list[str]:
-        return observed_tool_names(execution_steps)
-
-    @staticmethod
     def _canonical_tools(raw_tools: list[Any]) -> list[str]:
         return canonical_tools(
             raw_tools=raw_tools,
             aliases=LEGACY_TOOL_NAME_ALIASES,
             canonical_names=all_agent_tool_names(),
         )
-
-    @staticmethod
-    def _intent_kind_from_contract(contract: QueryContract) -> str:
-        return intent_kind_from_contract(contract)
 
     def _compose_memory_synthesis_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
         if self.clients.chat is not None:
@@ -2582,7 +2550,7 @@ class ResearchAssistantAgentV4(
         normalized_query = self._normalize_lookup_text(clean_query)
         if not followup_relationship_recheck_requested(clean_query, normalized_query):
             return contract
-        if not self._contract_allows_active_context_override(contract) and contract.relation != "followup_research":
+        if not contract_allows_active_context_override(contract) and contract.relation != "followup_research":
             return contract
         goals = self._research_plan_goals(contract)
         relation_like = bool(goals & {"followup_papers", "candidate_relationship", "summary", "results", "answer", "general_answer"})
@@ -2964,15 +2932,15 @@ class ResearchAssistantAgentV4(
             for target in contract.targets
             if (binding := self._target_binding_from_memory(session=session, target=target))
         }
-        topic_state = self._contract_topic_state(contract)
+        topic_state = contract_topic_state(contract)
         goals = self._research_plan_goals(contract)
-        if contract.relation == "origin_lookup" or "origin" in self._contract_answer_slots(contract) or goals & {"paper_title", "year"}:
+        if contract.relation == "origin_lookup" or "origin" in contract_answer_slots(contract) or goals & {"paper_title", "year"}:
             return contract
         allow_explicit_target_binding = bool(target_bindings) and topic_state != "switch"
         if "formula" in goals and topic_state != "continue":
             allow_explicit_target_binding = False
         if (
-            not self._contract_allows_active_context_override(contract)
+            not contract_allows_active_context_override(contract)
             and not allow_explicit_target_binding
         ):
             return contract
@@ -3658,7 +3626,7 @@ class ResearchAssistantAgentV4(
                     "query_contract": {
                         "relation": contract.relation,
                         "targets": contract.targets,
-                        "answer_slots": self._contract_answer_slots(contract),
+                        "answer_slots": contract_answer_slots(contract),
                         "requested_fields": contract.requested_fields,
                         "required_modalities": contract.required_modalities,
                         "answer_shape": contract.answer_shape,
@@ -4047,7 +4015,7 @@ class ResearchAssistantAgentV4(
         target = str(contract.targets[0] or "").strip()
         if not self._is_short_acronym(target):
             return False
-        if self._note_values(notes=contract.notes, prefix="ambiguous_slot="):
+        if note_values(notes=contract.notes, prefix="ambiguous_slot="):
             return True
         return bool(self._research_plan_goals(contract) & self._disambiguation_goal_markers())
 
@@ -4056,7 +4024,7 @@ class ResearchAssistantAgentV4(
         return {"definition", "entity_type", "role_in_context", "mechanism", "formula"}
 
     def _disambiguation_missing_fields(self, contract: QueryContract) -> list[str]:
-        ambiguous_slots = self._note_values(notes=contract.notes, prefix="ambiguous_slot=")
+        ambiguous_slots = note_values(notes=contract.notes, prefix="ambiguous_slot=")
         return ambiguous_slots or ["disambiguation"]
 
     def _acronym_options_from_evidence(
@@ -5520,7 +5488,7 @@ class ResearchAssistantAgentV4(
                         "targets": contract.targets,
                         "requested_fields": contract.requested_fields,
                         "required_modalities": contract.required_modalities,
-                        "answer_slots": self._contract_answer_slots(contract),
+                        "answer_slots": contract_answer_slots(contract),
                         "conversation_context": self._session_conversation_context(session),
                         "active_research_context": session.active_research_context_payload(),
                         "recent_turns": [
