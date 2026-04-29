@@ -93,11 +93,10 @@ from app.services.evidence_presentation import (
     build_figure_contexts,
     chunk_text,
     citations_from_doc_ids,
-    figure_fallback_summary,
     paper_recommendation_reason,
     safe_year,
 )
-from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
+from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
 from app.services.library_intents import (
     citation_ranking_has_library_context,
@@ -5484,16 +5483,9 @@ class ResearchAssistantAgentV4(
     def _build_figure_contexts(self, evidence: list[EvidenceBlock], limit: int = 2) -> list[dict[str, Any]]:
         return build_figure_contexts(evidence, limit=limit)
 
-    def _figure_fallback_summary(self, contexts: list[dict[str, Any]]) -> str:
-        return figure_fallback_summary(contexts)
-
     @staticmethod
     def _figure_signal_score(text: str) -> int:
         return figure_signal_score(text)
-
-    @staticmethod
-    def _extract_figure_benchmarks(text: str) -> list[str]:
-        return extract_figure_benchmarks(text)
 
     def _render_page_image_data_url(self, *, file_path: str, page: int) -> str:
         pdf_path = str(file_path or "").strip()

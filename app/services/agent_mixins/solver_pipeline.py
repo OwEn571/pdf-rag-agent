@@ -11,10 +11,13 @@ from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 from app.services.evidence_presentation import (
+    build_figure_contexts,
     evidence_ids_for_paper,
     extract_topology_terms,
+    figure_fallback_summary,
     formula_terms,
 )
+from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
@@ -632,13 +635,13 @@ class SolverPipelineMixin:
         )
 
     def _solve_figure(self, *, contract: QueryContract, papers: list[CandidatePaper], evidence: list[EvidenceBlock]) -> list[Claim]:
-        figure_contexts = self._build_figure_contexts(evidence)
+        figure_contexts = build_figure_contexts(evidence)
         if not figure_contexts:
             return []
         primary_context = figure_contexts[0]
         entity = contract.targets[0] if contract.targets else primary_context["title"]
-        fallback_text = self._figure_fallback_summary(figure_contexts)
-        evidence_benchmarks = self._extract_figure_benchmarks("\n".join(item.snippet for item in evidence[:10]))
+        fallback_text = figure_fallback_summary(figure_contexts)
+        evidence_benchmarks = extract_figure_benchmarks("\n".join(item.snippet for item in evidence[:10]))
         if len(evidence_benchmarks) >= 3:
             benchmark_suffix = " 图中提到的 benchmark 包括：" + "、".join(evidence_benchmarks) + "。"
             if benchmark_suffix not in fallback_text:
@@ -663,7 +666,7 @@ class SolverPipelineMixin:
             evidence_ids=primary_context["doc_ids"],
             paper_id=primary_context["paper_id"],
             fallback_text=fallback_text,
-            signal_score=self._figure_signal_score,
+            signal_score=figure_signal_score,
         )
         if vlm_claim is not None:
             return [vlm_claim]
