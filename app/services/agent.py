@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import json
 import logging
 import subprocess
@@ -10,8 +9,6 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
-
-import httpx
 
 from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
@@ -78,9 +75,8 @@ from app.services.clarification_intents import (
 from app.services.citation_ranking import (
     extract_citation_count_from_evidence,
     format_citation_ranking_answer,
-    parse_citation_count,
     select_citation_ranking_candidates,
-    title_token_overlap,
+    semantic_scholar_citation_evidence,
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.compound_task_helpers import compound_task_label, compound_task_result_from_task_payload
@@ -1184,66 +1180,10 @@ class ResearchAssistantAgentV4(
         return {"web_enabled": web_enabled, "results": results, "evidence": all_evidence}
 
     def _semantic_scholar_citation_evidence(self, *, title: str) -> EvidenceBlock | None:
-        if type(self.web_search).__name__ != "TavilyWebSearchClient":
-            return None
-        try:
-            response = httpx.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search/match",
-                params={
-                    "query": title,
-                    "fields": "title,year,citationCount,url",
-                },
-                timeout=min(max(float(self.settings.tavily_timeout_seconds), 2.0), 5.0),
-                follow_redirects=True,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:  # noqa: BLE001
-            logger.info("semantic scholar citation lookup failed for %s: %s", title, exc)
-            return None
-        records = payload.get("data", [])
-        if not isinstance(records, list):
-            return None
-        best_record: dict[str, Any] | None = None
-        best_overlap = 0.0
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            record_title = str(record.get("title", "") or "").strip()
-            overlap = title_token_overlap(title, record_title)
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_record = record
-        if best_record is None or best_overlap < 0.55:
-            return None
-        count = parse_citation_count(str(best_record.get("citationCount", "")))
-        if count is None:
-            return None
-        record_title = str(best_record.get("title", "") or title).strip()
-        url = str(best_record.get("url", "") or "").strip() or "https://www.semanticscholar.org/search"
-        year = str(best_record.get("year", "") or "").strip()
-        doc_id = "web::semantic-scholar::" + hashlib.sha1(f"{record_title}\n{url}".encode("utf-8")).hexdigest()[:16]
-        snippet = (
-            f"Semantic Scholar citationCount: {count:,}. "
-            f"Matched paper title: {record_title}."
-        )
-        return EvidenceBlock(
-            doc_id=doc_id,
-            paper_id=doc_id,
-            title=f"{record_title} | Semantic Scholar",
-            file_path=url,
-            page=0,
-            block_type="web",
-            caption=url,
-            snippet=snippet,
-            score=best_overlap,
-            metadata={
-                "source": "semantic_scholar",
-                "query": title,
-                "year": year,
-                "citation_count": count,
-                "title_overlap": best_overlap,
-            },
+        return semantic_scholar_citation_evidence(
+            title=title,
+            web_search=self.web_search,
+            timeout_seconds=float(self.settings.tavily_timeout_seconds),
         )
 
     def _force_best_effort_after_clarification_limit(

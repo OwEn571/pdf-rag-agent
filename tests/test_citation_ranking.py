@@ -8,6 +8,7 @@ from app.services.citation_ranking import (
     format_citation_ranking_answer,
     parse_citation_count,
     select_citation_ranking_candidates,
+    semantic_scholar_citation_evidence,
     title_token_overlap,
 )
 
@@ -81,6 +82,56 @@ def test_citation_ranking_selects_ranker_candidates_without_previous_context() -
     )
 
     assert selected == [{"title": "Paper A", "year": "2024", "paper_id": "p1", "reason": "ranked"}]
+
+
+def test_semantic_scholar_citation_evidence_builds_evidence_block() -> None:
+    class TavilyWebSearchClient:
+        pass
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {"title": "Different Paper", "citationCount": 1, "url": "https://example.com/different"},
+                    {
+                        "title": "Example Paper",
+                        "year": 2024,
+                        "citationCount": 1234,
+                        "url": "https://www.semanticscholar.org/paper/example",
+                    },
+                ]
+            }
+
+    calls: list[dict[str, object]] = []
+
+    def fake_get(*args: object, **kwargs: object) -> FakeResponse:
+        calls.append({"args": args, **kwargs})
+        return FakeResponse()
+
+    evidence = semantic_scholar_citation_evidence(
+        title="Example Paper",
+        web_search=TavilyWebSearchClient(),
+        timeout_seconds=9.0,
+        http_get=fake_get,
+    )
+
+    assert evidence is not None
+    assert evidence.metadata["source"] == "semantic_scholar"
+    assert evidence.metadata["citation_count"] == 1234
+    assert evidence.score >= 1.0
+    assert calls[0]["timeout"] == 5.0
+
+
+def test_semantic_scholar_citation_evidence_requires_tavily_client() -> None:
+    assert semantic_scholar_citation_evidence(
+        title="Example Paper",
+        web_search=object(),
+        timeout_seconds=3.0,
+        http_get=lambda **_: None,
+    ) is None
 
 
 def test_citation_ranking_format_refuses_local_heuristic_without_web() -> None:
