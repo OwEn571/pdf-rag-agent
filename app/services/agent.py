@@ -322,7 +322,7 @@ class ResearchAssistantAgentV4(
         final_payload = {k: v for k, v in result.items() if k != "answer"}
         answer_was_streamed = any(item.get("event") == "answer_delta" for item in emitted_events)
         if not answer_was_streamed:
-            for chunk in self._chunk_text(str(result.get("answer", "")), size=28):
+            for chunk in chunk_text(str(result.get("answer", "")), size=28):
                 yield {"event": "answer_delta", "data": {"text": chunk}}
         yield {"event": "final", "data": final_payload | {"answer": result.get("answer", "")}}
 
@@ -387,7 +387,7 @@ class ResearchAssistantAgentV4(
         emit: Callable[[str, dict[str, Any]], None],
     ) -> None:
         state["answer"] = answer
-        for chunk in self._chunk_text(str(answer or ""), size=96):
+        for chunk in chunk_text(str(answer or ""), size=96):
             emit("answer_delta", {"text": chunk})
 
     @staticmethod
@@ -5625,7 +5625,3 @@ class ResearchAssistantAgentV4(
         if contract.targets and goals & {"definition", "entity_type", "mechanism", "figure_conclusion", "answer", "general_answer"}:
             return f"当前语料里还没有稳定定位到与 `{contract.targets[0]}` 直接相关的证据。你可以指定论文、上下文，或换一种问法再试一次。"
         return "我需要更多上下文来确定你当前要继续的研究任务。"
-
-    @staticmethod
-    def _chunk_text(text: str, *, size: int) -> list[str]:
-        return chunk_text(text, size=size)

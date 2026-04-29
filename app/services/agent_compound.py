@@ -10,6 +10,7 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
+from app.services.evidence_presentation import chunk_text
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -75,7 +76,7 @@ def run_compound_query_if_needed(
         if not text:
             return
         answer_parts.append(text)
-        for chunk in agent._chunk_text(text, size=96):
+        for chunk in chunk_text(text, size=96):
             emit("answer_delta", {"text": chunk})
 
     for index, sub_contract in enumerate(subcontracts, start=1):
