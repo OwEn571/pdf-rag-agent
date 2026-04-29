@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.followup_relationship_intents import (
+    FOLLOWUP_RELATIONSHIP_MARKERS,
     followup_relationship_recheck_requested,
     followup_relevance_score,
     has_followup_domain_signal,
@@ -9,6 +10,25 @@ from app.services.followup_relationship_intents import (
     has_followup_support_relation_signal,
     target_relation_cue_near_text,
 )
+from app.services.intent_marker_matching import query_matches_any
+
+
+def test_followup_relationship_markers_use_centralized_profiles() -> None:
+    assert query_matches_any(
+        "strict follow-up",
+        "strict follow-up",
+        FOLLOWUP_RELATIONSHIP_MARKERS["recheck"],
+    )
+    assert query_matches_any(
+        "builds on",
+        "buildson",
+        FOLLOWUP_RELATIONSHIP_MARKERS["target_relation"],
+    )
+    assert not query_matches_any(
+        "generic retrieval",
+        "genericretrieval",
+        FOLLOWUP_RELATIONSHIP_MARKERS["seed_intro"],
+    )
 
 
 def test_followup_relationship_recheck_requested_detects_strict_followups() -> None:
