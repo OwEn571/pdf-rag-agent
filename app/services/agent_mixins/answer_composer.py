@@ -17,7 +17,7 @@ from app.domain.models import (
     SessionContext,
     VerificationReport,
 )
-from app.services.evidence_presentation import extract_topology_terms
+from app.services.evidence_presentation import claim_evidence_ids, extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.zotero_sqlite import ZoteroSQLiteReader
 
@@ -47,7 +47,7 @@ class AnswerComposerMixin:
             return self._clarification_question(contract, session or SessionContext(session_id="clarify")), []
         if verification.status == "retry":
             return self._compose_retry_answer(contract=contract, verification=verification, claims=claims), []
-        citations = self._citations_from_doc_ids(self._claim_evidence_ids(claims), evidence)
+        citations = self._citations_from_doc_ids(claim_evidence_ids(claims), evidence)
         if not citations and papers:
             fallback_doc_ids = [doc_id for paper in papers[:2] for doc_id in paper.doc_ids[:1]]
             citations = self._citations_from_doc_ids(fallback_doc_ids, evidence)
