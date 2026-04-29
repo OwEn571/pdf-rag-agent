@@ -16,7 +16,7 @@ from app.services.schema_claim_helpers import (
     schema_claim_system_prompt,
     should_use_schema_claim_solver,
 )
-from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
+from app.services.solver_goal_helpers import append_unique_claims, claim_goals, fallback_goals_from_query, looks_like_metric_goal
 from app.services.topology_recommendation_helpers import (
     is_unusable_topology_recommendation_text,
     topology_discovery_claim,
@@ -106,42 +106,34 @@ class SolverPipelineMixin:
         goals = self._claim_goals(contract=contract, plan=plan)
         claims: list[Claim] = []
 
-        def extend_once(new_claims: list[Claim]) -> None:
-            existing = {(claim.claim_type, claim.entity, claim.value) for claim in claims}
-            for claim in new_claims:
-                key = (claim.claim_type, claim.entity, claim.value)
-                if key not in existing:
-                    existing.add(key)
-                    claims.append(claim)
-
         if goals & {"paper_title", "year", "origin"}:
-            extend_once(self._solve_origin_lookup_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_origin_lookup_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if "formula" in goals:
-            extend_once(self._solve_formula(contract=contract, papers=papers, evidence=evidence))
+            append_unique_claims(claims, self._solve_formula(contract=contract, papers=papers, evidence=evidence))
         if goals & {"followup_papers", "candidate_relationship", "strict_followup"}:
-            extend_once(self._solve_followup_research(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_followup_research(contract=contract, papers=papers, evidence=evidence, session=session))
         if "figure_conclusion" in goals or "figure" in contract.required_modalities:
-            extend_once(self._solve_figure(contract=contract, papers=papers, evidence=evidence))
+            append_unique_claims(claims, self._solve_figure(contract=contract, papers=papers, evidence=evidence))
         if "recommended_papers" in goals:
-            extend_once(self._solve_paper_recommendation_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_paper_recommendation_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if goals & {"best_topology", "langgraph_recommendation"}:
-            extend_once(self._solve_topology_recommendation_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_topology_recommendation_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if goals & {"relevant_papers", "topology_types"}:
-            extend_once(self._solve_topology_discovery_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_topology_discovery_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if goals & {"summary", "results", "key_findings"}:
-            extend_once(self._solve_paper_summary_results_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_paper_summary_results_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if "reward_model_requirement" in goals:
-            extend_once(self._solve_default_text_answer(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_default_text_answer(contract=contract, papers=papers, evidence=evidence, session=session))
         if goals & {"entity_type", "role_in_context"}:
-            extend_once(self._solve_entity_definition_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_entity_definition_text(contract=contract, papers=papers, evidence=evidence, session=session))
         elif goals & {"definition", "mechanism", "examples"}:
-            extend_once(self._solve_concept_definition_text(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_concept_definition_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if goals & {"metric_value", "setting"}:
-            extend_once(self._solve_table(contract=contract, papers=papers, evidence=evidence))
+            append_unique_claims(claims, self._solve_table(contract=contract, papers=papers, evidence=evidence))
             if not any(claim.claim_type == "metric_value" for claim in claims):
-                extend_once(self._solve_metric_context_text(contract=contract, papers=papers, evidence=evidence, session=session))
+                append_unique_claims(claims, self._solve_metric_context_text(contract=contract, papers=papers, evidence=evidence, session=session))
         if not claims:
-            extend_once(self._solve_default_text_answer(contract=contract, papers=papers, evidence=evidence, session=session))
+            append_unique_claims(claims, self._solve_default_text_answer(contract=contract, papers=papers, evidence=evidence, session=session))
         return claims
 
     @staticmethod

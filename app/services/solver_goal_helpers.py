@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import re
 
-from app.domain.models import QueryContract, ResearchPlan
+from app.domain.models import Claim, QueryContract, ResearchPlan
+
+
+def append_unique_claims(claims: list[Claim], new_claims: list[Claim]) -> None:
+    existing = {(claim.claim_type, claim.entity, claim.value) for claim in claims}
+    for claim in new_claims:
+        key = (claim.claim_type, claim.entity, claim.value)
+        if key not in existing:
+            existing.add(key)
+            claims.append(claim)
 
 
 def claim_goals(*, contract: QueryContract, plan: ResearchPlan) -> set[str]:

@@ -1,7 +1,21 @@
 from __future__ import annotations
 
-from app.domain.models import QueryContract, ResearchPlan
-from app.services.solver_goal_helpers import claim_goals, fallback_goals_from_query, looks_like_metric_goal
+from app.domain.models import Claim, QueryContract, ResearchPlan
+from app.services.solver_goal_helpers import append_unique_claims, claim_goals, fallback_goals_from_query, looks_like_metric_goal
+
+
+def test_append_unique_claims_deduplicates_by_type_entity_and_value() -> None:
+    claims = [Claim(claim_type="summary", entity="AlignX", value="main result")]
+
+    append_unique_claims(
+        claims,
+        [
+            Claim(claim_type="summary", entity="AlignX", value="main result"),
+            Claim(claim_type="summary", entity="AlignX", value="second result"),
+        ],
+    )
+
+    assert [claim.value for claim in claims] == ["main result", "second result"]
 
 
 def test_fallback_goals_detects_origin_lookup() -> None:
