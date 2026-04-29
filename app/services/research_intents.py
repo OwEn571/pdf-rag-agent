@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
-
-MarkerProfile = tuple[str, ...]
+from app.services.intent_marker_matching import (
+    MarkerProfile,
+    normalized_query_text,
+    query_matches_any,
+)
 
 ORIGIN_LOOKUP_MARKERS: MarkerProfile = (
     "最先",
@@ -119,12 +120,7 @@ ROUTER_WEB_EXTRA_MARKERS: MarkerProfile = ("当前", "现在", "citation")
 
 
 def _normalized_query_text(query: str) -> tuple[str, str]:
-    normalized = " ".join(str(query or "").lower().split())
-    return normalized, normalized.replace(" ", "")
-
-
-def query_matches_any(lowered: str, compact: str, markers: Iterable[str]) -> bool:
-    return any(marker in lowered or marker in compact for marker in markers)
+    return normalized_query_text(query)
 
 
 def looks_like_origin_lookup_query(query: str) -> bool:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from app.domain.models import QueryContract, SessionContext, SessionTurn
+from app.services.intent_marker_matching import query_matches_any
 from app.services.library_intents import (
+    LIBRARY_INTENT_MARKERS,
     citation_ranking_has_library_context,
     is_citation_ranking_query,
     is_library_count_query,
@@ -20,6 +22,16 @@ def test_library_status_and_recommendation_intents_share_classifier() -> None:
     assert not is_scoped_library_recommendation_query("再推荐一篇别的")
     assert library_query_prefers_previous_candidates("再推荐一篇")
     assert not library_query_prefers_previous_candidates("全库里推荐一篇")
+
+
+def test_library_intent_markers_use_centralized_profiles() -> None:
+    assert query_matches_any("你的论文库", "你的论文库", LIBRARY_INTENT_MARKERS["scope"])
+    assert query_matches_any(
+        "citation count 排序",
+        "citationcount排序",
+        LIBRARY_INTENT_MARKERS["citation_ranking"],
+    )
+    assert not query_matches_any("随便聊聊", "随便聊聊", LIBRARY_INTENT_MARKERS["count"])
 
 
 def test_citation_ranking_uses_recent_library_context() -> None:
