@@ -112,6 +112,7 @@ from app.services.library_intents import (
     library_query_prefers_previous_candidates,
 )
 from app.services.memory_artifact_helpers import answer_from_recent_tool_artifact_reference
+from app.services.memory_intents import is_memory_comparison_query
 from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
@@ -610,15 +611,6 @@ class ResearchAssistantAgentV4(
             for turn in session.turns[-3:]
         )
         return is_formula_interpretation_followup_query(clean_query, had_formula_context=had_formula_context)
-
-    @staticmethod
-    def _is_language_preference_followup(*, clean_query: str, session: SessionContext) -> bool:
-        return is_language_preference_followup(clean_query, has_turns=bool(session.turns))
-
-    @staticmethod
-    def _is_comparison_query(query: str) -> bool:
-        normalized = " ".join(str(query or "").lower().split())
-        return any(token in normalized for token in ["区别", "比较", "对比", "difference", "compare", "vs"])
 
     def _active_memory_bindings(self, session: SessionContext) -> list[dict[str, Any]]:
         bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
@@ -2122,7 +2114,7 @@ class ResearchAssistantAgentV4(
                 continuation_mode="followup",
                 notes=["agent_tool", "formula_interpretation_followup"],
             )
-        if self._is_language_preference_followup(clean_query=clean_query, session=session):
+        if is_language_preference_followup(clean_query, has_turns=bool(session.turns)):
             active = session.effective_active_research()
             return QueryContract(
                 clean_query=clean_query,
@@ -2148,7 +2140,7 @@ class ResearchAssistantAgentV4(
                 targets=targets,
                 requested_fields=["comparison", "synthesis"],
                 required_modalities=[],
-                answer_shape="table" if self._is_comparison_query(clean_query) else "narrative",
+                answer_shape="table" if is_memory_comparison_query(normalize_lookup_text(clean_query)) else "narrative",
                 precision_requirement="high",
                 continuation_mode="followup",
                 notes=["agent_tool", "conversation_memory_synthesis"],
@@ -2290,10 +2282,6 @@ class ResearchAssistantAgentV4(
 
         return session_llm_history_messages(session, max_turns=max_turns, answer_limit=answer_limit)
 
-    @staticmethod
-    def _truncate_context_text(text: str, *, limit: int) -> str:
-        return truncate_context_text(text, limit=limit)
-
     def _remember_research_outcome(
         self,
         *,
@@ -2346,7 +2334,7 @@ class ResearchAssistantAgentV4(
                 "requested_fields": list(contract.requested_fields),
                 "required_modalities": list(contract.required_modalities),
                 "clean_query": contract.clean_query,
-                "answer_preview": self._truncate_context_text(answer, limit=900),
+                "answer_preview": truncate_context_text(answer, limit=900),
                 "evidence_ids": evidence_ids or [item.doc_id for item in evidence if item.paper_id == paper.paper_id][:4],
                 "support_titles": support_titles[:4],
             }
@@ -2357,7 +2345,7 @@ class ResearchAssistantAgentV4(
             "requested_fields": list(contract.requested_fields),
             "titles": [paper.title for paper in papers[:4]],
             "clean_query": contract.clean_query,
-            "answer_preview": self._truncate_context_text(answer, limit=1200),
+            "answer_preview": truncate_context_text(answer, limit=1200),
         }
         if any(claim.claim_type == "followup_research" for claim in claims):
             relationship = self._followup_relationship_memory(contract=contract, claims=claims, papers=papers, answer=answer)
@@ -2411,7 +2399,7 @@ class ResearchAssistantAgentV4(
             "relation_type": str(selected_row.get("relation_type", "") or "").strip(),
             "strict_followup": bool(selected_row.get("strict_followup", False)),
             "clean_query": contract.clean_query,
-            "answer_preview": self._truncate_context_text(answer, limit=900),
+            "answer_preview": truncate_context_text(answer, limit=900),
         }
 
     def _remember_compound_outcome(
@@ -2448,7 +2436,7 @@ class ResearchAssistantAgentV4(
                     "targets": list(contract.targets),
                     "requested_fields": list(contract.requested_fields),
                     "clean_query": contract.clean_query,
-                    "answer_preview": self._truncate_context_text(str(result.get("answer", "")), limit=900),
+                    "answer_preview": truncate_context_text(str(result.get("answer", "")), limit=900),
                     "citation_titles": [citation.title for citation in citations[:4]],
                 }
             )
@@ -2478,7 +2466,7 @@ class ResearchAssistantAgentV4(
             "targets": list(contract.targets),
             "requested_fields": list(contract.requested_fields),
             "answer_shape": contract.answer_shape,
-            "answer_preview": self._truncate_context_text(answer, limit=1800),
+            "answer_preview": truncate_context_text(answer, limit=1800),
         }
         if isinstance(artifact, dict) and artifact:
             record["artifact"] = artifact
@@ -2505,7 +2493,7 @@ class ResearchAssistantAgentV4(
                 if value is None or isinstance(value, (int, float)):
                     compact_row[str(key)] = value
                     continue
-                compact_row[str(key)] = self._truncate_context_text(str(value), limit=900)
+                compact_row[str(key)] = truncate_context_text(str(value), limit=900)
             item = {
                 "ordinal": index,
                 "row": compact_row,
@@ -2517,7 +2505,7 @@ class ResearchAssistantAgentV4(
         return {
             "type": "tabular_sql_result",
             "tool": tool,
-            "sql": self._truncate_context_text(str(result.get("sql", "") or ""), limit=1200),
+            "sql": truncate_context_text(str(result.get("sql", "") or ""), limit=1200),
             "columns": [str(item) for item in list(result.get("columns", []) or [])],
             "row_count": int(result.get("row_count", len(rows)) or 0),
             "truncated": bool(result.get("truncated", False)),
@@ -3286,13 +3274,13 @@ class ResearchAssistantAgentV4(
             "paper_id": paper_id,
             "title": str(option.get("title", "") or "").strip(),
             "year": str(option.get("year", "") or "").strip(),
-            "snippet": self._truncate_context_text(str(option.get("snippet", "") or ""), limit=420),
+            "snippet": truncate_context_text(str(option.get("snippet", "") or ""), limit=420),
             "match_reason": str(option.get("match_reason", "") or (paper.match_reason if paper is not None else "") or "").strip(),
             "evidence_relation": str(option.get("source_relation", "") or option.get("source", "") or "").strip(),
             "source_requested_fields": clarification_string_list(option.get("source_requested_fields")),
             "source_answer_slots": clarification_string_list(option.get("source_answer_slots")),
-            "paper_aliases": self._truncate_context_text(str(metadata.get("aliases", "") or ""), limit=220),
-            "paper_summary": self._truncate_context_text(
+            "paper_aliases": truncate_context_text(str(metadata.get("aliases", "") or ""), limit=220),
+            "paper_summary": truncate_context_text(
                 str(
                     metadata.get("paper_card_text", "")
                     or metadata.get("generated_summary", "")
@@ -3500,11 +3488,11 @@ class ResearchAssistantAgentV4(
             payload["display_title"] = str(payload.get("display_title", "") or payload.get("title", "") or "").strip()
             if option_id == selected_id:
                 payload["display_label"] = str(payload.get("display_label", "") or "推荐候选").strip()
-                payload["display_reason"] = self._truncate_context_text(str(decision.reason or ""), limit=180)
+                payload["display_reason"] = truncate_context_text(str(decision.reason or ""), limit=180)
                 payload["judge_recommended"] = True
                 payload["disambiguation_confidence"] = round(float(decision.confidence), 3)
             elif option_id in rejected_reasons:
-                payload["display_reason"] = self._truncate_context_text(rejected_reasons[option_id], limit=180)
+                payload["display_reason"] = truncate_context_text(rejected_reasons[option_id], limit=180)
             annotated.append(payload)
         annotated.sort(
             key=lambda item: (
@@ -3551,7 +3539,7 @@ class ResearchAssistantAgentV4(
             notes.append(f"selected_paper_id={paper_id}")
         if decision is not None:
             notes.append(f"disambiguation_judge_confidence={float(decision.confidence):.3f}")
-            reason = self._truncate_context_text(str(decision.reason or ""), limit=220)
+            reason = truncate_context_text(str(decision.reason or ""), limit=220)
             if reason:
                 notes.append(f"disambiguation_judge_reason={reason}")
         return contract.model_copy(update={"notes": list(dict.fromkeys(notes))})
@@ -3857,13 +3845,13 @@ class ResearchAssistantAgentV4(
         payload["kind"] = resolved_kind
         payload["target"] = resolved_target
         payload["label"] = label
-        payload["description"] = self._truncate_context_text(description, limit=260) if description else ""
+        payload["description"] = truncate_context_text(description, limit=260) if description else ""
         payload.setdefault("meaning", meaning or label)
         payload.setdefault("title", title)
         payload.setdefault("year", year)
         payload["display_title"] = str(payload.get("display_title", "") or title).strip()
         payload["display_label"] = str(payload.get("display_label", "") or "").strip()
-        payload["display_reason"] = self._truncate_context_text(str(payload.get("display_reason", "") or ""), limit=220)
+        payload["display_reason"] = truncate_context_text(str(payload.get("display_reason", "") or ""), limit=220)
         if "disambiguation_confidence" in payload:
             try:
                 payload["disambiguation_confidence"] = round(float(payload.get("disambiguation_confidence") or 0.0), 3)
