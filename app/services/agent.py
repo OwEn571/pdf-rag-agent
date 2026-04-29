@@ -49,7 +49,6 @@ from app.services.agent_runtime_helpers import (
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
-    ambiguity_option_matches_context,
     acronym_evidence_from_corpus as build_acronym_evidence_from_corpus,
     acronym_options_from_evidence as build_acronym_options_from_evidence,
     ambiguity_options_from_notes,
@@ -66,8 +65,8 @@ from app.services.clarification_intents import (
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
     disambiguation_missing_fields,
+    finalize_acronym_disambiguation_options,
     judge_allows_auto_resolve,
-    normalize_clarification_options,
     next_clarification_attempt,
     remember_clarification_attempt,
     reset_clarification_tracking,
@@ -1667,28 +1666,11 @@ class ResearchAssistantAgentV4(
             if len(corpus_options) > len(options):
                 options = corpus_options
         excluded_titles = self._excluded_focus_titles(session=session, contract=contract)
-        if excluded_titles:
-            options = [
-                option
-                for option in options
-                if normalize_lookup_text(str(option.get("title", ""))) not in excluded_titles
-            ]
-        if len(options) < 2:
-            return []
-        context_targets = [item for item in contract.targets[1:] if str(item).strip()]
-        if context_targets:
-            matched = [option for option in options if ambiguity_option_matches_context(option=option, context_targets=context_targets)]
-            if len(matched) <= 1:
-                return []
-            options = matched
-        if "exclude_previous_focus" in contract.notes and len(options) <= 1:
-            return []
-        return normalize_clarification_options(
-            options[:4],
+        return finalize_acronym_disambiguation_options(
+            options=options,
             contract=contract,
             target=target,
-            kind="acronym_meaning",
-            source="evidence_disambiguation",
+            excluded_titles=excluded_titles,
         )
 
     def _judge_disambiguation_options(

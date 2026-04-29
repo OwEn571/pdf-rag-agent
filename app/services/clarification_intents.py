@@ -626,6 +626,42 @@ def acronym_evidence_from_corpus(
     return evidence[:limit]
 
 
+def finalize_acronym_disambiguation_options(
+    *,
+    options: list[dict[str, Any]],
+    contract: QueryContract,
+    target: str,
+    excluded_titles: set[str],
+) -> list[dict[str, Any]]:
+    if excluded_titles:
+        options = [
+            option
+            for option in options
+            if normalize_lookup_text(str(option.get("title", ""))) not in excluded_titles
+        ]
+    if len(options) < 2:
+        return []
+    context_targets = [item for item in contract.targets[1:] if str(item).strip()]
+    if context_targets:
+        matched = [
+            option
+            for option in options
+            if ambiguity_option_matches_context(option=option, context_targets=context_targets)
+        ]
+        if len(matched) <= 1:
+            return []
+        options = matched
+    if "exclude_previous_focus" in contract.notes and len(options) <= 1:
+        return []
+    return normalize_clarification_options(
+        options[:4],
+        contract=contract,
+        target=target,
+        kind="acronym_meaning",
+        source="evidence_disambiguation",
+    )
+
+
 def normalize_clarification_option(
     option: dict[str, Any],
     *,

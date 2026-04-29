@@ -32,6 +32,7 @@ from app.services.clarification_intents import (
     disambiguation_judge_summary,
     disambiguation_missing_fields,
     extract_acronym_expansion_from_text,
+    finalize_acronym_disambiguation_options,
     judge_allows_auto_resolve,
     looks_like_clarification_choice_text,
     normalize_acronym_meaning,
@@ -419,6 +420,30 @@ def test_acronym_evidence_from_corpus_scores_expansions_and_formula_hints() -> N
     assert [item.doc_id for item in evidence] == ["b1"]
     assert evidence[0].score == 9.0
     assert evidence[0].snippet.startswith("Preference-Bridged Alignment")
+
+
+def test_finalize_acronym_disambiguation_options_filters_context_and_excluded_titles() -> None:
+    options = [
+        {"paper_id": "p1", "title": "Old Focus", "meaning": "First", "context_text": "First PBA"},
+        {"paper_id": "p2", "title": "AlignX", "meaning": "Preference Bridged Alignment", "context_text": "PPAIR benchmark"},
+        {"paper_id": "p3", "title": "Other", "meaning": "Policy Based Alignment", "context_text": "PPAIR comparison"},
+    ]
+
+    finalized = finalize_acronym_disambiguation_options(
+        options=options,
+        contract=QueryContract(clean_query="PBA in PPAIR", targets=["PBA", "PPAIR"]),
+        target="PBA",
+        excluded_titles={"old focus"},
+    )
+
+    assert [item["paper_id"] for item in finalized] == ["p2", "p3"]
+    assert all(item["schema_version"] == CLARIFICATION_OPTION_SCHEMA_VERSION for item in finalized)
+    assert finalize_acronym_disambiguation_options(
+        options=options[:2],
+        contract=QueryContract(clean_query="PBA in missing context", targets=["PBA", "missing"]),
+        target="PBA",
+        excluded_titles=set(),
+    ) == []
 
 
 def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
