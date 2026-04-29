@@ -107,3 +107,24 @@ def test_diff_agent_traces_reports_ask_human_question_changes() -> None:
     assert diff.ok is False
     assert "选哪篇" in diff.differences[0]
     assert "确认哪个公式" in diff.differences[0]
+
+
+def test_diff_agent_traces_reports_todo_update_changes() -> None:
+    expected = [
+        {
+            "event": "todo_update",
+            "data": {"type": "todo_update", "items": [{"id": "1", "text": "查找表格证据", "status": "doing"}]},
+        }
+    ]
+    actual = [
+        {
+            "event": "todo_update",
+            "data": {"type": "todo_update", "items": [{"id": "1", "text": "解释指标定义", "status": "pending"}]},
+        }
+    ]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is False
+    assert "查找表格证据" in diff.differences[0]
+    assert "解释指标定义" in diff.differences[0]

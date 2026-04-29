@@ -92,6 +92,8 @@ def _event_signature(*, event: str, data: dict[str, Any]) -> dict[str, Any]:
     if event == "ask_human":
         item["question"] = str(data.get("question", "") or "")[:200]
         item["options_count"] = len(data.get("options", [])) if isinstance(data.get("options"), list) else 0
+    if event == "todo_update":
+        item["todo_items"] = _todo_items_signature(data.get("items"))
     if event == "final":
         item["execution_nodes"] = _execution_nodes(data.get("execution_steps"))
         if "answer_chars" in data:
@@ -127,6 +129,21 @@ def _execution_nodes(value: Any) -> list[str]:
             if node:
                 nodes.append(node)
     return nodes
+
+
+def _todo_items_signature(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, str]] = []
+    for raw_item in value[:12]:
+        if not isinstance(raw_item, dict):
+            continue
+        item_id = str(raw_item.get("id", "") or "").strip()
+        text = " ".join(str(raw_item.get("text", "") or "").split())[:160]
+        status = str(raw_item.get("status", "") or "").strip()
+        if item_id or text or status:
+            items.append({"id": item_id, "text": text, "status": status})
+    return items
 
 
 def _answer_chars_bucket(value: Any) -> str:
