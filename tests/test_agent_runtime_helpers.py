@@ -36,6 +36,7 @@ from app.services.agent_runtime_helpers import (
     record_tool_loop_ready,
     planner_next_action,
     prefer_selected_clarification_paper,
+    refresh_selected_ambiguity_materials,
     research_runtime_actions,
     research_runtime_state,
     retry_research_limits,
@@ -367,6 +368,56 @@ def test_runtime_helpers_prepare_retry_research_materials_entity_path_grounds_ca
     assert materials.evidence == evidence
     assert entity_limits == [72]
     assert "role_in_context" in materials.goals
+
+
+def test_runtime_helpers_refresh_selected_ambiguity_materials_reuses_existing_evidence() -> None:
+    paper = CandidatePaper(paper_id="p2", title="Selected")
+    evidence = [
+        EvidenceBlock(doc_id="e1", paper_id="p1", title="Other", file_path="", page=1, block_type="page_text", snippet="other"),
+        EvidenceBlock(doc_id="e2", paper_id="p2", title="Selected", file_path="", page=1, block_type="page_text", snippet="selected"),
+    ]
+
+    refresh = refresh_selected_ambiguity_materials(
+        selected={"paper_id": "p2"},
+        contract=QueryContract(clean_query="DPO", targets=["DPO"]),
+        plan=ResearchPlan(evidence_limit=8),
+        candidate_papers=[paper],
+        existing_evidence=evidence,
+        excluded_titles=set(),
+        paper_lookup=lambda _: None,
+        search_concept_evidence=lambda *_: [],
+        expand_evidence=lambda *_: [],
+    )
+
+    assert refresh is not None
+    assert refresh.selected_papers == [paper]
+    assert [item.doc_id for item in refresh.evidence] == ["e2"]
+    assert refresh.evidence_refreshed is False
+
+
+def test_runtime_helpers_refresh_selected_ambiguity_materials_fetches_missing_evidence() -> None:
+    fetched = [
+        EvidenceBlock(doc_id="e2", paper_id="p2", title="Selected", file_path="", page=1, block_type="page_text", snippet="selected")
+    ]
+    calls: list[tuple[list[str], int]] = []
+
+    refresh = refresh_selected_ambiguity_materials(
+        selected={"paper_id": "p2"},
+        contract=QueryContract(clean_query="DPO", targets=["DPO"], requested_fields=["definition"]),
+        plan=ResearchPlan(evidence_limit=8),
+        candidate_papers=[],
+        existing_evidence=[],
+        excluded_titles=set(),
+        paper_lookup=lambda paper_id: CandidatePaper(paper_id=paper_id, title="Selected"),
+        search_concept_evidence=lambda _query, _contract, paper_ids, limit: calls.append((paper_ids, limit)) or fetched,
+        expand_evidence=lambda *_: [],
+    )
+
+    assert refresh is not None
+    assert [item.paper_id for item in refresh.selected_papers] == ["p2"]
+    assert refresh.evidence == fetched
+    assert refresh.evidence_refreshed is True
+    assert calls == [(["p2"], 8)]
 
 
 def test_runtime_helpers_search_agent_evidence_concept_fallback_filters_selection_and_excluded() -> None:

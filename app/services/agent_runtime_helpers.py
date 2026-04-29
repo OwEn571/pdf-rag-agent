@@ -65,6 +65,14 @@ class RetryResearchMaterials:
     goals: set[str]
 
 
+@dataclass(frozen=True)
+class SelectedAmbiguityRefresh:
+    paper_id: str
+    selected_papers: list[CandidatePaper]
+    evidence: list[EvidenceBlock]
+    evidence_refreshed: bool
+
+
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "contract": contract,
@@ -433,6 +441,61 @@ def prepare_retry_research_materials(
         evidence=broader_evidence,
         limits=limits,
         goals=goals,
+    )
+
+
+def refresh_selected_ambiguity_materials(
+    *,
+    selected: dict[str, Any],
+    contract: QueryContract,
+    plan: ResearchPlan,
+    candidate_papers: list[CandidatePaper],
+    existing_evidence: list[EvidenceBlock],
+    excluded_titles: set[str],
+    paper_lookup: PaperLookupFn,
+    search_concept_evidence: ConceptEvidenceSearchFn,
+    expand_evidence: ExpandEvidenceFn,
+) -> SelectedAmbiguityRefresh | None:
+    paper_id = str(selected.get("paper_id", "") or "").strip()
+    if not paper_id:
+        return None
+    selected_papers = [paper for paper in candidate_papers if paper.paper_id == paper_id]
+    if not selected_papers:
+        paper = paper_lookup(paper_id)
+        selected_papers = [paper] if paper is not None else []
+    evidence = [item for item in existing_evidence if item.paper_id == paper_id]
+    evidence_refreshed = False
+    if not evidence:
+        evidence_query = evidence_query_text(contract)
+        if should_use_concept_evidence(contract):
+            evidence = search_concept_evidence(
+                evidence_query,
+                contract,
+                [paper_id],
+                plan.evidence_limit,
+            )
+            if not evidence:
+                evidence = expand_evidence(
+                    [paper_id],
+                    evidence_query,
+                    contract,
+                    plan.evidence_limit,
+                )
+        else:
+            evidence = expand_evidence(
+                [paper_id],
+                evidence_query,
+                contract,
+                plan.evidence_limit,
+            )
+        if excluded_titles:
+            evidence = filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
+        evidence_refreshed = True
+    return SelectedAmbiguityRefresh(
+        paper_id=paper_id,
+        selected_papers=selected_papers[:1],
+        evidence=evidence,
+        evidence_refreshed=evidence_refreshed,
     )
 
 

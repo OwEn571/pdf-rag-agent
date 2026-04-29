@@ -43,6 +43,7 @@ from app.services.agent_runtime_helpers import (
     filter_evidence_by_excluded_titles,
     prepare_retry_research_materials,
     retry_research_limits,
+    refresh_selected_ambiguity_materials,
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
@@ -153,11 +154,9 @@ from app.services.memory_followup_answers import (
 )
 from app.services.pdf_rendering import render_pdf_page_image_data_url
 from app.services.query_shaping import (
-    evidence_query_text,
     extract_targets,
     is_short_acronym,
     paper_query_text,
-    should_use_concept_evidence,
     should_use_web_search,
 )
 from app.services.research_planning import (
@@ -1748,55 +1747,47 @@ class ResearchAssistantAgentV4(
         emit: Callable[[str, dict[str, Any]], None],
         execution_steps: list[dict[str, Any]],
     ) -> None:
-        paper_id = str(selected.get("paper_id", "") or "").strip()
-        if not paper_id:
-            return
-        contract: QueryContract = state["contract"]
-        plan: ResearchPlan = state["plan"]
-        excluded_titles: set[str] = state["excluded_titles"]
         candidate_pool: list[CandidatePaper] = [
             *list(state.get("screened_papers") or []),
             *list(state.get("candidate_papers") or []),
         ]
-        selected_papers = [paper for paper in candidate_pool if paper.paper_id == paper_id]
-        if not selected_papers:
-            paper = self._candidate_from_paper_id(paper_id)
-            selected_papers = [paper] if paper is not None else []
-        if selected_papers:
-            state["screened_papers"] = selected_papers[:1]
+        contract: QueryContract = state["contract"]
+        plan: ResearchPlan = state["plan"]
+        excluded_titles: set[str] = state["excluded_titles"]
+        refresh = refresh_selected_ambiguity_materials(
+            selected=selected,
+            contract=contract,
+            plan=plan,
+            candidate_papers=candidate_pool,
+            existing_evidence=list(state.get("evidence") or []),
+            excluded_titles=excluded_titles,
+            paper_lookup=self._candidate_from_paper_id,
+            search_concept_evidence=lambda query, search_contract, paper_ids, limit: self.retriever.search_concept_evidence(
+                query=query,
+                contract=search_contract,
+                paper_ids=paper_ids,
+                limit=limit,
+            ),
+            expand_evidence=lambda paper_ids, query, search_contract, limit: self.retriever.expand_evidence(
+                paper_ids=paper_ids,
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+        )
+        if refresh is None:
+            return
+        if refresh.selected_papers:
+            state["screened_papers"] = refresh.selected_papers
             emit("screened_papers", {"count": len(state["screened_papers"]), "items": [item.model_dump() for item in state["screened_papers"]]})
-        evidence = [item for item in list(state.get("evidence") or []) if item.paper_id == paper_id]
-        if not evidence:
-            evidence_query = evidence_query_text(contract)
-            if should_use_concept_evidence(contract):
-                evidence = self.retriever.search_concept_evidence(
-                    query=evidence_query,
-                    contract=contract,
-                    paper_ids=[paper_id],
-                    limit=plan.evidence_limit,
-                )
-                if not evidence:
-                    evidence = self.retriever.expand_evidence(
-                        paper_ids=[paper_id],
-                        query=evidence_query,
-                        contract=contract,
-                        limit=plan.evidence_limit,
-                    )
-            else:
-                evidence = self.retriever.expand_evidence(
-                    paper_ids=[paper_id],
-                    query=evidence_query,
-                    contract=contract,
-                    limit=plan.evidence_limit,
-                )
-            if excluded_titles:
-                evidence = self._filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
+        evidence = refresh.evidence
+        if refresh.evidence_refreshed:
             self._record_agent_observation(
                 emit=emit,
                 execution_steps=execution_steps,
                 tool="search_corpus",
                 summary=f"auto_resolved_evidence={len(evidence)}",
-                payload={"stage": "search_evidence", "selected_paper_id": paper_id, "evidence_count": len(evidence)},
+                payload={"stage": "search_evidence", "selected_paper_id": refresh.paper_id, "evidence_count": len(evidence)},
             )
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
