@@ -4,6 +4,9 @@ from collections.abc import Callable
 
 from app.domain.models import CandidatePaper, Claim
 
+PaperSummaryReader = Callable[[str], str]
+PaperEvidenceIds = Callable[[str, int], list[str]]
+
 
 def paper_summary_claim(
     *,
@@ -29,6 +32,32 @@ def paper_summary_claim(
         paper_ids=[paper.paper_id],
         confidence=0.82,
     )
+
+
+def paper_summary_claims(
+    *,
+    entity: str,
+    papers: list[CandidatePaper],
+    metric_lines: list[str],
+    summary_for_paper: PaperSummaryReader,
+    evidence_ids_for_paper: PaperEvidenceIds,
+) -> list[Claim]:
+    claims: list[Claim] = []
+    for paper in papers[:4]:
+        summary_text = summary_for_paper(paper.paper_id)
+        evidence_ids = evidence_ids_for_paper(paper.paper_id, 4)
+        if not summary_text and not evidence_ids:
+            continue
+        claims.append(
+            paper_summary_claim(
+                entity=entity or paper.title,
+                paper=paper,
+                summary_text=summary_text,
+                metric_lines=metric_lines,
+                evidence_ids=evidence_ids,
+            )
+        )
+    return claims
 
 
 def paper_recommendation_claim(
@@ -79,3 +108,27 @@ def default_text_claim(
         paper_ids=[paper.paper_id],
         confidence=0.72,
     )
+
+
+def default_text_claims(
+    *,
+    entity: str,
+    papers: list[CandidatePaper],
+    summary_for_paper: PaperSummaryReader,
+    evidence_ids_for_paper: PaperEvidenceIds,
+) -> list[Claim]:
+    claims: list[Claim] = []
+    for paper in papers[:4]:
+        summary = summary_for_paper(paper.paper_id)
+        evidence_ids = evidence_ids_for_paper(paper.paper_id, 3)
+        if not summary and not evidence_ids:
+            continue
+        claims.append(
+            default_text_claim(
+                entity=entity or paper.title,
+                paper=paper,
+                summary=summary,
+                evidence_ids=evidence_ids,
+            )
+        )
+    return claims

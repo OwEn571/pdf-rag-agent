@@ -10,7 +10,7 @@ from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
-from app.services.paper_claim_helpers import default_text_claim, paper_recommendation_claim, paper_summary_claim
+from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
     schema_claim_human_prompt,
@@ -263,23 +263,13 @@ class SolverPipelineMixin:
             ]
             if focused:
                 papers = focused
-        claims: list[Claim] = []
-        metric_bits = self._extract_metric_lines(evidence)
-        for paper in papers[:4]:
-            summary_text = self._paper_summary_text(paper.paper_id)
-            evidence_ids = self._evidence_ids_for_paper(evidence, paper.paper_id, limit=4)
-            if not summary_text and not evidence_ids:
-                continue
-            claims.append(
-                paper_summary_claim(
-                    entity=contract.targets[0] if contract.targets else paper.title,
-                    paper=paper,
-                    summary_text=summary_text,
-                    metric_lines=metric_bits,
-                    evidence_ids=evidence_ids,
-                )
-            )
-        return claims
+        return paper_summary_claims(
+            entity=contract.targets[0] if contract.targets else "",
+            papers=papers,
+            metric_lines=self._extract_metric_lines(evidence),
+            summary_for_paper=self._paper_summary_text,
+            evidence_ids_for_paper=lambda paper_id, limit: self._evidence_ids_for_paper(evidence, paper_id, limit=limit),
+        )
 
     def _solve_paper_recommendation_text(
         self,
@@ -341,21 +331,12 @@ class SolverPipelineMixin:
     ) -> list[Claim]:
         if not papers:
             return []
-        claims: list[Claim] = []
-        for paper in papers[:4]:
-            summary = self._paper_summary_text(paper.paper_id)
-            evidence_ids = self._evidence_ids_for_paper(evidence, paper.paper_id, limit=3)
-            if not summary and not evidence_ids:
-                continue
-            claims.append(
-                default_text_claim(
-                    entity=contract.targets[0] if contract.targets else paper.title,
-                    paper=paper,
-                    summary=summary,
-                    evidence_ids=evidence_ids,
-                )
-            )
-        return claims
+        return default_text_claims(
+            entity=contract.targets[0] if contract.targets else "",
+            papers=papers,
+            summary_for_paper=self._paper_summary_text,
+            evidence_ids_for_paper=lambda paper_id, limit: self._evidence_ids_for_paper(evidence, paper_id, limit=limit),
+        )
 
     def _select_origin_paper(
         self,
