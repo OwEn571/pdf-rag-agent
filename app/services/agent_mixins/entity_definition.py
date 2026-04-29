@@ -7,6 +7,7 @@ from typing import Any
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
+from app.services.evidence_presentation import safe_year
 
 
 class EntityDefinitionMixin:
@@ -55,7 +56,7 @@ class EntityDefinitionMixin:
                     }
                 )
             )
-        grounded.sort(key=lambda item: (-item.score, self._safe_year(item.year), item.title))
+        grounded.sort(key=lambda item: (-item.score, safe_year(item.year), item.title))
         return grounded[: max(1, limit)] or candidates[: max(1, limit)]
 
     def _select_entity_supporting_paper(

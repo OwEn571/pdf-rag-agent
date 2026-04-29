@@ -4714,7 +4714,7 @@ class ResearchAssistantAgentV4(
     def _pick_origin_paper(papers: list[CandidatePaper]) -> CandidatePaper | None:
         if not papers:
             return None
-        ranked = sorted(papers, key=lambda item: (ResearchAssistantAgentV4._safe_year(item.year), -item.score))
+        ranked = sorted(papers, key=lambda item: (safe_year(item.year), -item.score))
         return ranked[0] if ranked else None
 
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
@@ -4793,7 +4793,7 @@ class ResearchAssistantAgentV4(
             for item in expanded:
                 pool.setdefault(item.paper_id, item)
         ranked = list(pool.values())
-        ranked.sort(key=lambda item: (-item.score, self._safe_year(item.year), item.title))
+        ranked.sort(key=lambda item: (-item.score, safe_year(item.year), item.title))
         return ranked
 
     def _rank_followup_candidates(
@@ -5088,7 +5088,7 @@ class ResearchAssistantAgentV4(
         seed_keywords = self._paper_keyword_set(seed_papers)
         seed_author_tokens = self._paper_author_tokens(seed_papers)
         target_text = " ".join(contract.targets)
-        seed_year = min((self._safe_year(item.year) for item in seed_papers), default=9999)
+        seed_year = min((safe_year(item.year) for item in seed_papers), default=9999)
         seed_ids = {item.paper_id for item in seed_papers}
         scored: list[tuple[float, CandidatePaper, dict[str, Any]]] = []
         for paper in self._filter_followup_candidates(contract=contract, candidates=candidates):
@@ -5100,7 +5100,7 @@ class ResearchAssistantAgentV4(
             if target_text and self._matches_target(haystack.lower(), target_text.lower()):
                 score += 1.2
             if seed_year < 9999:
-                year = self._safe_year(paper.year)
+                year = safe_year(paper.year)
                 if year >= seed_year:
                     score += 0.4 + min(0.5, max(0, year - seed_year) * 0.1)
             overlap = len(seed_keywords & self._paper_keyword_set([paper]))
@@ -5119,7 +5119,7 @@ class ResearchAssistantAgentV4(
             scored.append((score, paper, assessment))
         ranked = [
             (paper, assessment)
-            for _, paper, assessment in sorted(scored, key=lambda item: (-item[0], self._safe_year(item[1].year), item[1].title))
+            for _, paper, assessment in sorted(scored, key=lambda item: (-item[0], safe_year(item[1].year), item[1].title))
         ]
         results: list[dict[str, Any]] = []
         for paper, assessment in ranked[:10]:
@@ -5316,7 +5316,7 @@ class ResearchAssistantAgentV4(
                 score += 1.1
         if has_followup_seed_intro_signal(haystack):
             score += 1.2
-        year = self._safe_year(paper.year)
+        year = safe_year(paper.year)
         if year < 9999:
             score += max(0.0, (2100 - year) / 1000.0)
         return score
@@ -5625,10 +5625,6 @@ class ResearchAssistantAgentV4(
         if contract.targets and goals & {"definition", "entity_type", "mechanism", "figure_conclusion", "answer", "general_answer"}:
             return f"当前语料里还没有稳定定位到与 `{contract.targets[0]}` 直接相关的证据。你可以指定论文、上下文，或换一种问法再试一次。"
         return "我需要更多上下文来确定你当前要继续的研究任务。"
-
-    @staticmethod
-    def _safe_year(value: str) -> int:
-        return safe_year(value)
 
     @staticmethod
     def _chunk_text(text: str, *, size: int) -> list[str]:

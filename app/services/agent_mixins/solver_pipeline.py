@@ -16,6 +16,7 @@ from app.services.evidence_presentation import (
     extract_topology_terms,
     figure_fallback_summary,
     formula_terms,
+    safe_year,
 )
 from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
@@ -405,7 +406,7 @@ class SolverPipelineMixin:
                 intro_score += origin_helpers.origin_target_intro_score(paper_text, target_aliases)
                 score += origin_helpers.origin_target_definition_score(paper_text, target_aliases)
             scored.append((intro_score, score, paper))
-        scored.sort(key=lambda item: (-item[0], -item[1], self._safe_year(item[2].year), -item[2].score, item[2].title))
+        scored.sort(key=lambda item: (-item[0], -item[1], safe_year(item[2].year), -item[2].score, item[2].title))
         if scored and scored[0][0] > 0:
             return scored[0][2]
         return self._pick_origin_paper_with_intro_support(contract=contract, papers=candidate_pool)
@@ -435,7 +436,7 @@ class SolverPipelineMixin:
             if score <= 0:
                 continue
             candidates.append((score, paper.model_copy(update={"score": max(float(paper.score), score)})))
-        candidates.sort(key=lambda item: (-item[0], self._safe_year(item[1].year), item[1].title))
+        candidates.sort(key=lambda item: (-item[0], safe_year(item[1].year), item[1].title))
         return [paper for _, paper in candidates[:8]]
 
     def _pick_origin_paper_with_intro_support(
@@ -452,7 +453,7 @@ class SolverPipelineMixin:
             for paper in papers
         ]
         scored = [(score, paper) for score, paper in scored if score > 0]
-        scored.sort(key=lambda item: (-item[0], self._safe_year(item[1].year), -item[1].score, item[1].title))
+        scored.sort(key=lambda item: (-item[0], safe_year(item[1].year), -item[1].score, item[1].title))
         return scored[0][1] if scored else None
 
     def _solve_followup_research(
