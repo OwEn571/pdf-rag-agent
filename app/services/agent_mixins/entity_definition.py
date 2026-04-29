@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
 
 
@@ -222,17 +223,7 @@ class EntityDefinitionMixin:
                 str(paper.metadata.get("abstract_note", "")),
             ]
         )
-        if hasattr(self, "_origin_target_definition_score"):
-            try:
-                return self._origin_target_definition_score(paper_text, [str(item) for item in context_targets]) >= 4.0
-            except Exception:  # noqa: BLE001
-                return False
-        lowered = paper_text.lower()
-        return any(
-            self._matches_target(lowered, str(target).lower()) and any(cue in lowered for cue in ["introduce", "introduces", "propose", "提出", "引入"])
-            for target in context_targets
-            if str(target).strip()
-        )
+        return origin_helpers.origin_target_definition_score(paper_text, [str(item) for item in context_targets]) >= 4.0
 
     def _entity_context_matches(self, *, item: EvidenceBlock, context_targets: list[str]) -> bool:
         paper = self._candidate_from_paper_id(item.paper_id)

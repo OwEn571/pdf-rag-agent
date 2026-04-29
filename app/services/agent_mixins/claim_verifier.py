@@ -4,6 +4,7 @@ import json
 import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
+from app.services import origin_selection_helpers as origin_helpers
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 
 
@@ -226,7 +227,7 @@ class ClaimVerifierMixin:
         targets = list(contract.targets or [])
         if claim.entity:
             targets.append(claim.entity)
-        aliases = self._origin_target_aliases(targets)
+        aliases = origin_helpers.origin_target_aliases(targets)
         if not aliases:
             return bool(claim.evidence_ids and claim.paper_ids)
         claim_paper_ids = {str(item) for item in claim.paper_ids if str(item)}
@@ -234,16 +235,16 @@ class ClaimVerifierMixin:
         paper_by_id = {item.paper_id: item for item in papers}
         for paper_id in list(claim_paper_ids):
             paper = paper_by_id.get(paper_id) or self._candidate_from_paper_id(paper_id)
-            if paper is not None and self._origin_target_intro_score(self._origin_paper_text(paper), aliases) > 0:
+            if paper is not None and origin_helpers.origin_target_intro_score(origin_helpers.origin_paper_text(paper), aliases) > 0:
                 return True
             paper_doc = self.retriever.paper_doc_by_id(paper_id)
-            if paper_doc is not None and self._origin_target_intro_score(str(paper_doc.page_content or ""), aliases) > 0:
+            if paper_doc is not None and origin_helpers.origin_target_intro_score(str(paper_doc.page_content or ""), aliases) > 0:
                 return True
         for item in evidence:
             if item.doc_id not in claim_evidence_ids and item.paper_id not in claim_paper_ids:
                 continue
             text = "\n".join([item.title, item.caption, item.snippet])
-            if self._origin_target_intro_score(text, aliases) > 0:
+            if origin_helpers.origin_target_intro_score(text, aliases) > 0:
                 return True
         return False
 

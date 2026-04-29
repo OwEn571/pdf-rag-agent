@@ -17,7 +17,7 @@ from app.services.schema_claim_helpers import (
     schema_claim_system_prompt,
     should_use_schema_claim_solver,
 )
-from app.services.solver_goal_helpers import append_unique_claims, claim_goals, fallback_goals_from_query, looks_like_metric_goal
+from app.services.solver_goal_helpers import append_unique_claims, claim_goals
 from app.services.topology_recommendation_helpers import (
     is_unusable_topology_recommendation_text,
     topology_discovery_claim,
@@ -105,7 +105,7 @@ class SolverPipelineMixin:
         evidence: list[EvidenceBlock],
         session: SessionContext,
     ) -> list[Claim]:
-        goals = self._claim_goals(contract=contract, plan=plan)
+        goals = claim_goals(contract=contract, plan=plan)
         claims: list[Claim] = []
 
         if goals & {"paper_title", "year", "origin"}:
@@ -137,18 +137,6 @@ class SolverPipelineMixin:
         if not claims:
             append_unique_claims(claims, self._solve_default_text_answer(contract=contract, papers=papers, evidence=evidence, session=session))
         return claims
-
-    @staticmethod
-    def _claim_goals(*, contract: QueryContract, plan: ResearchPlan) -> set[str]:
-        return claim_goals(contract=contract, plan=plan)
-
-    @staticmethod
-    def _looks_like_metric_goal(query: str, goals: set[str]) -> bool:
-        return looks_like_metric_goal(query, goals)
-
-    @staticmethod
-    def _fallback_goals_from_query(query: str, *, targets: list[str]) -> set[str]:
-        return fallback_goals_from_query(query, targets=targets)
 
     def _solve_text(
         self,
@@ -271,7 +259,7 @@ class SolverPipelineMixin:
                 paper
                 for paper in papers
                 if self._paper_identity_matches_targets(paper=paper, targets=contract.targets)
-                or self._paper_has_origin_intro_support(paper=paper, targets=contract.targets)
+                or origin_helpers.paper_has_origin_intro_support(paper=paper, targets=contract.targets)
             ]
             if focused:
                 papers = focused
@@ -389,13 +377,13 @@ class SolverPipelineMixin:
                 item
                 for item in candidate_pool
                 if self._paper_identity_matches_targets(paper=item, targets=contract.targets)
-                or self._paper_has_origin_intro_support(paper=item, targets=contract.targets)
+                or origin_helpers.paper_has_origin_intro_support(paper=item, targets=contract.targets)
             ]
             if identity_matched:
                 candidate_pool = identity_matched
         if not evidence:
             return self._pick_origin_paper_with_intro_support(contract=contract, papers=candidate_pool)
-        target_aliases = self._origin_target_aliases(contract.targets)
+        target_aliases = origin_helpers.origin_target_aliases(contract.targets)
         scored: list[tuple[float, float, CandidatePaper]] = []
         for paper in candidate_pool:
             support = [item for item in evidence if item.paper_id == paper.paper_id]
@@ -419,14 +407,14 @@ class SolverPipelineMixin:
                     score += 1.5
                 if " is a " in snippet or " is an " in snippet:
                     score += 0.8
-                intro_score += self._origin_target_intro_score(item.snippet, target_aliases)
-                score += self._origin_target_definition_score(item.snippet, target_aliases)
+                intro_score += origin_helpers.origin_target_intro_score(item.snippet, target_aliases)
+                score += origin_helpers.origin_target_definition_score(item.snippet, target_aliases)
             if target_aliases:
-                paper_text = self._origin_paper_text(paper)
+                paper_text = origin_helpers.origin_paper_text(paper)
                 if any(self._matches_target(paper_text, alias) for alias in target_aliases):
                     score += 0.8
-                intro_score += self._origin_target_intro_score(paper_text, target_aliases)
-                score += self._origin_target_definition_score(paper_text, target_aliases)
+                intro_score += origin_helpers.origin_target_intro_score(paper_text, target_aliases)
+                score += origin_helpers.origin_target_definition_score(paper_text, target_aliases)
             scored.append((intro_score, score, paper))
         scored.sort(key=lambda item: (-item[0], -item[1], self._safe_year(item[2].year), -item[2].score, item[2].title))
         if scored and scored[0][0] > 0:
@@ -434,7 +422,7 @@ class SolverPipelineMixin:
         return self._pick_origin_paper_with_intro_support(contract=contract, papers=candidate_pool)
 
     def _origin_candidates_from_corpus(self, *, contract: QueryContract) -> list[CandidatePaper]:
-        aliases = self._origin_target_aliases(contract.targets)
+        aliases = origin_helpers.origin_target_aliases(contract.targets)
         if not aliases:
             return []
         candidates: list[tuple[float, CandidatePaper]] = []
@@ -454,7 +442,7 @@ class SolverPipelineMixin:
                     str(meta.get("generated_summary", "")),
                 ]
             )
-            score = self._origin_target_intro_score(text, aliases)
+            score = origin_helpers.origin_target_intro_score(text, aliases)
             if score <= 0:
                 continue
             candidates.append((score, paper.model_copy(update={"score": max(float(paper.score), score)})))
@@ -467,33 +455,16 @@ class SolverPipelineMixin:
         contract: QueryContract,
         papers: list[CandidatePaper],
     ) -> CandidatePaper | None:
-        aliases = self._origin_target_aliases(contract.targets)
+        aliases = origin_helpers.origin_target_aliases(contract.targets)
         if not aliases:
             return self._pick_origin_paper(papers)
         scored = [
-            (self._origin_target_intro_score(self._origin_paper_text(paper), aliases), paper)
+            (origin_helpers.origin_target_intro_score(origin_helpers.origin_paper_text(paper), aliases), paper)
             for paper in papers
         ]
         scored = [(score, paper) for score, paper in scored if score > 0]
         scored.sort(key=lambda item: (-item[0], self._safe_year(item[1].year), -item[1].score, item[1].title))
         return scored[0][1] if scored else None
-
-    def _paper_has_origin_intro_support(self, *, paper: CandidatePaper, targets: list[str]) -> bool:
-        return origin_helpers.paper_has_origin_intro_support(paper=paper, targets=targets)
-
-    @staticmethod
-    def _origin_paper_text(paper: CandidatePaper) -> str:
-        return origin_helpers.origin_paper_text(paper)
-
-    @staticmethod
-    def _origin_target_aliases(targets: list[str]) -> list[str]:
-        return origin_helpers.origin_target_aliases(targets)
-
-    def _origin_target_intro_score(self, text: str, aliases: list[str]) -> float:
-        return origin_helpers.origin_target_intro_score(text, aliases)
-
-    def _origin_target_definition_score(self, text: str, aliases: list[str]) -> float:
-        return origin_helpers.origin_target_definition_score(text, aliases)
 
     def _solve_followup_research(
         self,
