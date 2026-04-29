@@ -9,6 +9,7 @@ from app.services.origin_selection_helpers import (
     origin_target_definition_score,
     origin_target_intro_score,
     paper_has_origin_intro_support,
+    pick_origin_paper,
 )
 
 
@@ -75,3 +76,12 @@ def test_paper_has_origin_intro_support_uses_combined_paper_text() -> None:
 
     assert "We introduce AlignX" in origin_paper_text(paper)
     assert paper_has_origin_intro_support(paper=paper, targets=["AlignX"])
+
+
+def test_pick_origin_paper_prefers_earliest_year_then_score() -> None:
+    early = CandidatePaper(paper_id="early", title="Early", year="2020", score=0.2)
+    stronger_same_year = CandidatePaper(paper_id="strong", title="Strong", year="2020", score=0.9)
+    recent = CandidatePaper(paper_id="recent", title="Recent", year="2024", score=2.0)
+
+    assert pick_origin_paper([recent, early, stronger_same_year]) == stronger_same_year
+    assert pick_origin_paper([]) is None

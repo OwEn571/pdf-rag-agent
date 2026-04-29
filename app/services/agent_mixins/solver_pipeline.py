@@ -447,7 +447,7 @@ class SolverPipelineMixin:
     ) -> CandidatePaper | None:
         aliases = origin_helpers.origin_target_aliases(contract.targets)
         if not aliases:
-            return self._pick_origin_paper(papers)
+            return origin_helpers.pick_origin_paper(papers)
         scored = [
             (origin_helpers.origin_target_intro_score(origin_helpers.origin_paper_text(paper), aliases), paper)
             for paper in papers

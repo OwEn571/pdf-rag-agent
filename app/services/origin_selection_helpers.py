@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from app.domain.models import CandidatePaper, Claim, QueryContract
+from app.services.evidence_presentation import safe_year
 
 
 def origin_paper_text(paper: CandidatePaper) -> str:
@@ -79,6 +80,13 @@ def origin_lookup_claim(*, contract: QueryContract, paper: CandidatePaper, evide
         paper_ids=[paper.paper_id],
         confidence=0.94,
     )
+
+
+def pick_origin_paper(papers: list[CandidatePaper]) -> CandidatePaper | None:
+    if not papers:
+        return None
+    ranked = sorted(papers, key=lambda item: (safe_year(item.year), -item.score))
+    return ranked[0] if ranked else None
 
 
 def origin_target_intro_score(text: str, aliases: list[str]) -> float:

@@ -4564,13 +4564,6 @@ class ResearchAssistantAgentV4(
             return False
         return raw_target in raw_text
 
-    @staticmethod
-    def _pick_origin_paper(papers: list[CandidatePaper]) -> CandidatePaper | None:
-        if not papers:
-            return None
-        ranked = sorted(papers, key=lambda item: (safe_year(item.year), -item.score))
-        return ranked[0] if ranked else None
-
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
         titles: list[str] = []
         by_id = {item.paper_id: item.title for item in papers}
