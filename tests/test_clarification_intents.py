@@ -20,6 +20,7 @@ from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clarification_string_list,
     contract_from_selected_clarification_option,
+    contract_needs_evidence_disambiguation,
     contract_with_auto_resolved_ambiguity,
     contract_with_ambiguity_options,
     clear_pending_clarification,
@@ -351,6 +352,19 @@ def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
 
     assert disambiguation_missing_fields(contract) == ["target"]
     assert disambiguation_missing_fields(QueryContract(clean_query="PBA是什么")) == ["disambiguation"]
+
+
+def test_contract_needs_evidence_disambiguation_for_acronym_goals_and_notes() -> None:
+    assert contract_needs_evidence_disambiguation(
+        QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"])
+    )
+    assert contract_needs_evidence_disambiguation(
+        QueryContract(clean_query="PBA?", targets=["PBA"], notes=["ambiguous_slot=target"])
+    )
+    assert not contract_needs_evidence_disambiguation(
+        QueryContract(clean_query="AlignX是什么", targets=["AlignX"], requested_fields=["definition"])
+    )
+    assert not contract_needs_evidence_disambiguation(QueryContract(clean_query="PBA?", targets=[]))
 
 
 def test_clarification_tracking_helpers_manage_attempts() -> None:

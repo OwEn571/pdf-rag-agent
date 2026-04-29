@@ -56,6 +56,7 @@ from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clear_pending_clarification,
     apply_disambiguation_judge_recommendation,
+    contract_needs_evidence_disambiguation,
     contract_with_auto_resolved_ambiguity,
     contract_from_pending_clarification,
     contract_from_selected_clarification_option,
@@ -97,8 +98,6 @@ from app.services.contract_context import (
     LEGACY_TOOL_NAME_ALIASES,
     canonical_tools,
     contract_answer_slots,
-    note_value,
-    note_values,
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
@@ -1645,7 +1644,7 @@ class ResearchAssistantAgentV4(
         papers: list[CandidatePaper],
         evidence: list[EvidenceBlock],
     ) -> list[dict[str, Any]]:
-        if not self._contract_needs_evidence_disambiguation(contract):
+        if not contract_needs_evidence_disambiguation(contract):
             return []
         if "resolved_human_choice" in contract.notes or selected_clarification_paper_id(contract):
             return []
@@ -1821,16 +1820,6 @@ class ResearchAssistantAgentV4(
             )
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
-
-    def _contract_needs_evidence_disambiguation(self, contract: QueryContract) -> bool:
-        if not contract.targets:
-            return False
-        target = str(contract.targets[0] or "").strip()
-        if not is_short_acronym(target):
-            return False
-        if note_values(notes=contract.notes, prefix="ambiguous_slot="):
-            return True
-        return bool(research_plan_goals(contract) & disambiguation_goal_markers())
 
     def _acronym_options_from_evidence(
         self,
@@ -2036,7 +2025,7 @@ class ResearchAssistantAgentV4(
                 "focus_titles": focus_titles,
             }
         goals = research_plan_goals(contract)
-        if self._contract_needs_evidence_disambiguation(contract):
+        if contract_needs_evidence_disambiguation(contract):
             if target_binding_from_memory(session=session, target=contract.targets[0]) and "exclude_previous_focus" not in contract.notes:
                 option_count = 1
             else:

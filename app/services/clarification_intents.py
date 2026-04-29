@@ -7,7 +7,8 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
 from app.services.contract_normalization import normalize_lookup_text
-from app.services.query_shaping import extract_targets, matches_target
+from app.services.query_shaping import extract_targets, is_short_acronym, matches_target
+from app.services.research_planning import research_plan_goals
 from app.services.session_context_helpers import truncate_context_text
 
 
@@ -438,6 +439,17 @@ def disambiguation_judge_summary(
 
 def disambiguation_goal_markers() -> set[str]:
     return {"definition", "entity_type", "role_in_context", "mechanism", "formula"}
+
+
+def contract_needs_evidence_disambiguation(contract: QueryContract) -> bool:
+    if not contract.targets:
+        return False
+    target = str(contract.targets[0] or "").strip()
+    if not is_short_acronym(target):
+        return False
+    if any(str(note).startswith("ambiguous_slot=") for note in contract.notes):
+        return True
+    return bool(research_plan_goals(contract) & disambiguation_goal_markers())
 
 
 def disambiguation_missing_fields(contract: QueryContract) -> list[str]:
