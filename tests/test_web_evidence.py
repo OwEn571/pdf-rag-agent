@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.domain.models import Claim, EvidenceBlock, QueryContract
 from app.services.web_evidence import (
     build_web_research_claim,
+    collect_web_evidence,
     merge_evidence,
     should_add_web_claim,
     web_include_domains,
@@ -58,6 +59,60 @@ def test_web_evidence_merges_by_doc_id() -> None:
     ]
 
     assert [item.doc_id for item in merge_evidence(local, web)] == ["doc-a", "web-b"]
+
+
+def test_web_evidence_collects_with_query_override_and_gate() -> None:
+    class FakeWebSearch:
+        is_configured = True
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def search(self, **kwargs: object) -> list[EvidenceBlock]:
+            self.calls.append(kwargs)
+            return [
+                EvidenceBlock(
+                    doc_id="web-a",
+                    paper_id="web-a",
+                    title="Recent RAG Paper",
+                    file_path="https://example.com/rag",
+                    page=0,
+                    block_type="web",
+                    snippet="A recent RAG paper.",
+                )
+            ]
+
+    contract = QueryContract(
+        clean_query="最新 RAG 论文",
+        relation="paper_recommendation",
+        targets=["RAG"],
+        requested_fields=["recommended_papers"],
+    )
+    web_search = FakeWebSearch()
+
+    evidence = collect_web_evidence(
+        web_search=web_search,
+        contract=contract,
+        use_web_search=True,
+        max_web_results=3,
+        query_override="today news about RAG",
+    )
+
+    assert [item.doc_id for item in evidence] == ["web-a"]
+    assert web_search.calls == [
+        {
+            "query": "today news about RAG",
+            "max_results": 3,
+            "topic": "news",
+            "include_domains": web_include_domains(contract),
+        }
+    ]
+    assert collect_web_evidence(
+        web_search=web_search,
+        contract=contract,
+        use_web_search=False,
+        max_web_results=3,
+    ) == []
 
 
 def test_web_evidence_claim_decision_and_payload() -> None:

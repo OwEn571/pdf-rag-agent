@@ -183,11 +183,10 @@ from app.services.research_memory import remember_compound_outcome, remember_res
 from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
+    collect_web_evidence,
     merge_evidence,
     should_add_web_claim,
-    web_include_domains,
     web_query_text,
-    web_search_topic,
 )
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -2956,14 +2955,12 @@ class ResearchAssistantAgentV4(
         max_web_results: int,
         query_override: str = "",
     ) -> list[EvidenceBlock]:
-        if not use_web_search or not self.web_search.is_configured:
-            return []
-        search_query = str(query_override or "").strip() or web_query_text(contract)
-        return self.web_search.search(
-            query=search_query,
-            max_results=max_web_results,
-            topic=web_search_topic(search_query or contract.clean_query),
-            include_domains=web_include_domains(contract),
+        return collect_web_evidence(
+            web_search=self.web_search,
+            contract=contract,
+            use_web_search=use_web_search,
+            max_web_results=max_web_results,
+            query_override=query_override,
         )
 
     @staticmethod

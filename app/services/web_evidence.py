@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.domain.models import Claim, EvidenceBlock, QueryContract
 from app.services.research_planning import research_plan_goals
 
@@ -52,6 +54,25 @@ def merge_evidence(local_evidence: list[EvidenceBlock], web_evidence: list[Evide
         seen.add(item.doc_id)
         merged.append(item)
     return merged
+
+
+def collect_web_evidence(
+    *,
+    web_search: Any,
+    contract: QueryContract,
+    use_web_search: bool,
+    max_web_results: int,
+    query_override: str = "",
+) -> list[EvidenceBlock]:
+    if not use_web_search or not getattr(web_search, "is_configured", False):
+        return []
+    search_query = str(query_override or "").strip() or web_query_text(contract)
+    return web_search.search(
+        query=search_query,
+        max_results=max_web_results,
+        topic=web_search_topic(search_query or contract.clean_query),
+        include_domains=web_include_domains(contract),
+    )
 
 
 def should_add_web_claim(*, contract: QueryContract, claims: list[Claim], explicit_web: bool) -> bool:
