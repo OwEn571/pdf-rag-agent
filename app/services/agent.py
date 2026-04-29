@@ -97,6 +97,7 @@ from app.services.evidence_presentation import (
     build_figure_contexts,
     chunk_text,
     citations_from_doc_ids,
+    dedupe_citations,
     paper_recommendation_reason,
     safe_year,
 )
@@ -644,7 +645,7 @@ class ResearchAssistantAgentV4(
             paper_id = str(binding.get("paper_id", "") or "").strip()
             if paper_id:
                 doc_ids.append(f"paper::{paper_id}")
-        return self._dedupe_citations(self._citations_from_doc_ids(list(dict.fromkeys(doc_ids)), []))
+        return dedupe_citations(self._citations_from_doc_ids(list(dict.fromkeys(doc_ids)), []))
 
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
         normalized = normalize_lookup_text(clean_query)
@@ -1070,18 +1071,6 @@ class ResearchAssistantAgentV4(
             )
             present_targets.add(key)
         return augmented
-
-    @staticmethod
-    def _dedupe_citations(citations: list[AssistantCitation]) -> list[AssistantCitation]:
-        seen: set[tuple[str, str, int, str]] = set()
-        deduped: list[AssistantCitation] = []
-        for citation in citations:
-            key = (citation.title, citation.file_path, citation.page, citation.block_type)
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(citation)
-        return deduped
 
     def _select_citation_ranking_candidates(
         self,

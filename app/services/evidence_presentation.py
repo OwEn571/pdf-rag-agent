@@ -106,6 +106,18 @@ def citations_from_doc_ids(
     return citations
 
 
+def dedupe_citations(citations: list[AssistantCitation]) -> list[AssistantCitation]:
+    seen: set[tuple[str, str, int, str]] = set()
+    deduped: list[AssistantCitation] = []
+    for citation in citations:
+        key = (citation.title, citation.file_path, citation.page, citation.block_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(citation)
+    return deduped
+
+
 def citation_from_evidence(item: EvidenceBlock) -> AssistantCitation:
     tags_raw = str(item.metadata.get("tags", ""))
     return AssistantCitation(

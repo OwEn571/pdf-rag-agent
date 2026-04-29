@@ -6,6 +6,7 @@ from app.domain.models import EvidenceBlock, QueryContract, SessionContext, Veri
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
 from app.services.citation_ranking import format_citation_ranking_answer
+from app.services.evidence_presentation import dedupe_citations
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
@@ -316,7 +317,7 @@ def build_conversation_tool_registry(
             web_enabled=bool(lookup.get("web_enabled")),
         )
         evidence, citation_doc_ids, report, summary = citation_ranking_result_payload(lookup)
-        state["citations"] = agent._dedupe_citations(agent._citations_from_doc_ids(citation_doc_ids, evidence))
+        state["citations"] = dedupe_citations(agent._citations_from_doc_ids(citation_doc_ids, evidence))
         state["verification_report"] = report
         store_conversation_answer_result(
             agent=agent, state=state, session=session, contract=contract, emit=emit,

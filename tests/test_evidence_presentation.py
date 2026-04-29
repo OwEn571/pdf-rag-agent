@@ -8,6 +8,7 @@ from app.services.evidence_presentation import (
     chunk_text,
     citations_from_doc_ids,
     claim_evidence_ids,
+    dedupe_citations,
     evidence_ids_for_paper,
     extract_topology_terms,
     figure_fallback_summary,
@@ -80,6 +81,10 @@ def test_evidence_presentation_builds_citations_from_evidence_and_lookup() -> No
     assert citations[0].snippet == "A" * 220
     assert citations[0].tags == ["rag", "agent"]
     assert citations[1].title == "Paper Two"
+    assert [item.doc_id for item in dedupe_citations([citations[0], citations[0], citations[1]])] == [
+        "doc-a",
+        "paper::P2",
+    ]
 
 
 def test_evidence_presentation_ranks_figure_contexts_and_fallback_summary() -> None:

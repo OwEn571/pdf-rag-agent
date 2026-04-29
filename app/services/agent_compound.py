@@ -16,7 +16,7 @@ from app.services.compound_task_helpers import (
     demote_markdown_headings,
     format_compound_section,
 )
-from app.services.evidence_presentation import chunk_text
+from app.services.evidence_presentation import chunk_text, dedupe_citations
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -182,7 +182,7 @@ def run_compound_query_if_needed(
         ),
         active=active_research,
     )
-    citations = agent._dedupe_citations(
+    citations = dedupe_citations(
         [
             citation
             for result in subtask_results
