@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
-from app.services.intent_marker_matching import normalized_query_text, query_matches_any
+from app.services.intent_marker_matching import MarkerProfile, normalized_query_text, query_matches_any
 from app.services.solver_goal_helpers import SOLVER_GOAL_MARKERS, looks_like_metric_goal
 from app.services.vector_index import CollectionVectorIndex
 
@@ -36,6 +36,57 @@ BOOKISH_TITLE_MARKERS = (
     "从入门到精通",
 )
 BOOKISH_CONTENT_MARKERS = ("本书", "本章", "第1章", "第 1 章", "章节", "读者")
+RETRIEVAL_MARKERS: dict[str, MarkerProfile] = {
+    "primary_figure_reference": ("figure 1", "fig. 1", "fig 1", "图1"),
+    "mechanism_strong": (
+        "objective",
+        "advantage",
+        "relative rewards",
+        "group-based reward",
+        "value critic",
+        "value estimates",
+        "rule-based rewards",
+        "rubric-based rewards",
+        "policy ratio",
+        "clip",
+        "kl penalty",
+        "workflow",
+        "work flow",
+        "机制",
+        "流程",
+        "目标函数",
+        "奖励",
+        "优势函数",
+    ),
+    "mechanism_medium": (
+        "reinforcement learning",
+        "policy optimization",
+        "algorithm",
+        "operates on groups",
+        "compute advantages",
+        "sampled from the old policy",
+        "eliminating the need",
+        "optimiz",
+        "训练",
+        "优化",
+        "算法",
+    ),
+    "formula_field": ("objective", "advantage", "clip", "kl", "reward", "公式", "目标函数"),
+    "mechanism_field": ("workflow", "operates", "uses", "guiding signals", "reward", "流程", "机制"),
+    "application_like": (
+        "we employ",
+        "we use",
+        "used in",
+        "is used",
+        "applied to",
+        "guiding signals",
+        "用于",
+        "用来",
+        "应用于",
+    ),
+    "formula_reward_model": ("preferred", "dispreferred", "yw", "yl"),
+    "formula_appendix_noise": ("a.4", "appendix", "plackett-luce", "rankings"),
+}
 
 
 class DualIndexRetriever:
@@ -708,7 +759,7 @@ class DualIndexRetriever:
                 lowered = text.lower()
                 if "figure " in lowered or "fig." in lowered or "图" in text:
                     score += 1.6
-                if any(token in lowered for token in ["figure 1", "fig. 1", "fig 1"]) or "图1" in text:
+                if query_matches_any(lowered, "", RETRIEVAL_MARKERS["primary_figure_reference"]):
                     score += 2.2
             if goals & {"metric_value", "setting", "summary", "results", "key_findings"} and block_type in {"table", "caption"}:
                 score += 1.4 + self._metric_signal_score(text)
@@ -1322,49 +1373,16 @@ class DualIndexRetriever:
         score = 0.0
         if targets and not any(target and DualIndexRetriever._matches_target(haystack, target) for target in targets):
             return 0.0
-        strong_cues = [
-            "objective",
-            "advantage",
-            "relative rewards",
-            "group-based reward",
-            "value critic",
-            "value estimates",
-            "rule-based rewards",
-            "rubric-based rewards",
-            "policy ratio",
-            "clip",
-            "kl penalty",
-            "workflow",
-            "work flow",
-            "机制",
-            "流程",
-            "目标函数",
-            "奖励",
-            "优势函数",
-        ]
-        medium_cues = [
-            "reinforcement learning",
-            "policy optimization",
-            "algorithm",
-            "operates on groups",
-            "compute advantages",
-            "sampled from the old policy",
-            "eliminating the need",
-            "optimiz",
-            "训练",
-            "优化",
-            "算法",
-        ]
-        if any(token in lowered for token in strong_cues):
+        if query_matches_any(lowered, "", RETRIEVAL_MARKERS["mechanism_strong"]):
             score += 1.4
-        if any(token in lowered for token in medium_cues):
+        if query_matches_any(lowered, "", RETRIEVAL_MARKERS["mechanism_medium"]):
             score += 0.8
-        if requested_fields & {"formula", "objective", "variable_explanation"} and any(
-            token in lowered for token in ["objective", "advantage", "clip", "kl", "reward", "公式", "目标函数"]
+        if requested_fields & {"formula", "objective", "variable_explanation"} and query_matches_any(
+            lowered, "", RETRIEVAL_MARKERS["formula_field"]
         ):
             score += 0.8
-        if requested_fields & {"mechanism", "workflow", "reward_signal", "training_signal"} and any(
-            token in lowered for token in ["workflow", "operates", "uses", "guiding signals", "reward", "流程", "机制"]
+        if requested_fields & {"mechanism", "workflow", "reward_signal", "training_signal"} and query_matches_any(
+            lowered, "", RETRIEVAL_MARKERS["mechanism_field"]
         ):
             score += 0.6
         return score
@@ -1375,20 +1393,7 @@ class DualIndexRetriever:
         lowered = raw.lower()
         if targets and not any(target and DualIndexRetriever._matches_target(raw, target) for target in targets):
             return 0.0
-        if any(
-            token in lowered
-            for token in [
-                "we employ",
-                "we use",
-                "used in",
-                "is used",
-                "applied to",
-                "guiding signals",
-                "用于",
-                "用来",
-                "应用于",
-            ]
-        ):
+        if query_matches_any(lowered, "", RETRIEVAL_MARKERS["application_like"]):
             return 0.8
         return 0.0
 
@@ -1474,13 +1479,15 @@ class DualIndexRetriever:
             for token, weight in self.settings.retrieval_target_formula_token_weights.get(target, {}).items():
                 if str(token).lower() in haystack:
                     score += float(weight)
-        if "reward model" in haystack and any(token in haystack for token in ["preferred", "dispreferred", "yw", "yl"]):
+        if "reward model" in haystack and query_matches_any(
+            haystack, "", RETRIEVAL_MARKERS["formula_reward_model"]
+        ):
             score -= 3.0
         if "figure " in haystack or haystack.startswith("figure"):
             score -= 2.0
         if "table " in haystack or haystack.startswith("table"):
             score -= 1.0
-        if any(token in haystack for token in ["a.4", "appendix", "plackett-luce", "rankings"]):
+        if query_matches_any(haystack, "", RETRIEVAL_MARKERS["formula_appendix_noise"]):
             score -= 4.0
         return max(0.0, score)
 

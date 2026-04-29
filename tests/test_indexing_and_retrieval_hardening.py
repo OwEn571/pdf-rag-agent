@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 from app.core.config import Settings
 from app.domain.models import EvidenceBlock, QueryContract
 from app.services.indexing import V4IngestionService
-from app.services.retrieval import DualIndexRetriever
+from app.services.retrieval import RETRIEVAL_MARKERS, DualIndexRetriever
 from app.services.zotero_sqlite import PaperRecord
 
 
@@ -143,6 +143,32 @@ def test_retriever_reranks_existing_evidence_by_focus_terms(tmp_path: Path) -> N
 
     assert [item.doc_id for item in reranked] == ["b", "a"]
     assert reranked[0].metadata["rerank_score"] > reranked[1].metadata["rerank_score"]
+
+
+def test_retrieval_markers_drive_static_scoring_profiles() -> None:
+    assert "mechanism_strong" in RETRIEVAL_MARKERS
+    assert (
+        DualIndexRetriever._mechanism_like_score(
+            "The objective computes relative rewards.",
+            "",
+            targets=[],
+            requested_fields=set(),
+        )
+        >= 1.4
+    )
+    assert (
+        DualIndexRetriever._mechanism_like_score(
+            "The workflow uses reward guiding signals.",
+            "",
+            targets=[],
+            requested_fields={"mechanism"},
+        )
+        >= 2.0
+    )
+    assert (
+        DualIndexRetriever._application_like_score("We use this method as guiding signals.", targets=[])
+        == 0.8
+    )
 
 
 def test_formula_heavy_filter_can_be_disabled_for_entity_evidence(tmp_path: Path) -> None:
