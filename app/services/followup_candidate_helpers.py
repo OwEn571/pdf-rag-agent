@@ -23,6 +23,7 @@ PaperAnchor = Callable[[CandidatePaper], str]
 ConfidenceCoercer = Callable[[Any], float]
 EvidenceExpander = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
 PaperSearch = Callable[[str, QueryContract, int], list[CandidatePaper]]
+SelectedAssessment = Callable[[CandidatePaper], dict[str, Any]]
 
 
 def selected_followup_candidate_title(contract: QueryContract) -> str:
@@ -170,6 +171,92 @@ def expand_followup_candidate_pool(
     ranked = list(pool.values())
     ranked.sort(key=lambda item: (-item.score, safe_year(item.year), item.title))
     return ranked
+
+
+def rank_followup_candidates(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    candidates: list[CandidatePaper],
+    evidence: list[EvidenceBlock],
+    clients: Any,
+    paper_summary_text: PaperText,
+    selected_candidate_assessment: SelectedAssessment,
+    coerce_confidence: ConfidenceCoercer,
+) -> list[dict[str, Any]]:
+    if not candidates:
+        return []
+    seed_ids = {item.paper_id for item in seed_papers}
+    filtered = [item for item in candidates if item.paper_id not in seed_ids]
+    if not filtered:
+        return []
+    selected_title = selected_followup_candidate_title(contract)
+    if selected_title:
+        selected_filtered = [item for item in filtered if candidate_title_matches(item, selected_title)]
+        if selected_filtered:
+            return [
+                {
+                    "paper": paper,
+                    **selected_candidate_assessment(paper),
+                }
+                for paper in selected_filtered[:3]
+            ]
+    by_id = {item.paper_id: item for item in filtered}
+    if getattr(clients, "chat", None) is not None:
+        payload = clients.invoke_json(
+            system_prompt=followup_candidate_ranker_system_prompt(),
+            human_prompt=followup_candidate_ranker_human_prompt(
+                contract=contract,
+                seed_papers=seed_papers,
+                candidates=filtered,
+                paper_summary_text=paper_summary_text,
+            ),
+            fallback={},
+        )
+        raw_followups = payload.get("followups", []) if isinstance(payload, dict) else []
+        if isinstance(raw_followups, list):
+            selected: list[dict[str, Any]] = []
+            for item in raw_followups:
+                if not isinstance(item, dict):
+                    continue
+                paper_id = str(item.get("paper_id", "")).strip()
+                paper = by_id.get(paper_id)
+                if paper is None:
+                    continue
+                assessment = followup_relationship_assessment(
+                    contract=contract,
+                    seed_papers=seed_papers,
+                    paper=paper,
+                    paper_summary_text=paper_summary_text,
+                )
+                if assessment["score"] < 0.3:
+                    continue
+                selected.append(
+                    {
+                        "paper": paper,
+                        "relation_type": str(assessment["relation_type"]),
+                        "reason": str(assessment["reason"]),
+                        "confidence": min(
+                            coerce_confidence(item.get("confidence", 0.82)),
+                            float(assessment["confidence"]),
+                        ),
+                        "relationship_strength": str(assessment["strength"]),
+                    }
+                )
+            if selected:
+                fallback_selected = rank_followup_candidates_fallback(
+                    contract=contract,
+                    seed_papers=seed_papers,
+                    candidates=filtered,
+                    paper_summary_text=paper_summary_text,
+                )
+                return merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
+    return rank_followup_candidates_fallback(
+        contract=contract,
+        seed_papers=seed_papers,
+        candidates=filtered,
+        paper_summary_text=paper_summary_text,
+    )
 
 
 def followup_candidate_ranker_system_prompt() -> str:

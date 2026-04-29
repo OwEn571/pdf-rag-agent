@@ -132,20 +132,15 @@ from app.services.evidence_presentation import (
     paper_recommendation_reason,
 )
 from app.services.followup_candidate_helpers import (
-    candidate_title_matches,
     expand_followup_candidate_pool,
     filter_followup_candidates,
-    followup_candidate_ranker_human_prompt,
-    followup_candidate_ranker_system_prompt,
     followup_relationship_assessment,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_validator_assessment_from_payload,
-    merge_followup_rankings,
-    rank_followup_candidates_fallback,
+    rank_followup_candidates,
     resolve_followup_seed_papers,
-    selected_followup_candidate_title,
 )
 from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
@@ -2307,83 +2302,20 @@ class ResearchAssistantAgentV4(
         candidates: list[CandidatePaper],
         evidence: list[EvidenceBlock] | None = None,
     ) -> list[dict[str, Any]]:
-        if not candidates:
-            return []
-        seed_ids = {item.paper_id for item in seed_papers}
-        filtered = [item for item in candidates if item.paper_id not in seed_ids]
-        if not filtered:
-            return []
-        selected_title = selected_followup_candidate_title(contract)
-        if selected_title:
-            selected_filtered = [item for item in filtered if candidate_title_matches(item, selected_title)]
-            if selected_filtered:
-                return [
-                    {
-                        "paper": paper,
-                        **self._selected_followup_candidate_assessment(
-                            contract=contract,
-                            seed_papers=seed_papers,
-                            paper=paper,
-                            evidence=evidence or [],
-                        ),
-                    }
-                    for paper in selected_filtered[:3]
-                ]
-        by_id = {item.paper_id: item for item in filtered}
-        if self.clients.chat is not None:
-            payload = self.clients.invoke_json(
-                system_prompt=followup_candidate_ranker_system_prompt(),
-                human_prompt=followup_candidate_ranker_human_prompt(
-                    contract=contract,
-                    seed_papers=seed_papers,
-                    candidates=filtered,
-                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                ),
-                fallback={},
-            )
-            raw_followups = payload.get("followups", []) if isinstance(payload, dict) else []
-            if isinstance(raw_followups, list):
-                selected: list[dict[str, Any]] = []
-                for item in raw_followups:
-                    if not isinstance(item, dict):
-                        continue
-                    paper_id = str(item.get("paper_id", "")).strip()
-                    paper = by_id.get(paper_id)
-                    if paper is None:
-                        continue
-                    assessment = followup_relationship_assessment(
-                        contract=contract,
-                        seed_papers=seed_papers,
-                        paper=paper,
-                        paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                    )
-                    if assessment["score"] < 0.3:
-                        continue
-                    selected.append(
-                        {
-                            "paper": paper,
-                            "relation_type": str(assessment["relation_type"]),
-                            "reason": str(assessment["reason"]),
-                            "confidence": min(
-                                self._coerce_confidence(item.get("confidence", 0.82)),
-                                float(assessment["confidence"]),
-                            ),
-                            "relationship_strength": str(assessment["strength"]),
-                        }
-                    )
-                if selected:
-                    fallback_selected = rank_followup_candidates_fallback(
-                        contract=contract,
-                        seed_papers=seed_papers,
-                        candidates=filtered,
-                        paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                    )
-                    return merge_followup_rankings(primary=selected, secondary=fallback_selected)[:10]
-        return rank_followup_candidates_fallback(
+        return rank_followup_candidates(
             contract=contract,
             seed_papers=seed_papers,
-            candidates=filtered,
+            candidates=candidates,
+            evidence=evidence or [],
+            clients=self.clients,
             paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            selected_candidate_assessment=lambda paper: self._selected_followup_candidate_assessment(
+                contract=contract,
+                seed_papers=seed_papers,
+                paper=paper,
+                evidence=evidence or [],
+            ),
+            coerce_confidence=lambda value: self._coerce_confidence(value),
         )
 
     def _selected_followup_candidate_assessment(

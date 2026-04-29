@@ -28,6 +28,7 @@ from app.services.followup_candidate_helpers import (
     paper_author_tokens,
     paper_keyword_set,
     paper_relationship_brief,
+    rank_followup_candidates,
     rank_followup_candidates_fallback,
     relationship_evidence_ids_from_payload,
     resolve_followup_seed_papers,
@@ -366,6 +367,43 @@ def test_expand_followup_candidate_pool_searches_with_seed_context_and_dedupes()
     assert "AlignX" in calls[0][0]
     assert calls[0][1].continuation_mode == "fresh"
     assert calls[0][2] == 16
+
+
+def test_rank_followup_candidates_uses_explicit_selected_candidate_assessment() -> None:
+    class Clients:
+        chat = object()
+
+        def invoke_json(self, **_: object) -> object:
+            raise AssertionError("LLM ranker should not run for explicit selected candidate")
+
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper")
+    candidate = CandidatePaper(paper_id="cand", title="Candidate Paper")
+    other = CandidatePaper(paper_id="other", title="Other Paper")
+    contract = QueryContract(
+        clean_query="Candidate Paper 是后续工作吗？",
+        targets=["Seed"],
+        notes=["candidate_title=Candidate Paper"],
+    )
+
+    ranked = rank_followup_candidates(
+        contract=contract,
+        seed_papers=[seed],
+        candidates=[seed, other, candidate],
+        evidence=[],
+        clients=Clients(),
+        paper_summary_text=lambda _: "",
+        selected_candidate_assessment=lambda paper: {
+            "relation_type": "后续工作",
+            "reason": f"{paper.title} extends seed.",
+            "confidence": 0.8,
+            "relationship_strength": "direct",
+        },
+        coerce_confidence=lambda value: float(value),
+    )
+
+    assert len(ranked) == 1
+    assert ranked[0]["paper"] == candidate
+    assert ranked[0]["relation_type"] == "后续工作"
 
 
 def test_followup_relationship_assessment_does_not_mark_loose_topic_as_direct() -> None:
