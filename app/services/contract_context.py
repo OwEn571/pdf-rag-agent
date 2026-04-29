@@ -13,6 +13,25 @@ RESEARCH_CONTEXT_CONVERSATION_RELATIONS = {
     "memory_synthesis",
 }
 
+LEGACY_TOOL_NAME_ALIASES = {
+    "understand_user_intent": "read_memory",
+    "reflect_previous_answer": "read_memory",
+    "read_conversation_memory": "read_memory",
+    "answer_from_memory": "read_memory",
+    "synthesize_previous_results": "read_memory",
+    "recover_previous_recommendation_candidates": "read_memory",
+    "web_citation_lookup": "web_search",
+    "rank_by_verified_citation_count": "web_search",
+    "answer_conversation": "compose",
+    "get_library_status": "compose",
+    "get_library_recommendation": "compose",
+    "resolve_ambiguity": "compose",
+    "compose_or_ask_human": "compose",
+    "detect_ambiguity": "ask_human",
+    "clarification_limit": "ask_human",
+    "retry_research": "search_corpus",
+}
+
 
 def conversation_relation_updates_research_context(relation: str) -> bool:
     return relation in RESEARCH_CONTEXT_CONVERSATION_RELATIONS
@@ -82,6 +101,12 @@ def canonical_tools(*, raw_tools: list[Any], aliases: dict[str, str], canonical_
         if mapped in canonical_names and mapped not in canonical:
             canonical.append(mapped)
     return canonical
+
+
+def canonical_agent_tool(*, tool: str, aliases: dict[str, str], canonical_names: set[str]) -> str:
+    if tool in canonical_names:
+        return tool
+    return aliases.get(tool, "compose")
 
 
 def intent_kind_from_contract(contract: QueryContract) -> str:

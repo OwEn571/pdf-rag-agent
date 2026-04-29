@@ -54,6 +54,8 @@ from app.services.citation_ranking import (
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.confidence import confidence_from_verification_report, confidence_payload
 from app.services.contract_context import (
+    LEGACY_TOOL_NAME_ALIASES,
+    canonical_agent_tool,
     canonical_tools,
     contract_allows_active_context_override,
     contract_answer_slots,
@@ -144,24 +146,6 @@ from app.services.session_store import SessionStore
 logger = logging.getLogger(__name__)
 ALLOWED_SUBPROCESS_COMMANDS = {"pdftoppm"}
 
-CANONICAL_TOOL_ALIASES = {
-    "understand_user_intent": "read_memory",
-    "reflect_previous_answer": "read_memory",
-    "read_conversation_memory": "read_memory",
-    "answer_from_memory": "read_memory",
-    "synthesize_previous_results": "read_memory",
-    "recover_previous_recommendation_candidates": "read_memory",
-    "web_citation_lookup": "web_search",
-    "rank_by_verified_citation_count": "web_search",
-    "answer_conversation": "compose",
-    "get_library_status": "compose",
-    "get_library_recommendation": "compose",
-    "resolve_ambiguity": "compose",
-    "compose_or_ask_human": "compose",
-    "detect_ambiguity": "ask_human",
-    "clarification_limit": "ask_human",
-    "retry_research": "search_corpus",
-}
 def _subprocess_command_allowed(command: list[str]) -> bool:
     if not command:
         return False
@@ -498,7 +482,7 @@ class ResearchAssistantAgentV4(
     def _canonical_tools(raw_tools: list[Any]) -> list[str]:
         return canonical_tools(
             raw_tools=raw_tools,
-            aliases=CANONICAL_TOOL_ALIASES,
+            aliases=LEGACY_TOOL_NAME_ALIASES,
             canonical_names=all_agent_tool_names(),
         )
 
@@ -1710,9 +1694,11 @@ class ResearchAssistantAgentV4(
 
     @staticmethod
     def _canonical_agent_tool(tool: str) -> str:
-        if tool in all_agent_tool_names():
-            return tool
-        return CANONICAL_TOOL_ALIASES.get(tool, "compose")
+        return canonical_agent_tool(
+            tool=tool,
+            aliases=LEGACY_TOOL_NAME_ALIASES,
+            canonical_names=all_agent_tool_names(),
+        )
 
     def _emit_agent_step(
         self,

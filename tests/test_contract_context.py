@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from app.domain.models import QueryContract
 from app.services.contract_context import (
+    LEGACY_TOOL_NAME_ALIASES,
+    canonical_agent_tool,
     canonical_tools,
     contract_allows_active_context_override,
     contract_answer_slots,
@@ -72,3 +74,13 @@ def test_contract_context_normalizes_observed_and_canonical_tools() -> None:
 
     assert observed == ["search_corpus", "compose"]
     assert canonical == ["web_search", "search_corpus"]
+    assert canonical_agent_tool(
+        tool="understand_user_intent",
+        aliases=LEGACY_TOOL_NAME_ALIASES,
+        canonical_names={"read_memory", "compose"},
+    ) == "read_memory"
+    assert canonical_agent_tool(
+        tool="missing_tool",
+        aliases=LEGACY_TOOL_NAME_ALIASES,
+        canonical_names={"read_memory", "compose"},
+    ) == "compose"
