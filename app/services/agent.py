@@ -134,11 +134,10 @@ from app.services.evidence_presentation import (
 from app.services.followup_candidate_helpers import (
     expand_followup_candidate_pool,
     filter_followup_candidates,
-    followup_relationship_assessment,
-    followup_relationship_evidence,
     llm_validate_followup_candidate,
     rank_followup_candidates,
     resolve_followup_seed_papers,
+    selected_followup_candidate_assessment,
 )
 from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
@@ -2324,49 +2323,21 @@ class ResearchAssistantAgentV4(
         paper: CandidatePaper,
         evidence: list[EvidenceBlock],
     ) -> dict[str, Any]:
-        relationship_evidence = followup_relationship_evidence(
+        return selected_followup_candidate_assessment(
             contract=contract,
             seed_papers=seed_papers,
             paper=paper,
             evidence=evidence,
+            clients=self.clients,
             expand_evidence=lambda paper_ids, query, evidence_contract, limit: self.retriever.expand_evidence(
                 paper_ids=paper_ids,
                 query=query,
                 contract=evidence_contract,
                 limit=limit,
             ),
-        )
-        llm_assessment = self._llm_validate_followup_candidate(
-            contract=contract,
-            seed_papers=seed_papers,
-            paper=paper,
-            relationship_evidence=relationship_evidence,
-        )
-        if llm_assessment:
-            return llm_assessment
-        fallback = followup_relationship_assessment(
-            contract=contract,
-            seed_papers=seed_papers,
-            paper=paper,
             paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            coerce_confidence=lambda value: self._coerce_confidence(value),
         )
-        if float(fallback.get("score", 0.0)) < 0.3:
-            return {
-                "relation_type": "证据不足",
-                "reason": "当前本地证据没有显示候选论文明确使用、继承、引用或评测种子论文/数据集。",
-                "confidence": 0.55,
-                "relationship_strength": "not_enough_evidence",
-                "strict_followup": False,
-                "evidence_ids": [item.doc_id for item in relationship_evidence[:4]],
-            }
-        return {
-            "relation_type": str(fallback["relation_type"]),
-            "reason": str(fallback["reason"]),
-            "confidence": float(fallback["confidence"]),
-            "relationship_strength": str(fallback["strength"]),
-            "strict_followup": str(fallback["strength"]) == "direct",
-            "evidence_ids": [item.doc_id for item in relationship_evidence[:4]],
-        }
 
     def _llm_validate_followup_candidate(
         self,

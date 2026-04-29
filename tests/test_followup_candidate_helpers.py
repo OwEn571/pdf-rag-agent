@@ -33,6 +33,7 @@ from app.services.followup_candidate_helpers import (
     rank_followup_candidates_fallback,
     relationship_evidence_ids_from_payload,
     resolve_followup_seed_papers,
+    selected_followup_candidate_assessment,
     selected_followup_candidate_title,
 )
 
@@ -676,6 +677,36 @@ def test_llm_validate_followup_candidate_invokes_validator_and_normalizes_payloa
 
     assert assessment["relation_type"] == "严格后续/直接使用证据"
     assert assessment["confidence"] == 0.86
+    assert assessment["evidence_ids"] == ["candidate-doc"]
+
+
+def test_selected_followup_candidate_assessment_falls_back_when_llm_disabled() -> None:
+    class Clients:
+        chat = None
+
+    evidence = [_evidence("candidate-doc", "candidate", snippet="Candidate uses the Seed benchmark.")]
+    assessment = selected_followup_candidate_assessment(
+        contract=QueryContract(clean_query="Seed 后续工作", targets=["Seed"]),
+        seed_papers=[
+            CandidatePaper(
+                paper_id="seed",
+                title="Seed Paper",
+                metadata={"paper_card_text": "We introduce the Seed benchmark."},
+            )
+        ],
+        paper=CandidatePaper(
+            paper_id="candidate",
+            title="Candidate Paper",
+            metadata={"paper_card_text": "Candidate uses the Seed benchmark for evaluation."},
+        ),
+        evidence=evidence,
+        clients=Clients(),
+        expand_evidence=lambda *_: [],
+        paper_summary_text=lambda paper_id: "uses Seed benchmark" if paper_id == "candidate" else "introduces Seed benchmark",
+        coerce_confidence=lambda value: float(value),
+    )
+
+    assert assessment["relationship_strength"] in {"direct", "strong_related"}
     assert assessment["evidence_ids"] == ["candidate-doc"]
 
 

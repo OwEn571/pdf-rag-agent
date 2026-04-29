@@ -820,6 +820,60 @@ def llm_validate_followup_candidate(
     )
 
 
+def selected_followup_candidate_assessment(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    evidence: list[EvidenceBlock],
+    clients: Any,
+    expand_evidence: EvidenceExpander,
+    paper_summary_text: PaperText,
+    coerce_confidence: ConfidenceCoercer,
+) -> dict[str, Any]:
+    relationship_evidence = followup_relationship_evidence(
+        contract=contract,
+        seed_papers=seed_papers,
+        paper=paper,
+        evidence=evidence,
+        expand_evidence=expand_evidence,
+    )
+    llm_assessment = llm_validate_followup_candidate(
+        contract=contract,
+        seed_papers=seed_papers,
+        paper=paper,
+        relationship_evidence=relationship_evidence,
+        clients=clients,
+        paper_summary_text=paper_summary_text,
+        coerce_confidence=coerce_confidence,
+    )
+    if llm_assessment:
+        return llm_assessment
+    fallback = followup_relationship_assessment(
+        contract=contract,
+        seed_papers=seed_papers,
+        paper=paper,
+        paper_summary_text=paper_summary_text,
+    )
+    if float(fallback.get("score", 0.0)) < 0.3:
+        return {
+            "relation_type": "证据不足",
+            "reason": "当前本地证据没有显示候选论文明确使用、继承、引用或评测种子论文/数据集。",
+            "confidence": 0.55,
+            "relationship_strength": "not_enough_evidence",
+            "strict_followup": False,
+            "evidence_ids": [item.doc_id for item in relationship_evidence[:4]],
+        }
+    return {
+        "relation_type": str(fallback["relation_type"]),
+        "reason": str(fallback["reason"]),
+        "confidence": float(fallback["confidence"]),
+        "relationship_strength": str(fallback["strength"]),
+        "strict_followup": str(fallback["strength"]) == "direct",
+        "evidence_ids": [item.doc_id for item in relationship_evidence[:4]],
+    }
+
+
 def followup_validator_assessment_from_payload(
     *,
     payload: object,
