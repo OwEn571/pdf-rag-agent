@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.domain.models import QueryContract, SessionContext
-from app.services.contract_normalization import normalize_lookup_text
+from app.services.contract_normalization import normalize_lookup_text, normalize_modalities
 from app.services.research_planning import research_plan_goals
 
 
@@ -191,7 +191,7 @@ class FollowupRoutingMixin:
             requested_fields = list(contract.requested_fields) or list(active.requested_fields) or ["answer"]
         targets = self._normalize_contract_targets(targets=targets, requested_fields=requested_fields)
         raw_required_modalities = payload.get("required_modalities", contract.required_modalities)
-        required_modalities = self._normalize_modalities(
+        required_modalities = normalize_modalities(
             [str(item).strip() for item in raw_required_modalities if str(item).strip()]
             if isinstance(raw_required_modalities, list)
             else list(contract.required_modalities),

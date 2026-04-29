@@ -70,8 +70,6 @@ from app.services.contract_context import (
     observed_tool_names,
 )
 from app.services.contract_normalization import (
-    clean_contract_target_text,
-    is_structural_target_reference,
     normalize_contract_targets,
     normalize_lookup_text,
     normalize_modalities,
@@ -968,7 +966,7 @@ class ResearchAssistantAgentV4(
             targets = []
             requested_fields = []
         raw_required_modalities = payload.get("required_modalities", [])
-        required_modalities = self._normalize_modalities(
+        required_modalities = normalize_modalities(
             [str(item).strip() for item in raw_required_modalities if str(item).strip()] if isinstance(raw_required_modalities, list) else [],
             relation=relation,
         )
@@ -4403,18 +4401,6 @@ class ResearchAssistantAgentV4(
             requested_fields=requested_fields,
             canonicalize_targets=self.retriever.canonicalize_targets,
         )
-
-    @staticmethod
-    def _clean_contract_target_text(text: str) -> str:
-        return clean_contract_target_text(text)
-
-    @staticmethod
-    def _is_structural_target_reference(text: str) -> bool:
-        return is_structural_target_reference(text)
-
-    @staticmethod
-    def _normalize_modalities(modalities: list[str], *, relation: str) -> list[str]:
-        return normalize_modalities(modalities, relation=relation)
 
     def _build_research_plan(self, contract: QueryContract) -> ResearchPlan:
         return build_research_plan(contract=contract, settings=self.settings)

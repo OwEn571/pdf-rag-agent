@@ -5,7 +5,7 @@ import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
 from app.services import origin_selection_helpers as origin_helpers
-from app.services.contract_normalization import normalize_lookup_text
+from app.services.contract_normalization import is_structural_target_reference, normalize_lookup_text
 from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.query_shaping import is_short_acronym, matches_target
@@ -632,7 +632,11 @@ class ClaimVerifierMixin:
         )
 
     def _paper_identity_matches_targets(self, *, paper: CandidatePaper, targets: list[str]) -> bool:
-        normalized_targets = [str(item).strip() for item in targets if str(item).strip() and not self._is_structural_target_reference(item)]
+        normalized_targets = [
+            str(item).strip()
+            for item in targets
+            if str(item).strip() and not is_structural_target_reference(item)
+        ]
         if not normalized_targets:
             return True
         aliases = [alias.strip() for alias in str(paper.metadata.get("aliases", "")).split("||") if alias.strip()]
