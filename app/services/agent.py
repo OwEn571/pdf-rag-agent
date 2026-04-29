@@ -75,7 +75,11 @@ from app.services.contextual_contract_helpers import (
     active_paper_reference_notes,
     formula_answer_correction_contract,
     formula_contextual_paper_contract,
+    formula_followup_target,
     formula_location_followup_contract,
+    formula_query_allows_paper_context,
+    normalize_entity_key,
+    paper_hint_names,
     promote_contextual_metric_contract,
 )
 from app.services.conversation_memory_contract import (
@@ -84,7 +88,6 @@ from app.services.conversation_memory_contract import (
     target_binding_from_memory,
 )
 from app.services.followup_intents import (
-    formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
     is_memory_synthesis_query,
@@ -2308,7 +2311,11 @@ class ResearchAssistantAgentV4(
         paper = self._paper_from_query_hint(contract.clean_query)
         if paper is None:
             return contract
-        target = self._formula_followup_target(contract=contract, session=session, paper=paper)
+        target = formula_followup_target(
+            contract=contract,
+            active=session.effective_active_research(),
+            paper=paper,
+        )
         if not target:
             return contract
         return formula_location_followup_contract(contract=contract, paper=paper, target=target)
@@ -2326,7 +2333,11 @@ class ResearchAssistantAgentV4(
         paper = self._paper_from_query_hint(context_text)
         if paper is None:
             return contract
-        if not self._formula_query_allows_active_paper_context(contract=contract, session=session, paper=paper):
+        if not formula_query_allows_paper_context(
+            contract=contract,
+            active=session.effective_active_research(),
+            paper=paper,
+        ):
             return contract
         target = str(contract.targets[0] or "").strip()
         if not target or not self._paper_context_supports_formula_target(paper=paper, target=target):
@@ -2386,7 +2397,7 @@ class ResearchAssistantAgentV4(
             marker="active_paper_reference",
         )
         clean_query = contract.clean_query
-        if self._normalize_entity_key(paper.title) not in self._normalize_entity_key(clean_query):
+        if normalize_entity_key(paper.title) not in normalize_entity_key(clean_query):
             clean_query = f"限定在论文《{paper.title}》中回答：{clean_query}"
         scoped = contract.model_copy(
             update={
@@ -2396,20 +2407,6 @@ class ResearchAssistantAgentV4(
             }
         )
         return promote_contextual_metric_contract(scoped)
-
-    def _formula_query_allows_active_paper_context(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        paper: CandidatePaper,
-    ) -> bool:
-        active_names = [*session.effective_active_research().targets, *self._paper_hint_names(paper)]
-        return formula_query_allows_active_paper_context(
-            contract.clean_query,
-            active_names=active_names,
-            normalize_entity_key=self._normalize_entity_key,
-        )
 
     def _paper_context_supports_formula_target(self, *, paper: CandidatePaper, target: str) -> bool:
         target = str(target or "").strip()
@@ -2427,32 +2424,11 @@ class ResearchAssistantAgentV4(
                 return True
         return False
 
-    def _formula_followup_target(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        paper: CandidatePaper,
-    ) -> str:
-        paper_names = self._paper_hint_names(paper)
-        paper_name_keys = {self._normalize_entity_key(name) for name in paper_names if name}
-        active = session.effective_active_research()
-        active_keys = {normalize_lookup_text(item) for item in active.targets}
-        for target in contract.targets:
-            candidate = str(target or "").strip()
-            if not candidate:
-                continue
-            if self._normalize_entity_key(candidate) in paper_name_keys:
-                continue
-            if is_short_acronym(candidate) or normalize_lookup_text(candidate) in active_keys:
-                return candidate
-        return str(active.targets[0] or "").strip()
-
     def _paper_from_query_hint(self, query: str) -> CandidatePaper | None:
         query_text = str(query or "").strip()
         if not query_text:
             return None
-        query_key = self._normalize_entity_key(query_text)
+        query_key = normalize_entity_key(query_text)
         query_words = normalize_lookup_text(query_text)
         query_hints = [
             token
@@ -2469,11 +2445,11 @@ class ResearchAssistantAgentV4(
             if paper is None:
                 continue
             best = 0
-            for name in self._paper_hint_names(paper):
+            for name in paper_hint_names(paper):
                 name = str(name or "").strip()
                 if not name:
                     continue
-                name_key = self._normalize_entity_key(name)
+                name_key = normalize_entity_key(name)
                 if len(name_key) < 4:
                     continue
                 if name_key in query_key:
@@ -2500,26 +2476,6 @@ class ResearchAssistantAgentV4(
             return None
         scored.sort(key=lambda item: (-item[0], -len(item[1].title), item[1].title))
         return scored[0][1]
-
-    @staticmethod
-    def _paper_hint_names(paper: CandidatePaper) -> list[str]:
-        names: list[str] = []
-        title = str(paper.title or "").strip()
-        aliases = [alias.strip() for alias in str(paper.metadata.get("aliases", "")).split("||") if alias.strip()]
-        for item in [title, *aliases]:
-            if item and item not in names:
-                names.append(item)
-        if title:
-            for separator in [":", " - ", " — ", " – "]:
-                if separator in title:
-                    head = title.split(separator, 1)[0].strip()
-                    if head and head not in names:
-                        names.append(head)
-        return names
-
-    @staticmethod
-    def _normalize_entity_key(text: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
 
     def _contract_from_pending_clarification(
         self,

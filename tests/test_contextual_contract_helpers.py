@@ -5,7 +5,11 @@ from app.services.contextual_contract_helpers import (
     active_paper_reference_notes,
     formula_answer_correction_contract,
     formula_contextual_paper_contract,
+    formula_followup_target,
     formula_location_followup_contract,
+    formula_query_allows_paper_context,
+    normalize_entity_key,
+    paper_hint_names,
     promote_contextual_metric_contract,
 )
 
@@ -26,6 +30,38 @@ def test_active_paper_reference_notes_adds_selected_paper_context_once() -> None
         "resolved_from_conversation_memory",
         "memory_title=Paper Title",
     ]
+
+
+def test_paper_hint_names_include_title_aliases_and_title_head() -> None:
+    paper = CandidatePaper(
+        paper_id="p1",
+        title="AlignX: Scaling Personalized Preference",
+        metadata={"aliases": "AX||Align-X"},
+    )
+
+    assert paper_hint_names(paper) == [
+        "AlignX: Scaling Personalized Preference",
+        "AX",
+        "Align-X",
+        "AlignX",
+    ]
+    assert normalize_entity_key("Align-X!") == "alignx"
+
+
+def test_formula_followup_target_skips_paper_name_and_uses_active_target() -> None:
+    paper = CandidatePaper(paper_id="p1", title="DPO: Direct Preference Optimization")
+    active = ActiveResearch(targets=["DPO"])
+    contract = QueryContract(clean_query="这篇里的公式", targets=["DPO: Direct Preference Optimization"])
+
+    assert formula_followup_target(contract=contract, active=active, paper=paper) == "DPO"
+
+
+def test_formula_query_allows_paper_context_uses_active_target_and_paper_alias() -> None:
+    paper = CandidatePaper(paper_id="p1", title="AlignX Paper", metadata={"aliases": "AlignX"})
+    active = ActiveResearch(targets=["PBA"])
+    contract = QueryContract(clean_query="这篇论文里 PBA 的公式是什么？")
+
+    assert formula_query_allows_paper_context(contract=contract, active=active, paper=paper)
 
 
 def test_promote_contextual_metric_contract_adds_metric_requirements() -> None:

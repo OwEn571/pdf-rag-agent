@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import re
+
 from app.domain.models import ActiveResearch, CandidatePaper, QueryContract
-from app.services.followup_intents import looks_like_contextual_metric_query
+from app.services.contract_normalization import normalize_lookup_text
+from app.services.followup_intents import (
+    formula_query_allows_active_paper_context,
+    looks_like_contextual_metric_query,
+)
 from app.services.query_shaping import is_short_acronym
 
 
@@ -17,6 +23,54 @@ def active_paper_reference_notes(*, notes: list[str], paper: CandidatePaper, mar
             ]
         )
     )
+
+
+def paper_hint_names(paper: CandidatePaper) -> list[str]:
+    names: list[str] = []
+    title = str(paper.title or "").strip()
+    aliases = [alias.strip() for alias in str(paper.metadata.get("aliases", "")).split("||") if alias.strip()]
+    for item in [title, *aliases]:
+        if item and item not in names:
+            names.append(item)
+    if title:
+        for separator in [":", " - ", " — ", " – "]:
+            if separator in title:
+                head = title.split(separator, 1)[0].strip()
+                if head and head not in names:
+                    names.append(head)
+    return names
+
+
+def normalize_entity_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
+
+
+def formula_query_allows_paper_context(
+    *,
+    contract: QueryContract,
+    active: ActiveResearch,
+    paper: CandidatePaper,
+) -> bool:
+    active_names = [*active.targets, *paper_hint_names(paper)]
+    return formula_query_allows_active_paper_context(
+        contract.clean_query,
+        active_names=active_names,
+        normalize_entity_key=normalize_entity_key,
+    )
+
+
+def formula_followup_target(*, contract: QueryContract, active: ActiveResearch, paper: CandidatePaper) -> str:
+    paper_name_keys = {normalize_entity_key(name) for name in paper_hint_names(paper) if name}
+    active_keys = {normalize_lookup_text(item) for item in active.targets}
+    for target in contract.targets:
+        candidate = str(target or "").strip()
+        if not candidate:
+            continue
+        if normalize_entity_key(candidate) in paper_name_keys:
+            continue
+        if is_short_acronym(candidate) or normalize_lookup_text(candidate) in active_keys:
+            return candidate
+    return str(active.targets[0] or "").strip()
 
 
 def promote_contextual_metric_contract(contract: QueryContract) -> QueryContract:
