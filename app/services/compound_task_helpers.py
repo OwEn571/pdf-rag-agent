@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.domain.models import QueryContract, SessionContext, VerificationReport
+from app.services.conversation_memory_contract import active_memory_bindings
 from app.services.contract_normalization import normalize_contract_targets, normalize_lookup_text, normalize_modalities
 
 
@@ -311,6 +312,64 @@ def merge_redundant_field_subtasks(subcontracts: list[QueryContract]) -> list[Qu
             }
         )
     return merged
+
+
+def comparison_results_with_memory(
+    *,
+    subtask_results: list[dict[str, Any]],
+    session: SessionContext,
+    comparison_contract: QueryContract | None,
+) -> list[dict[str, Any]]:
+    augmented = list(subtask_results)
+    present_targets = {
+        normalize_lookup_text(target)
+        for result in augmented
+        if isinstance(result.get("contract"), QueryContract)
+        for target in result["contract"].targets
+        if str(target).strip()
+    }
+    requested_targets = list(comparison_contract.targets if comparison_contract is not None else [])
+    if not requested_targets:
+        requested_targets = list(
+            dict.fromkeys(
+                [
+                    *session.effective_active_research().targets,
+                    *[item.get("target", "") for item in active_memory_bindings(session)],
+                ]
+            )
+        )
+    bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
+    for target in requested_targets:
+        clean_target = str(target or "").strip()
+        key = normalize_lookup_text(clean_target)
+        if not key or key in present_targets:
+            continue
+        binding = bindings.get(key)
+        if not isinstance(binding, dict):
+            continue
+        relation = str(binding.get("relation", "") or "followup_research")
+        requested_fields = [str(item) for item in list(binding.get("requested_fields", []) or []) if str(item)]
+        contract = QueryContract(
+            clean_query=str(binding.get("clean_query", "") or clean_target),
+            relation=relation,
+            targets=[str(binding.get("target", "") or clean_target)],
+            requested_fields=requested_fields or ["answer"],
+            required_modalities=[str(item) for item in list(binding.get("required_modalities", []) or []) if str(item)] or ["page_text"],
+            continuation_mode="followup",
+            notes=["restored_from_session_memory_for_comparison"],
+        )
+        augmented.append(
+            {
+                "contract": contract,
+                "answer": str(binding.get("answer_preview", "") or ""),
+                "citations": [],
+                "claims": [],
+                "evidence": [],
+                "verification": VerificationReport(status="pass", recommended_action="memory_comparison_context"),
+            }
+        )
+        present_targets.add(key)
+    return augmented
 
 
 def compound_section_heading(*, contract: QueryContract, index: int) -> str:

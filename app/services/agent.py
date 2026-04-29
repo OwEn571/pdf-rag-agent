@@ -76,6 +76,7 @@ from app.services.citation_ranking import (
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.compound_task_helpers import (
+    comparison_results_with_memory,
     compound_subtask_contract_from_payload,
     compound_subtask_relation_from_slots,
     compound_task_label,
@@ -706,56 +707,11 @@ class ResearchAssistantAgentV4(
         session: SessionContext,
         comparison_contract: QueryContract | None,
     ) -> list[dict[str, Any]]:
-        augmented = list(subtask_results)
-        present_targets = {
-            normalize_lookup_text(target)
-            for result in augmented
-            if isinstance(result.get("contract"), QueryContract)
-            for target in result["contract"].targets
-            if str(target).strip()
-        }
-        requested_targets = list(comparison_contract.targets if comparison_contract is not None else [])
-        if not requested_targets:
-            requested_targets = list(
-                dict.fromkeys(
-                    [
-                        *session.effective_active_research().targets,
-                        *[item.get("target", "") for item in active_memory_bindings(session)],
-                    ]
-                )
-            )
-        bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
-        for target in requested_targets:
-            clean_target = str(target or "").strip()
-            key = normalize_lookup_text(clean_target)
-            if not key or key in present_targets:
-                continue
-            binding = bindings.get(key)
-            if not isinstance(binding, dict):
-                continue
-            relation = str(binding.get("relation", "") or "followup_research")
-            requested_fields = [str(item) for item in list(binding.get("requested_fields", []) or []) if str(item)]
-            contract = QueryContract(
-                clean_query=str(binding.get("clean_query", "") or clean_target),
-                relation=relation,
-                targets=[str(binding.get("target", "") or clean_target)],
-                requested_fields=requested_fields or ["answer"],
-                required_modalities=[str(item) for item in list(binding.get("required_modalities", []) or []) if str(item)] or ["page_text"],
-                continuation_mode="followup",
-                notes=["restored_from_session_memory_for_comparison"],
-            )
-            augmented.append(
-                {
-                    "contract": contract,
-                    "answer": str(binding.get("answer_preview", "") or ""),
-                    "citations": [],
-                    "claims": [],
-                    "evidence": [],
-                    "verification": VerificationReport(status="pass", recommended_action="memory_comparison_context"),
-                }
-            )
-            present_targets.add(key)
-        return augmented
+        return comparison_results_with_memory(
+            subtask_results=subtask_results,
+            session=session,
+            comparison_contract=comparison_contract,
+        )
 
     def _select_citation_ranking_candidates(
         self,

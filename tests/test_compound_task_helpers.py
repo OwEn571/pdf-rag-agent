@@ -4,6 +4,7 @@ import json
 
 from app.domain.models import QueryContract, SessionContext, VerificationReport
 from app.services.compound_task_helpers import (
+    comparison_results_with_memory,
     compound_contracts_from_decomposer_payload,
     compound_subtask_contract_from_payload,
     compound_subtask_relation_from_slots,
@@ -180,3 +181,39 @@ def test_llm_decompose_compound_query_uses_message_history_branch() -> None:
 
     assert len(contracts) == 2
     assert clients.messages[0] == {"role": "assistant", "content": "history"}
+
+
+def test_comparison_results_with_memory_restores_missing_target_binding() -> None:
+    session = SessionContext(
+        session_id="comparison-memory",
+        working_memory={
+            "target_bindings": {
+                "ppo": {
+                    "target": "PPO",
+                    "relation": "formula_lookup",
+                    "clean_query": "PPO 的公式是什么？",
+                    "requested_fields": ["formula"],
+                    "required_modalities": ["page_text", "table"],
+                    "answer_preview": "PPO uses a clipped objective.",
+                }
+            }
+        },
+    )
+    dpo_contract = QueryContract(clean_query="DPO 公式", relation="formula_lookup", targets=["DPO"])
+    comparison_contract = QueryContract(
+        clean_query="比较 DPO 和 PPO",
+        relation="comparison_synthesis",
+        targets=["DPO", "PPO"],
+    )
+
+    results = comparison_results_with_memory(
+        subtask_results=[{"contract": dpo_contract, "answer": "DPO answer"}],
+        session=session,
+        comparison_contract=comparison_contract,
+    )
+
+    assert len(results) == 2
+    restored = results[1]
+    assert restored["contract"].targets == ["PPO"]
+    assert restored["answer"] == "PPO uses a clipped objective."
+    assert restored["verification"].recommended_action == "memory_comparison_context"
