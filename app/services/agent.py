@@ -39,6 +39,9 @@ from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_tools import agent_tool_manifest
 from app.services.clarification_intents import (
+    CLARIFICATION_OPTION_SCHEMA_VERSION,
+    ambiguity_options_from_notes,
+    clarification_option_public_payload,
     looks_like_clarification_choice_text,
     pending_clarification_selection_index,
 )
@@ -139,7 +142,6 @@ from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
-CLARIFICATION_OPTION_SCHEMA_VERSION = "clarification_option.v1"
 ALLOWED_SUBPROCESS_COMMANDS = {"pdftoppm"}
 
 CANONICAL_TOOL_ALIASES = {
@@ -4002,7 +4004,7 @@ class ResearchAssistantAgentV4(
             and not str(note).startswith("selected_paper_id=")
             and not str(note).startswith("disambiguation_judge_")
         ]
-        selected_payload = self._clarification_option_public_payload(selected)
+        selected_payload = clarification_option_public_payload(selected)
         notes.append("auto_resolved_by_llm_judge")
         notes.append("selected_ambiguity_option=" + json.dumps(selected_payload, ensure_ascii=False))
         paper_id = str(selected.get("paper_id", "") or "").strip()
@@ -4253,58 +4255,12 @@ class ResearchAssistantAgentV4(
     def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:
         notes = [note for note in contract.notes if not str(note).startswith("ambiguity_option=")]
         for option in options[:4]:
-            payload = ResearchAssistantAgentV4._clarification_option_public_payload(option)
+            payload = clarification_option_public_payload(option)
             notes.append("ambiguity_option=" + json.dumps(payload, ensure_ascii=False))
         return contract.model_copy(update={"notes": notes})
 
-    @staticmethod
-    def _clarification_option_public_payload(option: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            "schema_version": option.get("schema_version", CLARIFICATION_OPTION_SCHEMA_VERSION),
-            "option_id": option.get("option_id", ""),
-            "kind": option.get("kind", ""),
-            "target": option.get("target", ""),
-            "label": option.get("label", ""),
-            "description": option.get("description", ""),
-            "paper_id": option.get("paper_id", ""),
-            "title": option.get("title", ""),
-            "year": option.get("year", ""),
-            "meaning": option.get("meaning", ""),
-            "snippet": option.get("snippet", ""),
-            "source": option.get("source", ""),
-            "source_relation": option.get("source_relation", ""),
-            "source_requested_fields": option.get("source_requested_fields", []),
-            "source_answer_slots": option.get("source_answer_slots", []),
-        }
-        for key in [
-            "display_title",
-            "display_label",
-            "display_reason",
-            "judge_recommended",
-            "disambiguation_confidence",
-            "source_required_modalities",
-        ]:
-            if key in option:
-                payload[key] = option.get(key)
-        return payload
-
-    @staticmethod
-    def _ambiguity_options_from_notes(notes: list[str]) -> list[dict[str, Any]]:
-        options: list[dict[str, Any]] = []
-        for note in notes:
-            raw = str(note or "")
-            if not raw.startswith("ambiguity_option="):
-                continue
-            try:
-                payload = json.loads(raw.split("=", 1)[1])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict) and payload.get("title"):
-                options.append(payload)
-        return options
-
     def _clarification_options(self, contract: QueryContract) -> list[dict[str, Any]]:
-        options = self._ambiguity_options_from_notes(contract.notes)
+        options = ambiguity_options_from_notes(contract.notes)
         target = contract.targets[0] if contract.targets else ""
         return self._normalize_clarification_options(
             options,
@@ -4557,7 +4513,7 @@ class ResearchAssistantAgentV4(
                 option_count = 1
             else:
                 option_count = len(self._acronym_options_from_evidence(target=contract.targets[0], papers=papers, evidence=evidence))
-            if option_count > 1 and not claims and not self._ambiguity_options_from_notes(contract.notes):
+            if option_count > 1 and not claims and not ambiguity_options_from_notes(contract.notes):
                 return {
                     "decision": "clarify",
                     "reason": "Multiple acronym meanings remain unresolved.",
@@ -5536,7 +5492,7 @@ class ResearchAssistantAgentV4(
             return ""
 
     def _clarification_question(self, contract: QueryContract, session: SessionContext) -> str:
-        ambiguity_options = self._ambiguity_options_from_notes(contract.notes)
+        ambiguity_options = ambiguity_options_from_notes(contract.notes)
         if (
             not ambiguity_options
             and session.pending_clarification_type == "ambiguity"

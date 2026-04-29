@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
 
+
+CLARIFICATION_OPTION_SCHEMA_VERSION = "clarification_option.v1"
 
 CLARIFICATION_CHOICE_MARKERS = [
     "我说",
@@ -50,3 +54,49 @@ def pending_clarification_selection_index(query: str) -> int | None:
         if any(marker in compact for marker in markers):
             return index
     return None
+
+
+def clarification_option_public_payload(option: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "schema_version": option.get("schema_version", CLARIFICATION_OPTION_SCHEMA_VERSION),
+        "option_id": option.get("option_id", ""),
+        "kind": option.get("kind", ""),
+        "target": option.get("target", ""),
+        "label": option.get("label", ""),
+        "description": option.get("description", ""),
+        "paper_id": option.get("paper_id", ""),
+        "title": option.get("title", ""),
+        "year": option.get("year", ""),
+        "meaning": option.get("meaning", ""),
+        "snippet": option.get("snippet", ""),
+        "source": option.get("source", ""),
+        "source_relation": option.get("source_relation", ""),
+        "source_requested_fields": option.get("source_requested_fields", []),
+        "source_answer_slots": option.get("source_answer_slots", []),
+    }
+    for key in [
+        "display_title",
+        "display_label",
+        "display_reason",
+        "judge_recommended",
+        "disambiguation_confidence",
+        "source_required_modalities",
+    ]:
+        if key in option:
+            payload[key] = option.get(key)
+    return payload
+
+
+def ambiguity_options_from_notes(notes: list[str]) -> list[dict[str, Any]]:
+    options: list[dict[str, Any]] = []
+    for note in notes:
+        raw = str(note or "")
+        if not raw.startswith("ambiguity_option="):
+            continue
+        try:
+            payload = json.loads(raw.split("=", 1)[1])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and payload.get("title"):
+            options.append(payload)
+    return options
