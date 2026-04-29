@@ -41,6 +41,7 @@ from app.services.agent_runtime_helpers import (
     filter_candidate_papers_by_excluded_titles,
     filter_evidence_by_excluded_titles,
     prefer_selected_clarification_paper,
+    screen_agent_papers,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
@@ -134,7 +135,6 @@ from app.services.evidence_presentation import (
 )
 from app.services.followup_candidate_helpers import (
     expand_followup_candidate_pool,
-    filter_followup_candidates,
     llm_validate_followup_candidate,
     rank_followup_candidates,
     resolve_followup_seed_papers,
@@ -909,51 +909,28 @@ class ResearchAssistantAgentV4(
         candidate_papers: list[CandidatePaper],
         excluded_titles: set[str],
     ) -> tuple[list[CandidatePaper], list[EvidenceBlock] | None]:
-        selected_paper_id = selected_clarification_paper_id(contract)
-        candidate_papers = prefer_selected_clarification_paper(
-            candidate_papers,
+        return screen_agent_papers(
             contract=contract,
+            plan=plan,
+            candidate_papers=candidate_papers,
+            excluded_titles=excluded_titles,
             paper_lookup=self._candidate_from_paper_id,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            prefer_identity_matching_papers=lambda candidates, targets: self._prefer_identity_matching_papers(
+                candidates=candidates,
+                targets=targets,
+            ),
+            search_entity_evidence=lambda query, search_contract, limit: self.retriever.search_entity_evidence(
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+            ground_entity_papers=lambda candidates, evidence, limit: self._ground_entity_papers(
+                candidates=candidates,
+                evidence=evidence,
+                limit=limit,
+            ),
         )
-        screened_papers = candidate_papers
-        precomputed_evidence: list[EvidenceBlock] | None = None
-        goals = research_plan_goals(contract)
-        if goals & {"followup_papers", "candidate_relationship", "strict_followup"}:
-            screened_papers = filter_followup_candidates(
-                contract=contract,
-                candidates=candidate_papers,
-                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            )
-        elif "formula" in goals and contract.targets:
-            screened_papers = self._prefer_identity_matching_papers(candidates=candidate_papers, targets=contract.targets)
-        elif "figure_conclusion" in goals and contract.targets:
-            screened_papers = self._prefer_identity_matching_papers(candidates=candidate_papers, targets=contract.targets)
-        elif goals & {"entity_type", "role_in_context"}:
-            entity_evidence_limit = self._entity_evidence_limit(
-                contract=contract,
-                plan=plan,
-                excluded_titles=excluded_titles,
-            )
-            precomputed_evidence = self.retriever.search_entity_evidence(
-                query=evidence_query_text(contract),
-                contract=contract,
-                limit=entity_evidence_limit,
-            )
-            if selected_paper_id:
-                precomputed_evidence = [item for item in precomputed_evidence if item.paper_id == selected_paper_id]
-            if excluded_titles:
-                precomputed_evidence = self._filter_evidence_by_excluded_titles(
-                    precomputed_evidence,
-                    excluded_titles=excluded_titles,
-                )
-            grounded_papers = self._ground_entity_papers(
-                candidates=candidate_papers,
-                evidence=precomputed_evidence,
-                limit=plan.paper_limit,
-            )
-            if grounded_papers:
-                screened_papers = grounded_papers
-        return screened_papers, precomputed_evidence
 
     def _agent_search_evidence(
         self,

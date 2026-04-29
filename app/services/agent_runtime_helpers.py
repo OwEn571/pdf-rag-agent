@@ -12,7 +12,8 @@ from app.services.confidence import (
     should_ask_human,
 )
 from app.services.contract_normalization import normalize_lookup_text
-from app.services.query_shaping import is_short_acronym
+from app.services.followup_candidate_helpers import filter_followup_candidates
+from app.services.query_shaping import evidence_query_text, is_short_acronym
 from app.services.research_planning import research_plan_goals
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
@@ -26,6 +27,10 @@ FallbackNextFn = Callable[[set[str]], str | None]
 StopConditionFn = Callable[[set[str]], bool]
 PaperTitleLookupFn = Callable[[str], str | None]
 PaperLookupFn = Callable[[str], CandidatePaper | None]
+PaperSummaryFn = Callable[[str], str]
+PaperIdentityMatcherFn = Callable[[list[CandidatePaper], list[str]], list[CandidatePaper]]
+EntityEvidenceSearchFn = Callable[[str, QueryContract, int], list[EvidenceBlock]]
+GroundEntityPapersFn = Callable[[list[CandidatePaper], list[EvidenceBlock], int], list[CandidatePaper]]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -170,6 +175,61 @@ def entity_evidence_limit(*, contract: QueryContract, plan: ResearchPlan, exclud
     if goals & {"entity_type", "role_in_context"} and contract.targets and is_short_acronym(contract.targets[0]):
         return max(plan.evidence_limit, 96 if excluded_titles else 72)
     return plan.evidence_limit
+
+
+def screen_agent_papers(
+    *,
+    contract: QueryContract,
+    plan: ResearchPlan,
+    candidate_papers: list[CandidatePaper],
+    excluded_titles: set[str],
+    paper_lookup: PaperLookupFn,
+    paper_summary_text: PaperSummaryFn,
+    prefer_identity_matching_papers: PaperIdentityMatcherFn,
+    search_entity_evidence: EntityEvidenceSearchFn,
+    ground_entity_papers: GroundEntityPapersFn,
+) -> tuple[list[CandidatePaper], list[EvidenceBlock] | None]:
+    selected_paper_id = selected_clarification_paper_id(contract)
+    candidate_papers = prefer_selected_clarification_paper(
+        candidate_papers,
+        contract=contract,
+        paper_lookup=paper_lookup,
+    )
+    screened_papers = candidate_papers
+    precomputed_evidence: list[EvidenceBlock] | None = None
+    goals = research_plan_goals(contract)
+    if goals & {"followup_papers", "candidate_relationship", "strict_followup"}:
+        screened_papers = filter_followup_candidates(
+            contract=contract,
+            candidates=candidate_papers,
+            paper_summary_text=paper_summary_text,
+        )
+    elif "formula" in goals and contract.targets:
+        screened_papers = prefer_identity_matching_papers(candidate_papers, contract.targets)
+    elif "figure_conclusion" in goals and contract.targets:
+        screened_papers = prefer_identity_matching_papers(candidate_papers, contract.targets)
+    elif goals & {"entity_type", "role_in_context"}:
+        limit = entity_evidence_limit(
+            contract=contract,
+            plan=plan,
+            excluded_titles=excluded_titles,
+        )
+        precomputed_evidence = search_entity_evidence(
+            evidence_query_text(contract),
+            contract,
+            limit,
+        )
+        if selected_paper_id:
+            precomputed_evidence = [item for item in precomputed_evidence if item.paper_id == selected_paper_id]
+        if excluded_titles:
+            precomputed_evidence = filter_evidence_by_excluded_titles(
+                precomputed_evidence,
+                excluded_titles=excluded_titles,
+            )
+        grounded_papers = ground_entity_papers(candidate_papers, precomputed_evidence, plan.paper_limit)
+        if grounded_papers:
+            screened_papers = grounded_papers
+    return screened_papers, precomputed_evidence
 
 
 def claim_focus_titles(

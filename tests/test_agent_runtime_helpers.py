@@ -26,6 +26,7 @@ from app.services.agent_runtime_helpers import (
     prefer_selected_clarification_paper,
     research_runtime_actions,
     research_runtime_state,
+    screen_agent_papers,
     tool_loop_ready_tool,
     verification_execution_step,
 )
@@ -156,6 +157,69 @@ def test_runtime_helpers_prefer_selected_clarification_paper() -> None:
         contract=QueryContract(clean_query="普通查询"),
         paper_lookup=lambda _: None,
     ) == candidates
+
+
+def test_runtime_helpers_screen_agent_papers_entity_path_filters_selected_evidence() -> None:
+    candidates = [
+        CandidatePaper(paper_id="p1", title="First"),
+        CandidatePaper(paper_id="p2", title="Second"),
+    ]
+    evidence = [
+        EvidenceBlock(doc_id="e1", paper_id="p1", title="First", file_path="", page=1, block_type="page_text", snippet="PBA one"),
+        EvidenceBlock(doc_id="e2", paper_id="p2", title="Second", file_path="", page=1, block_type="page_text", snippet="PBA two"),
+    ]
+    calls: dict[str, object] = {}
+
+    def search_entity(query: str, contract: QueryContract, limit: int) -> list[EvidenceBlock]:
+        calls["args"] = (query, contract, limit)
+        return evidence
+
+    screened, precomputed = screen_agent_papers(
+        contract=QueryContract(
+            clean_query="PBA是什么",
+            targets=["PBA"],
+            requested_fields=["role_in_context"],
+            notes=["selected_paper_id=p2"],
+        ),
+        plan=ResearchPlan(paper_limit=4, evidence_limit=8),
+        candidate_papers=candidates,
+        excluded_titles=set(),
+        paper_lookup=lambda _: None,
+        paper_summary_text=lambda _: "",
+        prefer_identity_matching_papers=lambda papers, _: papers,
+        search_entity_evidence=search_entity,
+        ground_entity_papers=lambda papers, found_evidence, limit: [
+            paper for paper in papers[:limit] if paper.paper_id in {item.paper_id for item in found_evidence}
+        ],
+    )
+
+    assert [item.paper_id for item in screened] == ["p2"]
+    assert [item.doc_id for item in precomputed or []] == ["e2"]
+    query, _, limit = calls["args"]
+    assert "PBA" in str(query)
+    assert limit == 72
+
+
+def test_runtime_helpers_screen_agent_papers_formula_path_uses_identity_matcher() -> None:
+    candidates = [
+        CandidatePaper(paper_id="p1", title="Wrong"),
+        CandidatePaper(paper_id="p2", title="DPO"),
+    ]
+
+    screened, precomputed = screen_agent_papers(
+        contract=QueryContract(clean_query="DPO公式", targets=["DPO"], requested_fields=["formula"]),
+        plan=ResearchPlan(paper_limit=4, evidence_limit=8),
+        candidate_papers=candidates,
+        excluded_titles=set(),
+        paper_lookup=lambda _: None,
+        paper_summary_text=lambda _: "",
+        prefer_identity_matching_papers=lambda papers, targets: [paper for paper in papers if paper.title in targets],
+        search_entity_evidence=lambda *_: [],
+        ground_entity_papers=lambda papers, *_: papers,
+    )
+
+    assert [item.paper_id for item in screened] == ["p2"]
+    assert precomputed is None
 
 
 def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates() -> None:
