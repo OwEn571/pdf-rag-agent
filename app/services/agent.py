@@ -168,9 +168,8 @@ from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
     collect_web_evidence,
-    merge_evidence,
+    search_agent_web_evidence,
     should_add_web_claim,
-    web_query_text,
 )
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -1002,31 +1001,32 @@ class ResearchAssistantAgentV4(
     ) -> None:
         contract: QueryContract = state["contract"]
         tool_input = tool_input_from_state(state, "web_search")
-        web_query = str(tool_input.get("query", "") or "").strip() or web_query_text(contract)
-        result_limit = coerce_int(
-            tool_input.get("max_results", max_web_results),
-            default=max_web_results,
-            minimum=1,
-            maximum=20,
+        result = search_agent_web_evidence(
+            contract=contract,
+            existing_evidence=state["evidence"],
+            tool_input=tool_input,
+            web_enabled=web_enabled,
+            max_web_results=max_web_results,
+            collect=lambda search_contract, enabled, limit, query: self._collect_web_evidence(
+                contract=search_contract,
+                use_web_search=enabled,
+                max_web_results=limit,
+                query_override=query,
+            ),
         )
         self._emit_agent_tool_call(
             emit=emit,
             tool="web_search",
             arguments={
-                "query": web_query,
-                "max_results": result_limit,
+                "query": result.query,
+                "max_results": result.max_results,
                 "enabled": web_enabled,
             },
         )
-        web_evidence = self._collect_web_evidence(
-            contract=contract,
-            use_web_search=web_enabled,
-            max_web_results=result_limit,
-            query_override=web_query,
-        )
+        web_evidence = result.web_evidence
         state["web_evidence"] = web_evidence
         if web_evidence:
-            state["evidence"] = merge_evidence(state["evidence"], web_evidence)
+            state["evidence"] = result.merged_evidence
             emit("web_search", {"count": len(web_evidence), "items": [item.model_dump() for item in web_evidence]})
             emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
         self._record_agent_observation(

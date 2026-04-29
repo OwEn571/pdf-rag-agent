@@ -5,6 +5,7 @@ from app.services.web_evidence import (
     build_web_research_claim,
     collect_web_evidence,
     merge_evidence,
+    search_agent_web_evidence,
     should_add_web_claim,
     web_include_domains,
     web_query_text,
@@ -113,6 +114,57 @@ def test_web_evidence_collects_with_query_override_and_gate() -> None:
         use_web_search=False,
         max_web_results=3,
     ) == []
+
+
+def test_web_evidence_agent_search_normalizes_query_limit_and_merges() -> None:
+    contract = QueryContract(
+        clean_query="最新 RAG 论文",
+        relation="paper_recommendation",
+        targets=["RAG"],
+        requested_fields=["recommended_papers"],
+    )
+    local = [
+        EvidenceBlock(doc_id="local-a", paper_id="paper-a", title="A", file_path="", page=1, block_type="page_text", snippet="local")
+    ]
+    web = [
+        EvidenceBlock(doc_id="web-a", paper_id="web-a", title="Web", file_path="https://example.com", page=0, block_type="web", snippet="web")
+    ]
+    calls: list[tuple[QueryContract, bool, int, str]] = []
+
+    result = search_agent_web_evidence(
+        contract=contract,
+        existing_evidence=local,
+        tool_input={"query": "custom web query", "max_results": 99},
+        web_enabled=True,
+        max_web_results=3,
+        collect=lambda item_contract, enabled, limit, query: calls.append((item_contract, enabled, limit, query)) or web,
+    )
+
+    assert result.query == "custom web query"
+    assert result.max_results == 20
+    assert result.web_evidence == web
+    assert [item.doc_id for item in result.merged_evidence] == ["local-a", "web-a"]
+    assert calls == [(contract, True, 20, "custom web query")]
+
+
+def test_web_evidence_agent_search_keeps_existing_evidence_when_web_empty() -> None:
+    contract = QueryContract(clean_query="RAG")
+    local = [
+        EvidenceBlock(doc_id="local-a", paper_id="paper-a", title="A", file_path="", page=1, block_type="page_text", snippet="local")
+    ]
+
+    result = search_agent_web_evidence(
+        contract=contract,
+        existing_evidence=local,
+        tool_input={},
+        web_enabled=False,
+        max_web_results=3,
+        collect=lambda *_: [],
+    )
+
+    assert result.query == web_query_text(contract)
+    assert result.web_evidence == []
+    assert result.merged_evidence == local
 
 
 def test_web_evidence_claim_decision_and_payload() -> None:

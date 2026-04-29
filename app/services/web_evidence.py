@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from app.domain.models import Claim, EvidenceBlock, QueryContract
@@ -15,6 +17,24 @@ WEB_RESEARCH_DOMAINS = [
     "papers.nips.cc",
     "thecvf.com",
 ]
+
+WebEvidenceCollector = Callable[[QueryContract, bool, int, str], list[EvidenceBlock]]
+
+
+@dataclass(frozen=True)
+class AgentWebEvidenceResult:
+    query: str
+    max_results: int
+    web_evidence: list[EvidenceBlock]
+    merged_evidence: list[EvidenceBlock]
+
+
+def coerce_web_result_limit(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(20, parsed))
 
 
 def web_query_text(contract: QueryContract) -> str:
@@ -72,6 +92,30 @@ def collect_web_evidence(
         max_results=max_web_results,
         topic=web_search_topic(search_query or contract.clean_query),
         include_domains=web_include_domains(contract),
+    )
+
+
+def search_agent_web_evidence(
+    *,
+    contract: QueryContract,
+    existing_evidence: list[EvidenceBlock],
+    tool_input: dict[str, Any],
+    web_enabled: bool,
+    max_web_results: int,
+    collect: WebEvidenceCollector,
+) -> AgentWebEvidenceResult:
+    web_query = str(tool_input.get("query", "") or "").strip() or web_query_text(contract)
+    result_limit = coerce_web_result_limit(
+        tool_input.get("max_results", max_web_results),
+        default=max_web_results,
+    )
+    web_evidence = collect(contract, web_enabled, result_limit, web_query)
+    merged_evidence = merge_evidence(existing_evidence, web_evidence) if web_evidence else existing_evidence
+    return AgentWebEvidenceResult(
+        query=web_query,
+        max_results=result_limit,
+        web_evidence=web_evidence,
+        merged_evidence=merged_evidence,
     )
 
 
