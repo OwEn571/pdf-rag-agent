@@ -3868,6 +3868,36 @@ def test_contextual_method_result_query_binds_to_active_paper(tmp_path: Path) ->
     assert "PersonaDual" not in contract.clean_query
 
 
+def test_metric_definition_followup_reuses_active_metric_context(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("metric-definition-followup")
+    session.set_active_research(
+        relation="metric_value_lookup",
+        targets=["ICA", "PBA"],
+        titles=["From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment"],
+        requested_fields=["metric_value", "setting", "evidence"],
+        required_modalities=["table", "caption", "page_text"],
+        answer_shape="table",
+        precision_requirement="exact",
+        clean_query="ICA、PBA 方法在各数据集上的准确度是多少？",
+    )
+    agent.sessions.upsert(session)
+
+    contract = agent._extract_query_contract(
+        query="这个准确度是怎么定义的？",
+        session=session,
+        mode="auto",
+    )
+
+    assert contract.relation == "metric_value_lookup"
+    assert contract.interaction_mode == "research"
+    assert contract.continuation_mode == "followup"
+    assert contract.targets == ["ICA", "PBA"]
+    assert contract.requested_fields == ["metric_value", "metric_definition", "setting", "evidence"]
+    assert contract.required_modalities == ["table", "caption", "page_text"]
+    assert "metric_definition_followup" in contract.notes
+
+
 def test_paper_scope_correction_reuses_previous_targets_in_named_paper(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     persona_title = "PersonaDual: Balancing Personalization and Objectivity via Adaptive Reasoning"
