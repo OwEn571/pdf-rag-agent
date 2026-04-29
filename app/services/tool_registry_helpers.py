@@ -15,6 +15,7 @@ from app.services.evidence_tools import (
 from app.services.learnings import remember_learning
 from app.services.proposed_tools import propose_tool as record_tool_proposal
 from app.services.url_fetcher import FetchUrlResult
+from app.services.web_evidence import merge_evidence
 
 
 def tool_input_from_state(state: dict[str, Any], name: str) -> dict[str, Any]:
@@ -552,7 +553,7 @@ def store_research_evidence_result(
     state: dict[str, Any],
     evidence: list[EvidenceBlock],
 ) -> list[Any]:
-    state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), evidence)
+    state["evidence"] = merge_evidence(list(state.get("evidence", []) or []), evidence)
     papers = [
         paper
         for paper_id in list(dict.fromkeys(item.paper_id for item in evidence if item.paper_id))
@@ -585,7 +586,7 @@ def store_fetch_url_evidence_result(
     if evidence is None:
         return None
     state["web_evidence"] = [*list(state.get("web_evidence", []) or []), evidence]
-    state["evidence"] = agent._merge_evidence(list(state.get("evidence", []) or []), [evidence])
+    state["evidence"] = merge_evidence(list(state.get("evidence", []) or []), [evidence])
     return evidence_event_payload([evidence])
 
 

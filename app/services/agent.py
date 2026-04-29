@@ -2035,7 +2035,7 @@ class ResearchAssistantAgentV4(
     ) -> None:
         contract: QueryContract = state["contract"]
         tool_input = self._state_tool_input(state, "web_search")
-        web_query = str(tool_input.get("query", "") or "").strip() or self._web_query_text(contract)
+        web_query = str(tool_input.get("query", "") or "").strip() or web_query_text(contract)
         result_limit = self._tool_int_arg(tool_input, "max_results", default=max_web_results, minimum=1, maximum=20)
         self._emit_agent_tool_call(
             emit=emit,
@@ -2054,7 +2054,7 @@ class ResearchAssistantAgentV4(
         )
         state["web_evidence"] = web_evidence
         if web_evidence:
-            state["evidence"] = self._merge_evidence(state["evidence"], web_evidence)
+            state["evidence"] = merge_evidence(state["evidence"], web_evidence)
             emit("web_search", {"count": len(web_evidence), "items": [item.model_dump() for item in web_evidence]})
             emit("evidence", {"count": len(state["evidence"]), "items": [item.model_dump() for item in state["evidence"]]})
         self._record_agent_observation(
@@ -2136,7 +2136,7 @@ class ResearchAssistantAgentV4(
                     max_web_results=max_web_results,
                 )
                 web_evidence: list[EvidenceBlock] = state["web_evidence"]
-                if web_evidence and self._should_add_web_claim(
+                if web_evidence and should_add_web_claim(
                     contract=contract,
                     claims=claims,
                     explicit_web=explicit_web_search,
@@ -2167,7 +2167,7 @@ class ResearchAssistantAgentV4(
                 max_web_results=max_web_results,
             )
             web_evidence: list[EvidenceBlock] = state["web_evidence"]
-            if web_evidence and self._should_add_web_claim(
+            if web_evidence and should_add_web_claim(
                 contract=contract,
                 claims=claims,
                 explicit_web=explicit_web_search,
@@ -4680,33 +4680,13 @@ class ResearchAssistantAgentV4(
     ) -> list[EvidenceBlock]:
         if not use_web_search or not self.web_search.is_configured:
             return []
-        search_query = str(query_override or "").strip() or self._web_query_text(contract)
+        search_query = str(query_override or "").strip() or web_query_text(contract)
         return self.web_search.search(
             query=search_query,
             max_results=max_web_results,
-            topic=self._web_search_topic(search_query or contract.clean_query),
-            include_domains=self._web_include_domains(contract),
+            topic=web_search_topic(search_query or contract.clean_query),
+            include_domains=web_include_domains(contract),
         )
-
-    @staticmethod
-    def _web_query_text(contract: QueryContract) -> str:
-        return web_query_text(contract)
-
-    @staticmethod
-    def _web_search_topic(query: str) -> str:
-        return web_search_topic(query)
-
-    @staticmethod
-    def _web_include_domains(contract: QueryContract) -> list[str]:
-        return web_include_domains(contract)
-
-    @staticmethod
-    def _merge_evidence(local_evidence: list[EvidenceBlock], web_evidence: list[EvidenceBlock]) -> list[EvidenceBlock]:
-        return merge_evidence(local_evidence, web_evidence)
-
-    @staticmethod
-    def _should_add_web_claim(*, contract: QueryContract, claims: list[Claim], explicit_web: bool) -> bool:
-        return should_add_web_claim(contract=contract, claims=claims, explicit_web=explicit_web)
 
     @staticmethod
     def _build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:
