@@ -74,7 +74,7 @@ from app.services.citation_ranking import (
     select_citation_ranking_candidates,
     semantic_scholar_citation_evidence,
 )
-from app.services.compound_intents import should_try_compound_decomposition_heuristic
+from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
     compose_compound_comparison_answer,
     comparison_results_with_memory,
@@ -526,17 +526,7 @@ class ResearchAssistantAgentV4(
         return is_formula_interpretation_followup_query(clean_query, had_formula_context=had_formula_context)
 
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
-        normalized = normalize_lookup_text(clean_query)
-        memory = dict((session.working_memory if session is not None else {}) or {})
-        bindings = dict(memory.get("target_bindings", {}) or {})
-        has_memory_context = bool(bindings or (session is not None and session.effective_active_research().targets))
-        target_count = len({target.lower() for target in extract_targets(clean_query)})
-        return should_try_compound_decomposition_heuristic(
-            clean_query,
-            normalized_query=normalized,
-            target_count=target_count,
-            has_memory_context=has_memory_context,
-        )
+        return should_try_compound_decomposition_query(clean_query, session=session)
 
     def _llm_decompose_compound_query(self, *, clean_query: str, session: SessionContext) -> list[QueryContract]:
         return llm_decompose_compound_query(

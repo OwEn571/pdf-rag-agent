@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.services.compound_intents import should_try_compound_decomposition_heuristic
+from app.domain.models import SessionContext
+from app.services.compound_intents import should_try_compound_decomposition, should_try_compound_decomposition_heuristic
 
 
 def test_compound_intent_detects_library_count_plus_recommendation() -> None:
@@ -40,3 +41,20 @@ def test_compound_intent_detects_multi_target_task_cues() -> None:
         target_count=1,
         has_memory_context=False,
     )
+
+
+def test_compound_intent_session_aware_wrapper_uses_active_context_for_comparison() -> None:
+    session = SessionContext(session_id="compound-intent")
+    session.set_active_research(
+        relation="formula_lookup",
+        targets=["DPO", "PPO"],
+        titles=[],
+        requested_fields=["formula"],
+        required_modalities=["page_text"],
+        answer_shape="bullets",
+        precision_requirement="exact",
+        clean_query="DPO 和 PPO 公式",
+    )
+
+    assert should_try_compound_decomposition("两者区别是什么？", session=session)
+    assert not should_try_compound_decomposition("两者区别是什么？", session=SessionContext(session_id="empty"))
