@@ -22,6 +22,7 @@ from app.services.followup_candidate_helpers import (
     followup_target_aliases,
     followup_validator_assessment_from_payload,
     infer_followup_relation_type,
+    llm_validate_followup_candidate,
     merge_followup_rankings,
     paper_anchor_text,
     paper_brief,
@@ -633,6 +634,48 @@ def test_followup_validator_assessment_from_payload_normalizes_defaults() -> Non
     assert assessment["relation_type"] == "严格后续/直接使用证据"
     assert assessment["reason"] == "uses the seed benchmark"
     assert assessment["confidence"] == 0.91
+    assert assessment["evidence_ids"] == ["candidate-doc"]
+
+
+def test_llm_validate_followup_candidate_invokes_validator_and_normalizes_payload() -> None:
+    class Clients:
+        chat = object()
+
+        def invoke_json(self, *, system_prompt: str, human_prompt: str, fallback: object) -> object:
+            assert "strict_followup" in system_prompt
+            payload = json.loads(human_prompt)
+            assert payload["candidate_paper"]["paper_id"] == "candidate"
+            return {
+                "classification": "strict_followup",
+                "strict_followup": True,
+                "reason": "uses benchmark",
+                "confidence": 0.86,
+                "evidence_ids": ["candidate-doc"],
+            }
+
+    evidence = [
+        EvidenceBlock(
+            doc_id="candidate-doc",
+            paper_id="candidate",
+            title="Candidate Paper",
+            file_path="candidate.pdf",
+            page=2,
+            block_type="page_text",
+            snippet="candidate evidence",
+        )
+    ]
+    assessment = llm_validate_followup_candidate(
+        contract=QueryContract(clean_query="关系", targets=["Seed"]),
+        seed_papers=[CandidatePaper(paper_id="seed", title="Seed Paper")],
+        paper=CandidatePaper(paper_id="candidate", title="Candidate Paper"),
+        relationship_evidence=evidence,
+        clients=Clients(),
+        paper_summary_text=lambda paper_id: f"summary:{paper_id}",
+        coerce_confidence=lambda value: float(value),
+    )
+
+    assert assessment["relation_type"] == "严格后续/直接使用证据"
+    assert assessment["confidence"] == 0.86
     assert assessment["evidence_ids"] == ["candidate-doc"]
 
 

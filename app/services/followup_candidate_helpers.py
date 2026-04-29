@@ -790,6 +790,36 @@ def followup_relationship_validator_human_prompt(
     )
 
 
+def llm_validate_followup_candidate(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    relationship_evidence: list[EvidenceBlock],
+    clients: Any,
+    paper_summary_text: PaperText,
+    coerce_confidence: ConfidenceCoercer,
+) -> dict[str, Any]:
+    if getattr(clients, "chat", None) is None or not seed_papers:
+        return {}
+    payload = clients.invoke_json(
+        system_prompt=followup_relationship_validator_system_prompt(),
+        human_prompt=followup_relationship_validator_human_prompt(
+            contract=contract,
+            seed_papers=seed_papers,
+            paper=paper,
+            relationship_evidence=relationship_evidence,
+            paper_summary_text=paper_summary_text,
+        ),
+        fallback={},
+    )
+    return followup_validator_assessment_from_payload(
+        payload=payload,
+        relationship_evidence=relationship_evidence,
+        coerce_confidence=coerce_confidence,
+    )
+
+
 def followup_validator_assessment_from_payload(
     *,
     payload: object,

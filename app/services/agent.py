@@ -136,9 +136,7 @@ from app.services.followup_candidate_helpers import (
     filter_followup_candidates,
     followup_relationship_assessment,
     followup_relationship_evidence,
-    followup_relationship_validator_human_prompt,
-    followup_relationship_validator_system_prompt,
-    followup_validator_assessment_from_payload,
+    llm_validate_followup_candidate,
     rank_followup_candidates,
     resolve_followup_seed_papers,
 )
@@ -2378,22 +2376,13 @@ class ResearchAssistantAgentV4(
         paper: CandidatePaper,
         relationship_evidence: list[EvidenceBlock],
     ) -> dict[str, Any]:
-        if self.clients.chat is None or not seed_papers:
-            return {}
-        payload = self.clients.invoke_json(
-            system_prompt=followup_relationship_validator_system_prompt(),
-            human_prompt=followup_relationship_validator_human_prompt(
-                contract=contract,
-                seed_papers=seed_papers,
-                paper=paper,
-                relationship_evidence=relationship_evidence,
-                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            ),
-            fallback={},
-        )
-        return followup_validator_assessment_from_payload(
-            payload=payload,
+        return llm_validate_followup_candidate(
+            contract=contract,
+            seed_papers=seed_papers,
+            paper=paper,
             relationship_evidence=relationship_evidence,
+            clients=self.clients,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
             coerce_confidence=lambda value: self._coerce_confidence(value),
         )
 
