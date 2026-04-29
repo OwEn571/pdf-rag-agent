@@ -3,12 +3,50 @@ from __future__ import annotations
 import json
 import re
 
-from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
+from app.domain.models import (
+    CandidatePaper,
+    Claim,
+    EvidenceBlock,
+    QueryContract,
+    ResearchPlan,
+    VerificationReport,
+)
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.contract_normalization import is_structural_target_reference, normalize_lookup_text
 from app.services.evidence_presentation import extract_topology_terms
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.query_shaping import is_short_acronym, matches_target
+from app.services.solver_goal_helpers import looks_like_metric_goal
+
+
+CLAIM_VERIFIER_MARKERS: dict[str, MarkerProfile] = {
+    "claim_formula": (
+        "=",
+        "\\frac",
+        "\\sum",
+        "\\mathbb",
+        "\\mathcal",
+        "∑",
+        "π",
+        "sigma",
+        "loss",
+        "objective",
+    ),
+    "evidence_formula": (
+        "=",
+        "formula",
+        "objective",
+        "loss",
+        "目标函数",
+        "公式",
+        "∑",
+        "π",
+        "\\pi",
+        "sigma",
+        "σ",
+    ),
+}
 
 
 class ClaimVerifierMixin:
@@ -193,10 +231,7 @@ class ClaimVerifierMixin:
 
     @staticmethod
     def _looks_like_metric_verification_goal(query: str, goals: set[str]) -> bool:
-        if goals & {"metric_value", "setting"}:
-            return True
-        normalized = " ".join(str(query or "").lower().split())
-        return any(token in normalized for token in ["多少", "数值", "准确率", "得分", "score", "accuracy", "metric", "win rate"])
+        return looks_like_metric_goal(query, goals)
 
     def _verify_origin_lookup_claims(
         self,
@@ -521,8 +556,7 @@ class ClaimVerifierMixin:
         if not text:
             return False
         lowered = text.lower()
-        formula_markers = ["=", "\\frac", "\\sum", "\\mathbb", "\\mathcal", "∑", "π", "sigma", "loss", "objective"]
-        return any(marker in lowered or marker in text for marker in formula_markers)
+        return query_matches_any(lowered, text, CLAIM_VERIFIER_MARKERS["claim_formula"])
 
     def _formula_claim_matches_target(
         self,
@@ -567,13 +601,12 @@ class ClaimVerifierMixin:
         return False
 
     def _formula_evidence_supports_target(self, *, target: str, evidence: list[EvidenceBlock]) -> bool:
-        formula_markers = ["=", "formula", "objective", "loss", "目标函数", "公式", "∑", "π", "\\pi", "sigma", "σ"]
         for item in evidence[:8]:
             text = "\n".join([item.title, item.caption, item.snippet])
             if not matches_target(text, target):
                 continue
             lowered = text.lower()
-            if any(marker in lowered or marker in text for marker in formula_markers):
+            if query_matches_any(lowered, text, CLAIM_VERIFIER_MARKERS["evidence_formula"]):
                 return True
         return False
 
