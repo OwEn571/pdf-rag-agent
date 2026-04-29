@@ -12,6 +12,7 @@ from app.services.followup_candidate_helpers import (
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_reason_fallback,
+    followup_relationship_assessment,
     followup_seed_score,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
@@ -219,6 +220,70 @@ def test_followup_seed_score_boosts_active_target_intro_and_older_year() -> None
     )
 
     assert score > 5.0
+
+
+def test_followup_relationship_assessment_does_not_mark_loose_topic_as_direct() -> None:
+    contract = QueryContract(
+        clean_query="AlignX数据集有后续工作吗？",
+        relation="followup_research",
+        targets=["AlignX"],
+    )
+    seed = CandidatePaper(
+        paper_id="ALIGNX",
+        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+        year="2025",
+        metadata={
+            "authors": "Li; Chen",
+            "aliases": "AlignX",
+            "paper_card_text": "This paper introduces AlignX, a dataset and benchmark for user-level alignment.",
+        },
+    )
+    candidate = CandidatePaper(
+        paper_id="RELATED",
+        title="Personalized Alignment with User Profiles",
+        year="2026",
+        metadata={
+            "authors": "Li; Zhang",
+            "paper_card_text": "A personalized alignment method for user preference inference.",
+        },
+    )
+
+    assessment = followup_relationship_assessment(
+        contract=contract,
+        seed_papers=[seed],
+        paper=candidate,
+        paper_summary_text=lambda paper_id: {
+            "ALIGNX": "AlignX introduces a personalized preference benchmark dataset.",
+            "RELATED": "A personalized alignment method for user preference inference.",
+        }.get(paper_id, ""),
+    )
+
+    assert assessment["strength"] != "direct"
+    assert "证据不足" in assessment["reason"]
+
+
+def test_followup_relationship_assessment_marks_direct_target_relation() -> None:
+    contract = QueryContract(clean_query="AlignX 后续", targets=["AlignX"])
+    seed = CandidatePaper(paper_id="ALIGNX", title="AlignX", metadata={"aliases": "AlignX"})
+    candidate = CandidatePaper(
+        paper_id="CANDIDATE",
+        title="Candidate Benchmark",
+        metadata={"paper_card_text": "The benchmark evaluates and extends AlignX for user-level alignment."},
+    )
+
+    assessment = followup_relationship_assessment(
+        contract=contract,
+        seed_papers=[seed],
+        paper=candidate,
+        paper_summary_text=lambda paper_id: {
+            "ALIGNX": "AlignX introduces a dataset.",
+            "CANDIDATE": "This work uses the AlignX benchmark dataset.",
+        }.get(paper_id, ""),
+    )
+
+    assert assessment["strength"] == "direct"
+    assert assessment["confidence"] == 0.86
+    assert "AlignX" in assessment["reason"]
 
 
 def test_merge_followup_rankings_deduplicates_by_paper_id() -> None:

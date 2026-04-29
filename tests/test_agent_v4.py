@@ -3120,43 +3120,6 @@ def test_followup_answer_groups_relationship_strength_and_hides_raw_english_reas
     assert "读法建议" in answer
 
 
-def test_followup_assessment_does_not_treat_author_overlap_as_direct(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    seed = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        year="2025",
-        metadata={
-            "authors": "Li; Chen",
-            "aliases": "AlignX",
-            "paper_card_text": "This paper introduces AlignX, a dataset and benchmark for user-level alignment.",
-        },
-    )
-    candidate = CandidatePaper(
-        paper_id="RELATED",
-        title="Personalized Alignment with User Profiles",
-        year="2026",
-        metadata={
-            "authors": "Li; Zhang",
-            "paper_card_text": "A personalized alignment method for user preference inference.",
-        },
-    )
-
-    assessment = agent._followup_relationship_assessment(
-        contract=contract,
-        seed_papers=[seed],
-        paper=candidate,
-    )
-
-    assert assessment["strength"] != "direct"
-    assert "证据不足" in assessment["reason"]
-
-
 def test_web_search_fallback_uses_web_evidence_when_enabled(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 

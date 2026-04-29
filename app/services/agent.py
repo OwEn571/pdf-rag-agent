@@ -102,10 +102,7 @@ from app.services.followup_relationship_contracts import (
 )
 from app.services.followup_relationship_intents import (
     followup_relevance_score,
-    has_followup_domain_signal,
     has_followup_soft_relation_signal,
-    has_followup_support_relation_signal,
-    target_relation_cue_near_text,
 )
 from app.services.evidence_presentation import (
     build_figure_contexts,
@@ -116,17 +113,14 @@ from app.services.evidence_presentation import (
 )
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
-    extract_followup_keyphrases,
     filter_followup_candidates,
     followup_expansion_terms,
-    followup_reason_fallback,
+    followup_relationship_assessment,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_seed_score,
-    followup_target_aliases,
     followup_validator_assessment_from_payload,
-    infer_followup_relation_type,
     merge_followup_rankings,
     paper_anchor_text,
     paper_author_tokens,
@@ -3664,10 +3658,11 @@ class ResearchAssistantAgentV4(
                     paper = by_id.get(paper_id)
                     if paper is None:
                         continue
-                    assessment = self._followup_relationship_assessment(
+                    assessment = followup_relationship_assessment(
                         contract=contract,
                         seed_papers=seed_papers,
                         paper=paper,
+                        paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
                     )
                     if assessment["score"] < 0.3:
                         continue
@@ -3720,7 +3715,12 @@ class ResearchAssistantAgentV4(
         )
         if llm_assessment:
             return llm_assessment
-        fallback = self._followup_relationship_assessment(contract=contract, seed_papers=seed_papers, paper=paper)
+        fallback = followup_relationship_assessment(
+            contract=contract,
+            seed_papers=seed_papers,
+            paper=paper,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
         if float(fallback.get("score", 0.0)) < 0.3:
             return {
                 "relation_type": "证据不足",
@@ -3810,7 +3810,12 @@ class ResearchAssistantAgentV4(
             if has_followup_soft_relation_signal(haystack):
                 score += 0.35
             score += followup_relevance_score(haystack)
-            assessment = self._followup_relationship_assessment(contract=contract, seed_papers=seed_papers, paper=paper)
+            assessment = followup_relationship_assessment(
+                contract=contract,
+                seed_papers=seed_papers,
+                paper=paper,
+                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            )
             if assessment["score"] < 0.3:
                 continue
             score += float(assessment["score"])
@@ -3831,126 +3836,6 @@ class ResearchAssistantAgentV4(
                 }
             )
         return results
-
-    def _followup_relationship_assessment(
-        self,
-        *,
-        contract: QueryContract,
-        seed_papers: list[CandidatePaper],
-        paper: CandidatePaper,
-    ) -> dict[str, Any]:
-        target_aliases = followup_target_aliases(
-            contract=contract,
-            seed_papers=seed_papers,
-            paper_anchor_text=paper_anchor_text,
-        )
-        seed_keywords = paper_keyword_set(
-            seed_papers,
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-        )
-        candidate_keywords = paper_keyword_set(
-            [paper],
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-        )
-        seed_phrases: set[str] = set()
-        for seed in seed_papers:
-            seed_text = f"{seed.title}\n{self._paper_summary_text(seed.paper_id)}\n{seed.metadata.get('paper_card_text', '')}"
-            seed_phrases.update(extract_followup_keyphrases(seed_text))
-        seed_author_tokens = paper_author_tokens(seed_papers)
-        summary = self._paper_summary_text(paper.paper_id)
-        haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}\n{paper.metadata.get('abstract_note', '')}"
-        lowered = haystack.lower()
-        score = 0.0
-        explicit_direct_signals: list[str] = []
-        support_signals: list[str] = []
-        target_seen = ""
-        for alias in target_aliases:
-            if alias and matches_target(haystack, alias):
-                target_seen = alias
-                if target_relation_cue_near_text(text=haystack, target=alias):
-                    score += 3.2
-                    explicit_direct_signals.append(f"候选摘要/元数据明确提到并使用、评测或扩展 {alias}")
-                else:
-                    score += 1.2
-                    support_signals.append(f"候选摘要/元数据提到 {alias}")
-                break
-        candidate_phrases = set(extract_followup_keyphrases(haystack))
-        phrase_overlap = {
-            phrase
-            for phrase in seed_phrases & candidate_phrases
-            if " " in phrase and phrase not in {"large language models"}
-        }
-        if phrase_overlap:
-            score += min(1.2, len(phrase_overlap) * 0.35)
-            support_signals.append("共享研究线索：" + "、".join(sorted(phrase_overlap)[:4]))
-        overlap = seed_keywords & candidate_keywords
-        displayable_topic_terms = {
-            "behavioral",
-            "signal",
-            "signals",
-            "persona",
-            "decoding",
-            "transfer",
-            "transferable",
-            "conditioned",
-            "generation",
-            "profile",
-            "profiles",
-            "hypothesis",
-            "preference-inference",
-            "user-level",
-        }
-        topical_overlap = {
-            token
-            for token in overlap
-            if token in displayable_topic_terms
-        }
-        if topical_overlap and not phrase_overlap:
-            score += min(1.0, len(topical_overlap) * 0.16)
-            support_signals.append("共享部分主题词：" + "、".join(sorted(topical_overlap)[:4]))
-        author_overlap = seed_author_tokens & paper_author_tokens([paper])
-        if author_overlap:
-            score += min(1.0, len(author_overlap) * 0.35)
-            support_signals.append("存在作者重合")
-        if has_followup_support_relation_signal(lowered):
-            score += 0.45
-            support_signals.append("包含扩展、使用、评测或迁移类关系词")
-        if has_followup_domain_signal(lowered):
-            score += 0.35
-            support_signals.append("主题属于 personalized preference / alignment 相邻方向")
-        if explicit_direct_signals:
-            strength = "direct"
-            relation_type = infer_followup_relation_type(
-                paper=paper,
-                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                strict=True,
-            )
-            reason_bits = explicit_direct_signals + support_signals[:2]
-            confidence = 0.86
-        elif score >= 1.4 and (target_seen or support_signals):
-            strength = "strong_related"
-            relation_type = "强相关延续候选"
-            reason_bits = support_signals
-            confidence = 0.66
-        else:
-            strength = "weak_related"
-            relation_type = "同主题待确认候选"
-            reason_bits = support_signals
-            confidence = 0.48
-        reason = "；".join(dict.fromkeys(reason_bits)) if reason_bits else followup_reason_fallback(
-            seed_papers=seed_papers,
-            paper=paper,
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-        )
-        if strength != "direct" and reason:
-            reason = f"{reason}；目前证据不足以确认它严格继承、引用或使用种子论文/数据集。"
-        return {
-            "score": score,
-            "strength": strength,
-            "relation_type": relation_type,
-            "reason": reason,
-            "confidence": confidence,
-        }
 
     def _paper_brief(self, paper: CandidatePaper) -> dict[str, Any]:
         return {

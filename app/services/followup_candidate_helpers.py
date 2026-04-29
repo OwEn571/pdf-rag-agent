@@ -8,7 +8,12 @@ from typing import Any
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import safe_year
-from app.services.followup_relationship_intents import has_followup_domain_signal, has_followup_seed_intro_signal
+from app.services.followup_relationship_intents import (
+    has_followup_domain_signal,
+    has_followup_seed_intro_signal,
+    has_followup_support_relation_signal,
+    target_relation_cue_near_text,
+)
 from app.services.query_shaping import matches_target
 
 PaperText = Callable[[str], str]
@@ -260,6 +265,121 @@ def followup_seed_score(
     if year < 9999:
         score += max(0.0, (2100 - year) / 1000.0)
     return score
+
+
+def followup_relationship_assessment(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+) -> dict[str, Any]:
+    target_aliases = followup_target_aliases(
+        contract=contract,
+        seed_papers=seed_papers,
+        paper_anchor_text=paper_anchor_text,
+    )
+    seed_keywords = paper_keyword_set(seed_papers, paper_summary_text=paper_summary_text)
+    candidate_keywords = paper_keyword_set([paper], paper_summary_text=paper_summary_text)
+    seed_phrases: set[str] = set()
+    for seed in seed_papers:
+        seed_text = f"{seed.title}\n{paper_summary_text(seed.paper_id)}\n{seed.metadata.get('paper_card_text', '')}"
+        seed_phrases.update(extract_followup_keyphrases(seed_text))
+    seed_author_tokens = paper_author_tokens(seed_papers)
+    summary = paper_summary_text(paper.paper_id)
+    haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}\n{paper.metadata.get('abstract_note', '')}"
+    lowered = haystack.lower()
+    score = 0.0
+    explicit_direct_signals: list[str] = []
+    support_signals: list[str] = []
+    target_seen = ""
+    for alias in target_aliases:
+        if alias and matches_target(haystack, alias):
+            target_seen = alias
+            if target_relation_cue_near_text(text=haystack, target=alias):
+                score += 3.2
+                explicit_direct_signals.append(f"候选摘要/元数据明确提到并使用、评测或扩展 {alias}")
+            else:
+                score += 1.2
+                support_signals.append(f"候选摘要/元数据提到 {alias}")
+            break
+    candidate_phrases = set(extract_followup_keyphrases(haystack))
+    phrase_overlap = {
+        phrase
+        for phrase in seed_phrases & candidate_phrases
+        if " " in phrase and phrase not in {"large language models"}
+    }
+    if phrase_overlap:
+        score += min(1.2, len(phrase_overlap) * 0.35)
+        support_signals.append("共享研究线索：" + "、".join(sorted(phrase_overlap)[:4]))
+    overlap = seed_keywords & candidate_keywords
+    displayable_topic_terms = {
+        "behavioral",
+        "signal",
+        "signals",
+        "persona",
+        "decoding",
+        "transfer",
+        "transferable",
+        "conditioned",
+        "generation",
+        "profile",
+        "profiles",
+        "hypothesis",
+        "preference-inference",
+        "user-level",
+    }
+    topical_overlap = {
+        token
+        for token in overlap
+        if token in displayable_topic_terms
+    }
+    if topical_overlap and not phrase_overlap:
+        score += min(1.0, len(topical_overlap) * 0.16)
+        support_signals.append("共享部分主题词：" + "、".join(sorted(topical_overlap)[:4]))
+    author_overlap = seed_author_tokens & paper_author_tokens([paper])
+    if author_overlap:
+        score += min(1.0, len(author_overlap) * 0.35)
+        support_signals.append("存在作者重合")
+    if has_followup_support_relation_signal(lowered):
+        score += 0.45
+        support_signals.append("包含扩展、使用、评测或迁移类关系词")
+    if has_followup_domain_signal(lowered):
+        score += 0.35
+        support_signals.append("主题属于 personalized preference / alignment 相邻方向")
+    if explicit_direct_signals:
+        strength = "direct"
+        relation_type = infer_followup_relation_type(
+            paper=paper,
+            paper_summary_text=paper_summary_text,
+            strict=True,
+        )
+        reason_bits = explicit_direct_signals + support_signals[:2]
+        confidence = 0.86
+    elif score >= 1.4 and (target_seen or support_signals):
+        strength = "strong_related"
+        relation_type = "强相关延续候选"
+        reason_bits = support_signals
+        confidence = 0.66
+    else:
+        strength = "weak_related"
+        relation_type = "同主题待确认候选"
+        reason_bits = support_signals
+        confidence = 0.48
+    reason = "；".join(dict.fromkeys(reason_bits)) if reason_bits else followup_reason_fallback(
+        seed_papers=seed_papers,
+        paper=paper,
+        paper_summary_text=paper_summary_text,
+    )
+    if strength != "direct" and reason:
+        reason = f"{reason}；目前证据不足以确认它严格继承、引用或使用种子论文/数据集。"
+    return {
+        "score": score,
+        "strength": strength,
+        "relation_type": relation_type,
+        "reason": reason,
+        "confidence": confidence,
+    }
 
 
 def merge_followup_rankings(
