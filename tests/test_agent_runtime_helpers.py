@@ -43,6 +43,7 @@ from app.services.agent_runtime_helpers import (
     research_runtime_actions,
     research_runtime_state,
     retry_research_limits,
+    run_agent_paper_search,
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
@@ -308,6 +309,41 @@ def test_runtime_helpers_search_agent_candidate_papers_prefers_selected_lookup()
 
     assert result.contract.notes == ["selected_paper_id=p2"]
     assert result.candidate_papers == [selected]
+
+
+def test_runtime_helpers_run_agent_paper_search_builds_payloads_and_screens() -> None:
+    first = CandidatePaper(paper_id="p1", title="First")
+    second = CandidatePaper(paper_id="p2", title="Second")
+    calls: list[tuple[str, int]] = []
+
+    result = run_agent_paper_search(
+        contract=QueryContract(
+            clean_query="DPO是什么",
+            targets=["DPO"],
+            requested_fields=["definition"],
+            required_modalities=["page_text"],
+        ),
+        plan=ResearchPlan(paper_limit=4, evidence_limit=8),
+        tool_input={"query": "custom query", "top_k": 2},
+        active_targets=[],
+        excluded_titles=set(),
+        search_papers=lambda query, _contract, limit: calls.append((query, limit)) or [first, second],
+        paper_lookup=lambda _: None,
+        screen_papers=lambda _contract, search_plan, candidates, _excluded: (candidates[: search_plan.paper_limit - 1], None),
+    )
+
+    assert calls == [("custom query", 2)]
+    assert result.candidate_papers == [first, second]
+    assert result.screened_papers == [first]
+    assert result.tool_call_arguments == {
+        "stage": "search_papers",
+        "query": "custom query",
+        "limit": 2,
+        "requested_fields": ["definition"],
+        "modalities": ["page_text"],
+    }
+    assert result.observation_summary == "candidates=2, selected=1"
+    assert result.observation_payload["selected_titles"] == ["First"]
 
 
 def test_runtime_helpers_prepare_retry_research_materials_expands_limits_and_filters_selection() -> None:

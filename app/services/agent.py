@@ -44,8 +44,8 @@ from app.services.agent_runtime_helpers import (
     reflect_agent_state_decision,
     retry_research_limits,
     refresh_selected_ambiguity_materials,
+    run_agent_paper_search,
     screen_agent_papers,
-    search_agent_candidate_papers,
     search_agent_evidence,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
@@ -148,7 +148,6 @@ from app.services.pdf_rendering import render_pdf_page_image_data_url
 from app.services.query_shaping import (
     extract_targets,
     is_short_acronym,
-    paper_query_text,
     should_use_web_search,
 )
 from app.services.research_planning import (
@@ -156,7 +155,7 @@ from app.services.research_planning import (
     research_plan_goals,
 )
 from app.services.research_memory import remember_compound_outcome, remember_research_outcome
-from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
+from app.services.tool_registry_helpers import tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
     collect_web_evidence,
@@ -779,32 +778,12 @@ class ResearchAssistantAgentV4(
         contract: QueryContract = state["contract"]
         plan: ResearchPlan = state["plan"]
         tool_input = tool_input_from_state(state, "search_corpus")
-        paper_limit = coerce_int(
-            tool_input.get("top_k", plan.paper_limit),
-            default=plan.paper_limit,
-            minimum=1,
-            maximum=50,
-        )
-        if paper_limit != plan.paper_limit:
-            plan = plan.model_copy(update={"paper_limit": paper_limit})
         excluded_titles: set[str] = state["excluded_titles"]
-        paper_query = str(tool_input.get("query", "") or "").strip() or paper_query_text(contract)
-        self._emit_agent_tool_call(
-            emit=emit,
-            tool="search_corpus",
-            arguments={
-                "stage": "search_papers",
-                "query": paper_query,
-                "limit": plan.paper_limit,
-                "requested_fields": contract.requested_fields,
-                "modalities": contract.required_modalities,
-            },
-        )
         active = session.effective_active_research()
-        paper_result = search_agent_candidate_papers(
+        result = run_agent_paper_search(
             contract=contract,
-            paper_query=paper_query,
-            paper_limit=plan.paper_limit,
+            plan=plan,
+            tool_input=tool_input,
             active_targets=list(active.targets),
             excluded_titles=excluded_titles,
             search_papers=lambda query, search_contract, limit: self.retriever.search_papers(
@@ -813,32 +792,28 @@ class ResearchAssistantAgentV4(
                 limit=limit,
             ),
             paper_lookup=self._candidate_from_paper_id,
+            screen_papers=lambda search_contract, search_plan, candidates, search_excluded_titles: self._screen_agent_papers(
+                contract=search_contract,
+                plan=search_plan,
+                candidate_papers=candidates,
+                excluded_titles=search_excluded_titles,
+            ),
         )
-        state["contract"] = paper_result.contract
-        contract = paper_result.contract
-        candidate_papers = paper_result.candidate_papers
-        screened_papers, precomputed_evidence = self._screen_agent_papers(
-            contract=contract,
-            plan=plan,
-            candidate_papers=candidate_papers,
-            excluded_titles=excluded_titles,
-        )
+        self._emit_agent_tool_call(emit=emit, tool="search_corpus", arguments=result.tool_call_arguments)
+        state["contract"] = result.contract
+        candidate_papers = result.candidate_papers
+        screened_papers = result.screened_papers
         state["candidate_papers"] = candidate_papers
         state["screened_papers"] = screened_papers
-        state["precomputed_evidence"] = precomputed_evidence
+        state["precomputed_evidence"] = result.precomputed_evidence
         emit("candidate_papers", {"count": len(candidate_papers), "items": [item.model_dump() for item in candidate_papers]})
         emit("screened_papers", {"count": len(screened_papers), "items": [item.model_dump() for item in screened_papers]})
         self._record_agent_observation(
             emit=emit,
             execution_steps=execution_steps,
             tool="search_corpus",
-            summary=f"candidates={len(candidate_papers)}, selected={len(screened_papers)}",
-            payload={
-                "stage": "search_papers",
-                "candidate_count": len(candidate_papers),
-                "selected_count": len(screened_papers),
-                "selected_titles": [item.title for item in screened_papers[:5]],
-            },
+            summary=result.observation_summary,
+            payload=result.observation_payload,
         )
 
     def _screen_agent_papers(

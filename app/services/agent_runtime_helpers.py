@@ -43,6 +43,10 @@ GroundEntityPapersFn = Callable[[list[CandidatePaper], list[EvidenceBlock], int]
 ConceptEvidenceSearchFn = Callable[[str, QueryContract, list[str], int], list[EvidenceBlock]]
 ExpandEvidenceFn = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
 AmbiguityOptionCountFn = Callable[[], int]
+ScreenAgentPapersFn = Callable[
+    [QueryContract, ResearchPlan, list[CandidatePaper], set[str]],
+    tuple[list[CandidatePaper], list[EvidenceBlock] | None],
+]
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,18 @@ class AgentEvidenceSearchResult:
 class AgentCandidatePaperSearchResult:
     contract: QueryContract
     candidate_papers: list[CandidatePaper]
+
+
+@dataclass(frozen=True)
+class AgentPaperSearchRun:
+    contract: QueryContract
+    query: str
+    candidate_papers: list[CandidatePaper]
+    screened_papers: list[CandidatePaper]
+    precomputed_evidence: list[EvidenceBlock] | None
+    tool_call_arguments: dict[str, Any]
+    observation_summary: str
+    observation_payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -371,6 +387,63 @@ def search_agent_candidate_papers(
         paper_lookup=paper_lookup,
     )
     return AgentCandidatePaperSearchResult(contract=effective_contract, candidate_papers=candidate_papers)
+
+
+def run_agent_paper_search(
+    *,
+    contract: QueryContract,
+    plan: ResearchPlan,
+    tool_input: dict[str, Any],
+    active_targets: list[str],
+    excluded_titles: set[str],
+    search_papers: CandidatePaperSearchFn,
+    paper_lookup: PaperLookupFn,
+    screen_papers: ScreenAgentPapersFn,
+) -> AgentPaperSearchRun:
+    paper_limit = coerce_int(
+        tool_input.get("top_k", plan.paper_limit),
+        default=plan.paper_limit,
+        minimum=1,
+        maximum=50,
+    )
+    search_plan = plan.model_copy(update={"paper_limit": paper_limit}) if paper_limit != plan.paper_limit else plan
+    paper_query = str(tool_input.get("query", "") or "").strip() or paper_query_text(contract)
+    paper_result = search_agent_candidate_papers(
+        contract=contract,
+        paper_query=paper_query,
+        paper_limit=search_plan.paper_limit,
+        active_targets=active_targets,
+        excluded_titles=excluded_titles,
+        search_papers=search_papers,
+        paper_lookup=paper_lookup,
+    )
+    screened_papers, precomputed_evidence = screen_papers(
+        paper_result.contract,
+        search_plan,
+        paper_result.candidate_papers,
+        excluded_titles,
+    )
+    return AgentPaperSearchRun(
+        contract=paper_result.contract,
+        query=paper_query,
+        candidate_papers=paper_result.candidate_papers,
+        screened_papers=screened_papers,
+        precomputed_evidence=precomputed_evidence,
+        tool_call_arguments={
+            "stage": "search_papers",
+            "query": paper_query,
+            "limit": search_plan.paper_limit,
+            "requested_fields": paper_result.contract.requested_fields,
+            "modalities": paper_result.contract.required_modalities,
+        },
+        observation_summary=f"candidates={len(paper_result.candidate_papers)}, selected={len(screened_papers)}",
+        observation_payload={
+            "stage": "search_papers",
+            "candidate_count": len(paper_result.candidate_papers),
+            "selected_count": len(screened_papers),
+            "selected_titles": [item.title for item in screened_papers[:5]],
+        },
+    )
 
 
 def retry_research_limits(plan: ResearchPlan) -> RetryResearchLimits:
