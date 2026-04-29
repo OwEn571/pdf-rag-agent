@@ -60,7 +60,9 @@ class ToolProposal:
     status: str = "pending_review"
 
     def payload(self) -> dict[str, Any]:
+        code_sha256 = hashlib.sha256(self.python_code.encode("utf-8")).hexdigest()
         return {
+            "proposal_id": self.path.stem,
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
@@ -68,6 +70,7 @@ class ToolProposal:
             "path": str(self.path),
             "status": self.status,
             "code_chars": len(self.python_code),
+            "code_sha256": code_sha256,
             "admin_approval_required": True,
             "sandbox_required": True,
             "safety": self.safety,

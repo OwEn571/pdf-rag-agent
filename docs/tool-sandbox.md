@@ -14,6 +14,8 @@ This document defines the safety boundary for `propose_tool`.
   disallowed import roots, dunder attribute access, and calls such as `open`,
   `eval`, `exec`, `__import__`, `os`, `subprocess`, `socket`, `httpx`,
   `urllib`, `pathlib`, and `shutil`.
+- Pending proposal payloads include a stable `proposal_id` and full
+  `code_sha256` hash for later audit and approval checks.
 
 ## Approval Stages
 
