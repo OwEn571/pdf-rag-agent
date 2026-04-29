@@ -10,7 +10,7 @@ from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
-from app.services.evidence_presentation import extract_topology_terms
+from app.services.evidence_presentation import extract_topology_terms, formula_terms
 from app.services.paper_claim_helpers import default_text_claims, paper_recommendation_claim, paper_summary_claims
 from app.services.schema_claim_helpers import (
     claims_from_schema_payload,
@@ -516,7 +516,7 @@ class SolverPipelineMixin:
                 formula_blocks=formula_blocks,
                 fallback_evidence_ids=self._evidence_ids_for_paper(evidence, paper.paper_id, limit=3),
                 fallback_term_text="\n".join(item.snippet for item in paper_evidence[:3]),
-                term_extractor=self._formula_terms,
+                term_extractor=formula_terms,
             )
             if claim is None:
                 continue
@@ -536,7 +536,7 @@ class SolverPipelineMixin:
         llm_payload = self._llm_extract_formula_claim_payload(contract=contract, evidence=selected_evidence)
         if llm_payload:
             return llm_payload
-        return formula_helpers.fallback_formula_payload(selected_evidence, term_extractor=self._formula_terms)
+        return formula_helpers.fallback_formula_payload(selected_evidence, term_extractor=formula_terms)
 
     def _llm_extract_formula_claim_payload(self, *, contract: QueryContract, evidence: list[EvidenceBlock]) -> dict[str, Any]:
         if self.clients.chat is None or not evidence:
@@ -549,7 +549,7 @@ class SolverPipelineMixin:
         return formula_helpers.llm_formula_payload_from_response(
             payload,
             allowed_evidence_ids={item.doc_id for item in evidence},
-            term_extractor=self._formula_terms,
+            term_extractor=formula_terms,
         )
 
     @staticmethod
