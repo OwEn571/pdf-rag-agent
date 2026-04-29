@@ -1,8 +1,25 @@
 from __future__ import annotations
 
-import re
-
 from app.domain.models import Claim, QueryContract, ResearchPlan
+from app.services.intent_marker_matching import (
+    MarkerProfile,
+    normalized_query_text,
+    query_matches_any,
+)
+from app.services.research_intents import ORIGIN_LOOKUP_MARKERS, RESEARCH_SLOT_MARKERS
+
+
+SOLVER_GOAL_MARKERS: dict[str, MarkerProfile] = {
+    "origin": (*ORIGIN_LOOKUP_MARKERS, "提出的"),
+    "formula": RESEARCH_SLOT_MARKERS["formula"],
+    "followup": (*RESEARCH_SLOT_MARKERS["followup_research"], "successor"),
+    "figure": RESEARCH_SLOT_MARKERS["figure"],
+    "summary": RESEARCH_SLOT_MARKERS["paper_summary"],
+    "metric": (*RESEARCH_SLOT_MARKERS["metric_value"], "win rate"),
+    "recommendation": ("推荐", "值得", "入门", "recommend"),
+    "definition_targeted": ("是什么", "什么意思", "定义"),
+    "definition_english": ("what is", "what are"),
+}
 
 
 def append_unique_claims(claims: list[Claim], new_claims: list[Claim]) -> None:
@@ -46,47 +63,38 @@ def claim_goals(*, contract: QueryContract, plan: ResearchPlan) -> set[str]:
 def looks_like_metric_goal(query: str, goals: set[str]) -> bool:
     if goals & {"metric_value", "setting"}:
         return True
-    normalized = " ".join(str(query or "").lower().split())
-    return any(token in normalized for token in ["多少", "数值", "准确率", "得分", "score", "accuracy", "metric", "win rate"])
+    normalized, compact = normalized_query_text(query)
+    return query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["metric"])
 
 
 def fallback_goals_from_query(query: str, *, targets: list[str]) -> set[str]:
     raw_query = str(query or "")
-    normalized = " ".join(raw_query.lower().split())
-    compact = re.sub(r"\s+", "", normalized)
+    normalized, compact = normalized_query_text(raw_query)
     goals: set[str] = set()
-    if any(
-        token in normalized or token in compact
-        for token in [
-            "最早",
-            "最先",
-            "最初",
-            "首次",
-            "第一个提出",
-            "第一篇提出",
-            "第一篇论文",
-            "谁提出",
-            "提出的",
-            "origin",
-            "first proposed",
-            "first introduced",
-        ]
-    ):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["origin"]):
         goals.update({"paper_title", "year"})
-    if any(token in normalized for token in ["公式", "损失函数", "objective", "loss", "gradient", "梯度"]):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["formula"]):
         goals.add("formula")
-    if any(token in normalized for token in ["后续", "followup", "follow-up", "successor"]):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["followup"]):
         goals.add("followup_papers")
-    if any(token in normalized for token in ["figure", "fig.", "图", "caption"]):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["figure"]):
         goals.add("figure_conclusion")
-    if any(token in normalized for token in ["结果", "实验", "核心结论", "贡献", "summary", "result"]):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["summary"]):
         goals.update({"summary", "results"})
     if looks_like_metric_goal(query, goals):
         goals.add("metric_value")
-    if any(token in normalized for token in ["推荐", "值得", "入门", "recommend"]):
+    if query_matches_any(normalized, compact, SOLVER_GOAL_MARKERS["recommendation"]):
         goals.add("recommended_papers")
-    if (targets and any(token in raw_query for token in ["是什么", "什么意思", "定义"])) or any(
-        token in normalized for token in ["what is", "what are"]
-    ):
+    has_targeted_definition = bool(targets) and query_matches_any(
+        normalized,
+        raw_query,
+        SOLVER_GOAL_MARKERS["definition_targeted"],
+    )
+    has_english_definition = query_matches_any(
+        normalized,
+        "",
+        SOLVER_GOAL_MARKERS["definition_english"],
+    )
+    if has_targeted_definition or has_english_definition:
         goals.update({"entity_type", "definition", "mechanism"})
     return goals or {"answer"}

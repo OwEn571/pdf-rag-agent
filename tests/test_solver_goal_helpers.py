@@ -1,7 +1,20 @@
 from __future__ import annotations
 
 from app.domain.models import Claim, QueryContract, ResearchPlan
-from app.services.solver_goal_helpers import append_unique_claims, claim_goals, fallback_goals_from_query, looks_like_metric_goal
+from app.services.intent_marker_matching import query_matches_any
+from app.services.solver_goal_helpers import (
+    SOLVER_GOAL_MARKERS,
+    append_unique_claims,
+    claim_goals,
+    fallback_goals_from_query,
+    looks_like_metric_goal,
+)
+
+
+def test_solver_goal_markers_use_centralized_profiles() -> None:
+    assert query_matches_any("最早", "最早", SOLVER_GOAL_MARKERS["origin"])
+    assert query_matches_any("win rate", "winrate", SOLVER_GOAL_MARKERS["metric"])
+    assert not query_matches_any("闲聊", "闲聊", SOLVER_GOAL_MARKERS["formula"])
 
 
 def test_append_unique_claims_deduplicates_by_type_entity_and_value() -> None:
