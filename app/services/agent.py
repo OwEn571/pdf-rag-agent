@@ -1360,7 +1360,7 @@ class ResearchAssistantAgentV4(
                 continue
             seen_paper_ids.add(paper_id)
             docs.append(meta)
-            by_title[self._normalize_title_key(title)] = meta
+            by_title[normalize_lookup_text(title)] = meta
 
         selected: list[dict[str, str]] = []
         selected_keys: set[str] = set()
@@ -1369,7 +1369,7 @@ class ResearchAssistantAgentV4(
             clean_title = " ".join(str(title or "").split()).strip()
             if not clean_title:
                 return
-            key = self._normalize_title_key(clean_title)
+            key = normalize_lookup_text(clean_title)
             if not key or key in selected_keys:
                 return
             meta = by_title.get(key)
@@ -1539,10 +1539,6 @@ class ResearchAssistantAgentV4(
                 "title_overlap": best_overlap,
             },
         )
-
-    @staticmethod
-    def _normalize_title_key(title: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", str(title or "").lower())
 
     def _force_best_effort_after_clarification_limit(
         self,
@@ -3574,7 +3570,7 @@ class ResearchAssistantAgentV4(
             options = [
                 option
                 for option in options
-                if self._normalize_title_key(str(option.get("title", ""))) not in excluded_titles
+                if normalize_lookup_text(str(option.get("title", ""))) not in excluded_titles
             ]
         if len(options) < 2:
             return []
@@ -4324,7 +4320,7 @@ class ResearchAssistantAgentV4(
         titles.extend(session.effective_active_research().titles)
         if session.turns:
             titles.extend(session.turns[-1].titles)
-        return {self._normalize_title_key(title) for title in titles if self._normalize_title_key(title)}
+        return {normalize_lookup_text(title) for title in titles if normalize_lookup_text(title)}
 
     @staticmethod
     def _filter_candidate_papers_by_excluded_titles(
@@ -4334,7 +4330,7 @@ class ResearchAssistantAgentV4(
     ) -> list[CandidatePaper]:
         if not excluded_titles:
             return candidates
-        return [item for item in candidates if ResearchAssistantAgentV4._normalize_title_key(item.title) not in excluded_titles]
+        return [item for item in candidates if normalize_lookup_text(item.title) not in excluded_titles]
 
     @staticmethod
     def _filter_evidence_by_excluded_titles(
@@ -4344,11 +4340,7 @@ class ResearchAssistantAgentV4(
     ) -> list[EvidenceBlock]:
         if not excluded_titles:
             return evidence
-        return [item for item in evidence if ResearchAssistantAgentV4._normalize_title_key(item.title) not in excluded_titles]
-
-    @staticmethod
-    def _normalize_title_key(title: str) -> str:
-        return " ".join(str(title or "").lower().split())
+        return [item for item in evidence if normalize_lookup_text(item.title) not in excluded_titles]
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
         goals = research_plan_goals(contract)
@@ -4375,7 +4367,7 @@ class ResearchAssistantAgentV4(
         excluded_titles: set[str],
     ) -> dict[str, Any]:
         focus_titles = self._claim_focus_titles(claims=claims, papers=papers)
-        repeated_excluded = bool(excluded_titles & {self._normalize_title_key(title) for title in focus_titles})
+        repeated_excluded = bool(excluded_titles & {normalize_lookup_text(title) for title in focus_titles})
         if repeated_excluded:
             return {
                 "decision": "clarify",

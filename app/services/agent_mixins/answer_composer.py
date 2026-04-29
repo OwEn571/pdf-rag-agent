@@ -17,6 +17,7 @@ from app.domain.models import (
     SessionContext,
     VerificationReport,
 )
+from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import claim_evidence_ids, extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.zotero_sqlite import ZoteroSQLiteReader
@@ -1696,7 +1697,7 @@ class AnswerComposerMixin:
         )
         if not isinstance(payload, dict):
             return [], ""
-        by_title = {self._normalize_title_key(item.get("title", "")): item for item in candidates}
+        by_title = {normalize_lookup_text(item.get("title", "")): item for item in candidates}
         selected: list[dict[str, str]] = []
         raw_recommendations = payload.get("recommendations", [])
         if isinstance(raw_recommendations, list):
@@ -1704,7 +1705,7 @@ class AnswerComposerMixin:
                 if not isinstance(raw, dict):
                     continue
                 title = str(raw.get("title", "") or "").strip()
-                candidate = by_title.get(self._normalize_title_key(title))
+                candidate = by_title.get(normalize_lookup_text(title))
                 if candidate is None:
                     continue
                 reason = str(raw.get("reason", "") or "").strip() or candidate.get("reason", "")
@@ -1738,12 +1739,12 @@ class AnswerComposerMixin:
         query: str,
         limit: int,
     ) -> list[dict[str, str]]:
-        recent_keys = {self._normalize_title_key(title) for title in recent_titles}
+        recent_keys = {normalize_lookup_text(title) for title in recent_titles}
         wants_same_best = any(marker in str(query).lower() for marker in ["最值得", "best", "top", "first"])
         fresh: list[dict[str, str]] = []
         repeated: list[dict[str, str]] = []
         for item in candidates:
-            key = self._normalize_title_key(item.get("title", ""))
+            key = normalize_lookup_text(item.get("title", ""))
             if key in recent_keys and not wants_same_best:
                 repeated.append(item)
             else:
@@ -1771,7 +1772,7 @@ class AnswerComposerMixin:
         deduped: list[str] = []
         seen: set[str] = set()
         for title in titles:
-            key = self._normalize_title_key(title)
+            key = normalize_lookup_text(title)
             if key and key not in seen:
                 seen.add(key)
                 deduped.append(title)

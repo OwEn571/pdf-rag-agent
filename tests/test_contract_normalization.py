@@ -4,6 +4,7 @@ from app.services.contract_normalization import (
     clean_contract_target_text,
     is_structural_target_reference,
     normalize_contract_targets,
+    normalize_lookup_text,
     normalize_modalities,
 )
 
@@ -34,3 +35,8 @@ def test_contract_normalization_modalities_use_aliases_and_relation_defaults() -
     assert normalize_modalities([], relation="figure_question") == ["figure", "caption", "page_text"]
     assert normalize_modalities([], relation="metric_value_lookup") == ["table", "caption", "page_text"]
     assert normalize_modalities([], relation="general_question") == ["page_text", "paper_card"]
+
+
+def test_normalize_lookup_text_matches_title_key_semantics() -> None:
+    assert normalize_lookup_text("  A   Mixed CASE Title  ") == "a mixed case title"
+    assert normalize_lookup_text("") == ""
