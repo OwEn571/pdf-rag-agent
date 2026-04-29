@@ -1843,7 +1843,7 @@ class ResearchAssistantAgentV4(
                 candidate_papers = selected
         screened_papers = candidate_papers
         precomputed_evidence: list[EvidenceBlock] | None = None
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if goals & {"followup_papers", "candidate_relationship", "strict_followup"}:
             screened_papers = self._filter_followup_candidates(contract=contract, candidates=candidate_papers)
         elif "formula" in goals and contract.targets:
@@ -2153,7 +2153,7 @@ class ResearchAssistantAgentV4(
                 execution_steps=execution_steps,
             )
             verification = state["verification"]
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if verification.status == "retry" and contract.targets and (
             goals & {"definition", "mechanism", "examples", "figure_conclusion", "answer", "general_answer"}
         ):
@@ -2211,7 +2211,7 @@ class ResearchAssistantAgentV4(
                 selected = [paper] if paper is not None else []
             if selected:
                 broader_candidates = selected
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if self._should_use_concept_evidence(contract):
             broader_evidence = self.retriever.search_concept_evidence(
                 query=self._evidence_query_text(contract),
@@ -2547,7 +2547,7 @@ class ResearchAssistantAgentV4(
             return contract
         if not contract_allows_active_context_override(contract) and contract.relation != "followup_research":
             return contract
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         relation_like = bool(goals & {"followup_papers", "candidate_relationship", "summary", "results", "answer", "general_answer"})
         if not relation_like and contract.continuation_mode != "followup":
             return contract
@@ -2924,7 +2924,7 @@ class ResearchAssistantAgentV4(
             if (binding := self._target_binding_from_memory(session=session, target=target))
         }
         topic_state = contract_topic_state(contract)
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if contract.relation == "origin_lookup" or "origin" in contract_answer_slots(contract) or goals & {"paper_title", "year"}:
             return contract
         allow_explicit_target_binding = bool(target_bindings) and topic_state != "switch"
@@ -3041,7 +3041,7 @@ class ResearchAssistantAgentV4(
         )
 
     def _resolve_formula_contextual_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if contract.interaction_mode != "research" or "formula" not in goals or not contract.targets:
             return contract
         if self._selected_clarification_paper_id(contract) or "exclude_previous_focus" in contract.notes:
@@ -3549,7 +3549,7 @@ class ResearchAssistantAgentV4(
             if self._target_binding_from_memory(session=session, target=target):
                 return []
         options = self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if len(options) < 2 and "formula" in goals:
             broad_evidence = self.retriever.search_concept_evidence(
                 query=target,
@@ -4008,7 +4008,7 @@ class ResearchAssistantAgentV4(
             return False
         if note_values(notes=contract.notes, prefix="ambiguous_slot="):
             return True
-        return bool(self._research_plan_goals(contract) & self._disambiguation_goal_markers())
+        return bool(research_plan_goals(contract) & self._disambiguation_goal_markers())
 
     @staticmethod
     def _disambiguation_goal_markers() -> set[str]:
@@ -4388,7 +4388,7 @@ class ResearchAssistantAgentV4(
         return " ".join(str(title or "").lower().split())
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if goals & {"entity_type", "role_in_context"} and contract.targets and self._is_short_acronym(contract.targets[0]):
             return max(plan.evidence_limit, 96 if excluded_titles else 72)
         return plan.evidence_limit
@@ -4429,7 +4429,7 @@ class ResearchAssistantAgentV4(
                 "recommended_action": verification.recommended_action,
                 "focus_titles": focus_titles,
             }
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if self._contract_needs_evidence_disambiguation(contract):
             if self._target_binding_from_memory(session=session, target=contract.targets[0]) and "exclude_previous_focus" not in contract.notes:
                 option_count = 1
@@ -4470,10 +4470,6 @@ class ResearchAssistantAgentV4(
 
     def _build_research_plan(self, contract: QueryContract) -> ResearchPlan:
         return build_research_plan(contract=contract, settings=self.settings)
-
-    @staticmethod
-    def _research_plan_goals(contract: QueryContract) -> set[str]:
-        return research_plan_goals(contract)
 
     def _compress_session_history_if_needed(self, session: SessionContext) -> None:
         if self.clients.chat is None:
@@ -5499,7 +5495,7 @@ class ResearchAssistantAgentV4(
                 return response_text
         if contract.continuation_mode == "followup" and not session.effective_active_research().targets:
             return "我需要确认你是在延续上一轮的哪篇论文或哪个主题。"
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
         if contract.targets and goals & {"definition", "entity_type", "mechanism", "figure_conclusion", "answer", "general_answer"}:
             return f"当前语料里还没有稳定定位到与 `{contract.targets[0]}` 直接相关的证据。你可以指定论文、上下文，或换一种问法再试一次。"
         return "我需要更多上下文来确定你当前要继续的研究任务。"

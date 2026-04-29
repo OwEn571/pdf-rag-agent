@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.research_planning import research_plan_goals
 
 
 class FollowupRoutingMixin:
@@ -19,7 +20,7 @@ class FollowupRoutingMixin:
         answer_shape = contract.answer_shape
         precision_requirement = contract.precision_requirement
         notes = list(contract.notes)
-        goals = self._research_plan_goals(contract)
+        goals = research_plan_goals(contract)
 
         if goals & {"entity_type", "role_in_context"}:
             refined_fields, resolved_query = self._infer_entity_followup_focus(
