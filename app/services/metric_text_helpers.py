@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract
+
+PaperTargetMatcher = Callable[[CandidatePaper, list[str]], bool]
 
 
 def extract_metric_lines(evidence: list[EvidenceBlock], *, token_weights: Mapping[str, float]) -> list[str]:
@@ -59,6 +61,92 @@ def metric_block_score(
     if paper_by_id.get(item.paper_id) is not None and contract.targets and target_paper_match:
         score += 6.0
     return score
+
+
+def ranked_metric_context_evidence(
+    *,
+    contract: QueryContract,
+    papers: list[CandidatePaper],
+    evidence: list[EvidenceBlock],
+    token_weights: Mapping[str, float],
+    paper_target_matcher: PaperTargetMatcher,
+) -> list[EvidenceBlock]:
+    return _rank_metric_evidence(
+        contract=contract,
+        papers=papers,
+        evidence=[
+            item
+            for item in evidence
+            if metric_line_score(item.snippet, token_weights=token_weights) > 0
+            or item.block_type in {"table", "caption"}
+        ],
+        token_weights=token_weights,
+        paper_target_matcher=paper_target_matcher,
+    )
+
+
+def ranked_table_metric_blocks(
+    *,
+    contract: QueryContract,
+    papers: list[CandidatePaper],
+    evidence: list[EvidenceBlock],
+    token_weights: Mapping[str, float],
+    paper_target_matcher: PaperTargetMatcher,
+) -> list[EvidenceBlock]:
+    return _rank_metric_evidence(
+        contract=contract,
+        papers=papers,
+        evidence=[
+            item
+            for item in evidence
+            if item.block_type in {"table", "caption"}
+            or (
+                item.block_type == "page_text"
+                and metric_line_score(item.snippet, token_weights=token_weights) >= 3
+            )
+        ],
+        token_weights=token_weights,
+        paper_target_matcher=paper_target_matcher,
+    )
+
+
+def metric_paper_selection(
+    *, papers: list[CandidatePaper], ranked_evidence: list[EvidenceBlock]
+) -> tuple[CandidatePaper | None, list[CandidatePaper], list[str]]:
+    paper_by_id = {paper.paper_id: paper for paper in papers}
+    paper_ids = list(dict.fromkeys(item.paper_id for item in ranked_evidence[:4] if item.paper_id))
+    selected_papers = [paper_by_id[paper_id] for paper_id in paper_ids if paper_id in paper_by_id]
+    selected_paper = selected_papers[0] if selected_papers else max(papers, key=lambda item: item.score) if papers else None
+    return selected_paper, selected_papers, paper_ids
+
+
+def _rank_metric_evidence(
+    *,
+    contract: QueryContract,
+    papers: list[CandidatePaper],
+    evidence: list[EvidenceBlock],
+    token_weights: Mapping[str, float],
+    paper_target_matcher: PaperTargetMatcher,
+) -> list[EvidenceBlock]:
+    paper_by_id = {paper.paper_id: paper for paper in papers}
+    return sorted(
+        evidence,
+        key=lambda item: (
+            -metric_block_score(
+                item=item,
+                contract=contract,
+                paper_by_id=paper_by_id,
+                token_weights=token_weights,
+                target_paper_match=bool(
+                    paper_by_id.get(item.paper_id) is not None
+                    and contract.targets
+                    and paper_target_matcher(paper_by_id[item.paper_id], contract.targets)
+                ),
+            ),
+            item.page,
+            item.doc_id,
+        ),
+    )
 
 
 def metric_context_claim(

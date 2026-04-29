@@ -6,6 +6,9 @@ from app.services.metric_text_helpers import (
     metric_block_score,
     metric_context_claim,
     metric_line_score,
+    metric_paper_selection,
+    ranked_metric_context_evidence,
+    ranked_table_metric_blocks,
     text_table_metric_claim,
 )
 
@@ -72,6 +75,49 @@ def test_metric_block_score_rewards_table_target_and_primary_paper_match() -> No
     )
 
     assert matched == base + 6.0
+
+
+def test_ranked_metric_context_evidence_includes_metric_text_and_tables() -> None:
+    contract = QueryContract(clean_query="PBA accuracy 是多少？", targets=["PBA"])
+    papers = [CandidatePaper(paper_id="paper-1", title="PBA Paper")]
+    ranked = ranked_metric_context_evidence(
+        contract=contract,
+        papers=papers,
+        evidence=[
+            _evidence("plain", snippet="plain summary"),
+            _evidence("metric", snippet="PBA accuracy is reported", score=0.1),
+            _evidence("table", snippet="unparsed cells", block_type="table"),
+        ],
+        token_weights=METRIC_WEIGHTS,
+        paper_target_matcher=lambda paper, targets: targets[0] in paper.title,
+    )
+
+    assert [item.doc_id for item in ranked] == ["metric", "table"]
+
+
+def test_ranked_table_metric_blocks_filters_weak_page_text_and_selects_papers() -> None:
+    contract = QueryContract(clean_query="PBA win rate 是多少？", targets=["PBA"])
+    papers = [
+        CandidatePaper(paper_id="paper-1", title="PBA Paper", score=0.1),
+        CandidatePaper(paper_id="paper-2", title="Fallback Paper", score=0.9),
+    ]
+    ranked = ranked_table_metric_blocks(
+        contract=contract,
+        papers=papers,
+        evidence=[
+            _evidence("weak-page", snippet="reported value", block_type="page_text", paper_id="paper-1"),
+            _evidence("strong-page", snippet="PBA win rate accuracy", block_type="page_text", paper_id="paper-1"),
+            _evidence("caption", snippet="caption only", block_type="caption", paper_id="paper-2"),
+        ],
+        token_weights=METRIC_WEIGHTS,
+        paper_target_matcher=lambda paper, targets: targets[0] in paper.title,
+    )
+    selected_paper, selected_papers, paper_ids = metric_paper_selection(papers=papers, ranked_evidence=ranked)
+
+    assert [item.doc_id for item in ranked] == ["strong-page", "caption"]
+    assert selected_paper == papers[0]
+    assert selected_papers == [papers[0], papers[1]]
+    assert paper_ids == ["paper-1", "paper-2"]
 
 
 def test_metric_context_claim_uses_metric_evidence_or_fallback_ids() -> None:

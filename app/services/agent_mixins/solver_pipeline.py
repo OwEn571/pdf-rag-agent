@@ -318,14 +318,17 @@ class SolverPipelineMixin:
     ) -> list[Claim]:
         if not papers and not evidence:
             return []
-        paper_by_id = {paper.paper_id: paper for paper in papers}
-        metric_evidence = sorted(
-            [item for item in evidence if self._metric_line_score(item.snippet) > 0 or item.block_type in {"table", "caption"}],
-            key=lambda item: (-self._metric_block_score(item=item, contract=contract, paper_by_id=paper_by_id), item.page, item.doc_id),
+        metric_evidence = metric_helpers.ranked_metric_context_evidence(
+            contract=contract,
+            papers=papers,
+            evidence=evidence,
+            token_weights=self.settings.solver_metric_token_weights,
+            paper_target_matcher=lambda paper, targets: self._paper_identity_matches_targets(paper=paper, targets=targets),
         )
-        paper_ids = list(dict.fromkeys(item.paper_id for item in metric_evidence[:4] if item.paper_id))
-        selected_papers = [paper_by_id[paper_id] for paper_id in paper_ids if paper_id in paper_by_id]
-        selected_paper = selected_papers[0] if selected_papers else max(papers, key=lambda item: item.score) if papers else None
+        selected_paper, selected_papers, paper_ids = metric_helpers.metric_paper_selection(
+            papers=papers,
+            ranked_evidence=metric_evidence,
+        )
         if selected_paper is None:
             return []
         return [
@@ -605,30 +608,22 @@ class SolverPipelineMixin:
         return formula_helpers.normalize_extracted_formula_text(text)
 
     def _solve_table(self, *, contract: QueryContract, papers: list[CandidatePaper], evidence: list[EvidenceBlock]) -> list[Claim]:
-        table_blocks = [
-            item
-            for item in evidence
-            if item.block_type in {"table", "caption"}
-            or (item.block_type == "page_text" and self._metric_line_score(item.snippet) >= 3)
-        ]
-        if not table_blocks:
-            return []
-        paper_by_id = {paper.paper_id: paper for paper in papers}
-        ranked_blocks = sorted(
-            table_blocks,
-            key=lambda item: (
-                -self._metric_block_score(item=item, contract=contract, paper_by_id=paper_by_id),
-                item.page,
-                item.doc_id,
-            ),
+        ranked_blocks = metric_helpers.ranked_table_metric_blocks(
+            contract=contract,
+            papers=papers,
+            evidence=evidence,
+            token_weights=self.settings.solver_metric_token_weights,
+            paper_target_matcher=lambda paper, targets: self._paper_identity_matches_targets(paper=paper, targets=targets),
         )
-        primary_paper = paper_by_id.get(ranked_blocks[0].paper_id) if ranked_blocks else None
-        fallback_paper = max(papers, key=lambda item: item.score) if papers else None
-        selected_paper = primary_paper or fallback_paper
+        if not ranked_blocks:
+            return []
+        selected_paper, _, paper_ids = metric_helpers.metric_paper_selection(
+            papers=papers,
+            ranked_evidence=ranked_blocks,
+        )
         if selected_paper is None:
             return []
         evidence_ids = [item.doc_id for item in ranked_blocks[:4]]
-        paper_ids = list(dict.fromkeys(item.paper_id for item in ranked_blocks[:4] if item.paper_id))
         vlm_claim = self._solve_table_with_vlm(
             contract=contract,
             ranked_blocks=ranked_blocks,
@@ -758,30 +753,6 @@ class SolverPipelineMixin:
 
     def _extract_metric_lines(self, evidence: list[EvidenceBlock]) -> list[str]:
         return metric_helpers.extract_metric_lines(evidence, token_weights=self.settings.solver_metric_token_weights)
-
-    def _metric_line_score(self, text: str) -> int:
-        return metric_helpers.metric_line_score(text, token_weights=self.settings.solver_metric_token_weights)
-
-    def _metric_block_score(
-        self,
-        *,
-        item: EvidenceBlock,
-        contract: QueryContract,
-        paper_by_id: dict[str, CandidatePaper],
-    ) -> float:
-        paper = paper_by_id.get(item.paper_id)
-        target_paper_match = bool(
-            paper is not None
-            and contract.targets
-            and self._paper_identity_matches_targets(paper=paper, targets=contract.targets)
-        )
-        return metric_helpers.metric_block_score(
-            item=item,
-            contract=contract,
-            paper_by_id=paper_by_id,
-            token_weights=self.settings.solver_metric_token_weights,
-            target_paper_match=target_paper_match,
-        )
 
     def _formula_block_score(self, text: str, *, contract: QueryContract | None = None) -> float:
         return formula_helpers.formula_block_score(
