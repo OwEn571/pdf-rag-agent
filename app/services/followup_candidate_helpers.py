@@ -51,6 +51,85 @@ def paper_anchor_text(paper: CandidatePaper) -> str:
     return title
 
 
+def paper_brief(
+    *,
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+) -> dict[str, Any]:
+    return {
+        "paper_id": paper.paper_id,
+        "title": paper.title,
+        "year": paper.year,
+        "authors": str(paper.metadata.get("authors", "")),
+        "aliases": str(paper.metadata.get("aliases", "")),
+        "summary": paper_summary_text(paper.paper_id),
+    }
+
+
+def followup_seed_selector_system_prompt() -> str:
+    return (
+        "你是论文关系求解器中的种子论文定位器。"
+        "请根据当前问题、目标实体和候选论文，找出用户真正想追踪其后续工作的原始/种子论文。"
+        "如果目标是数据集、方法或模型，优先选择“引入/提出/定义该对象”的论文，而不是后续扩展。"
+        "只输出 JSON，字段为 seed_paper_ids 和 rationale。"
+    )
+
+
+def followup_seed_selector_human_prompt(
+    *,
+    contract: QueryContract,
+    active_titles: list[str],
+    candidates: list[CandidatePaper],
+    paper_summary_text: PaperText,
+) -> str:
+    return json.dumps(
+        {
+            "query": contract.clean_query,
+            "targets": contract.targets,
+            "active_titles": active_titles,
+            "candidates": [
+                paper_brief(paper=item, paper_summary_text=paper_summary_text)
+                for item in candidates[:8]
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def followup_candidate_ranker_system_prompt() -> str:
+    return (
+        "你是论文关系分析器。"
+        "请判断哪些候选论文是种子论文的后续研究、扩展工作、迁移工作或直接延续。"
+        "后续工作必须与种子论文的对象、问题设定或方法线索直接相关；只在同一大领域但关系松散的论文不要选。"
+        "绝对不要把种子论文本身选进去。"
+        "只输出 JSON，字段为 followups。followups 中每项包含 paper_id, relation_type, reason, confidence。"
+    )
+
+
+def followup_candidate_ranker_human_prompt(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    candidates: list[CandidatePaper],
+    paper_summary_text: PaperText,
+) -> str:
+    return json.dumps(
+        {
+            "query": contract.clean_query,
+            "targets": contract.targets,
+            "seed_papers": [
+                paper_brief(paper=item, paper_summary_text=paper_summary_text)
+                for item in seed_papers[:2]
+            ],
+            "candidates": [
+                paper_brief(paper=item, paper_summary_text=paper_summary_text)
+                for item in candidates[:10]
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 def followup_target_aliases(
     *,
     contract: QueryContract,

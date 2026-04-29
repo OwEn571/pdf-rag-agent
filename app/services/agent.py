@@ -110,11 +110,15 @@ from app.services.evidence_presentation import (
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
+    followup_candidate_ranker_human_prompt,
+    followup_candidate_ranker_system_prompt,
     followup_expansion_terms,
     followup_relationship_assessment,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
+    followup_seed_selector_human_prompt,
+    followup_seed_selector_system_prompt,
     followup_seed_score,
     followup_validator_assessment_from_payload,
     merge_followup_rankings,
@@ -3526,20 +3530,12 @@ class ResearchAssistantAgentV4(
         by_id = {item.paper_id: item for item in candidates}
         if self.clients.chat is not None:
             payload = self.clients.invoke_json(
-                system_prompt=(
-                    "你是论文关系求解器中的种子论文定位器。"
-                    "请根据当前问题、目标实体和候选论文，找出用户真正想追踪其后续工作的原始/种子论文。"
-                    "如果目标是数据集、方法或模型，优先选择“引入/提出/定义该对象”的论文，而不是后续扩展。"
-                    "只输出 JSON，字段为 seed_paper_ids 和 rationale。"
-                ),
-                human_prompt=json.dumps(
-                    {
-                        "query": contract.clean_query,
-                        "targets": contract.targets,
-                        "active_titles": session.effective_active_research().titles,
-                        "candidates": [self._paper_brief(item) for item in candidates[:8]],
-                    },
-                    ensure_ascii=False,
+                system_prompt=followup_seed_selector_system_prompt(),
+                human_prompt=followup_seed_selector_human_prompt(
+                    contract=contract,
+                    active_titles=session.effective_active_research().titles,
+                    candidates=candidates,
+                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
                 ),
                 fallback={},
             )
@@ -3625,21 +3621,12 @@ class ResearchAssistantAgentV4(
         by_id = {item.paper_id: item for item in filtered}
         if self.clients.chat is not None:
             payload = self.clients.invoke_json(
-                system_prompt=(
-                    "你是论文关系分析器。"
-                    "请判断哪些候选论文是种子论文的后续研究、扩展工作、迁移工作或直接延续。"
-                    "后续工作必须与种子论文的对象、问题设定或方法线索直接相关；只在同一大领域但关系松散的论文不要选。"
-                    "绝对不要把种子论文本身选进去。"
-                    "只输出 JSON，字段为 followups。followups 中每项包含 paper_id, relation_type, reason, confidence。"
-                ),
-                human_prompt=json.dumps(
-                    {
-                        "query": contract.clean_query,
-                        "targets": contract.targets,
-                        "seed_papers": [self._paper_brief(item) for item in seed_papers[:2]],
-                        "candidates": [self._paper_brief(item) for item in filtered[:10]],
-                    },
-                    ensure_ascii=False,
+                system_prompt=followup_candidate_ranker_system_prompt(),
+                human_prompt=followup_candidate_ranker_human_prompt(
+                    contract=contract,
+                    seed_papers=seed_papers,
+                    candidates=filtered,
+                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
                 ),
                 fallback={},
             )
@@ -3766,16 +3753,6 @@ class ResearchAssistantAgentV4(
             relationship_evidence=relationship_evidence,
             coerce_confidence=lambda value: self._coerce_confidence(value),
         )
-
-    def _paper_brief(self, paper: CandidatePaper) -> dict[str, Any]:
-        return {
-            "paper_id": paper.paper_id,
-            "title": paper.title,
-            "year": paper.year,
-            "authors": str(paper.metadata.get("authors", "")),
-            "aliases": str(paper.metadata.get("aliases", "")),
-            "summary": self._paper_summary_text(paper.paper_id),
-        }
 
     def _paper_summary_text(self, paper_id: str) -> str:
         doc = self.retriever.paper_doc_by_id(paper_id)

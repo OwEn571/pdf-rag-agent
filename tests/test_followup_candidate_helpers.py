@@ -7,18 +7,23 @@ from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     extract_followup_keyphrases,
     filter_followup_candidates,
+    followup_candidate_ranker_human_prompt,
+    followup_candidate_ranker_system_prompt,
     followup_expansion_terms,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_reason_fallback,
     followup_relationship_assessment,
+    followup_seed_selector_human_prompt,
+    followup_seed_selector_system_prompt,
     followup_seed_score,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
     infer_followup_relation_type,
     merge_followup_rankings,
     paper_anchor_text,
+    paper_brief,
     paper_author_tokens,
     paper_keyword_set,
     paper_relationship_brief,
@@ -71,6 +76,66 @@ def test_candidate_title_matches_title_or_alias() -> None:
 def test_paper_anchor_text_uses_short_title_prefix() -> None:
     assert paper_anchor_text(CandidatePaper(paper_id="p1", title="AlignX: Scaling Preferences")) == "AlignX"
     assert paper_anchor_text(CandidatePaper(paper_id="p2", title="Plain Title")) == "Plain Title"
+
+
+def test_paper_brief_injects_summary_and_metadata() -> None:
+    paper = CandidatePaper(
+        paper_id="p1",
+        title="Paper One",
+        year="2026",
+        metadata={"authors": "A; B", "aliases": "P1"},
+    )
+
+    brief = paper_brief(paper=paper, paper_summary_text=lambda paper_id: f"summary:{paper_id}")
+
+    assert brief == {
+        "paper_id": "p1",
+        "title": "Paper One",
+        "year": "2026",
+        "authors": "A; B",
+        "aliases": "P1",
+        "summary": "summary:p1",
+    }
+
+
+def test_followup_seed_selector_prompts_build_bounded_candidate_payload() -> None:
+    contract = QueryContract(clean_query="AlignX 后续工作", targets=["AlignX"])
+    candidates = [CandidatePaper(paper_id=f"p{index}", title=f"Paper {index}") for index in range(10)]
+
+    assert "seed_paper_ids" in followup_seed_selector_system_prompt()
+    payload = json.loads(
+        followup_seed_selector_human_prompt(
+            contract=contract,
+            active_titles=["Active Paper"],
+            candidates=candidates,
+            paper_summary_text=lambda paper_id: f"summary:{paper_id}",
+        )
+    )
+
+    assert payload["query"] == "AlignX 后续工作"
+    assert payload["active_titles"] == ["Active Paper"]
+    assert len(payload["candidates"]) == 8
+    assert payload["candidates"][0]["summary"] == "summary:p0"
+
+
+def test_followup_candidate_ranker_prompts_build_seed_and_candidate_payload() -> None:
+    contract = QueryContract(clean_query="AlignX 后续工作", targets=["AlignX"])
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper")
+    candidates = [CandidatePaper(paper_id=f"p{index}", title=f"Paper {index}") for index in range(12)]
+
+    assert "followups" in followup_candidate_ranker_system_prompt()
+    payload = json.loads(
+        followup_candidate_ranker_human_prompt(
+            contract=contract,
+            seed_papers=[seed],
+            candidates=candidates,
+            paper_summary_text=lambda paper_id: f"summary:{paper_id}",
+        )
+    )
+
+    assert payload["seed_papers"][0]["paper_id"] == "seed"
+    assert len(payload["candidates"]) == 10
+    assert payload["candidates"][-1]["paper_id"] == "p9"
 
 
 def test_followup_target_aliases_combines_targets_seed_aliases_and_anchor() -> None:
