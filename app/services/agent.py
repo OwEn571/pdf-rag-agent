@@ -42,6 +42,13 @@ from app.services.agent_emit import (
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_runtime_summary import build_runtime_summary
+from app.services.agent_runtime_helpers import (
+    claim_focus_titles,
+    entity_evidence_limit,
+    excluded_focus_titles,
+    filter_candidate_papers_by_excluded_titles,
+    filter_evidence_by_excluded_titles,
+)
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     ambiguity_option_context_text,
@@ -2804,13 +2811,11 @@ class ResearchAssistantAgentV4(
         return active
 
     def _excluded_focus_titles(self, *, session: SessionContext, contract: QueryContract) -> set[str]:
-        if "exclude_previous_focus" not in contract.notes and not is_negative_correction_query(contract.clean_query):
-            return set()
-        titles: list[str] = []
-        titles.extend(session.effective_active_research().titles)
-        if session.turns:
-            titles.extend(session.turns[-1].titles)
-        return {normalize_lookup_text(title) for title in titles if normalize_lookup_text(title)}
+        return excluded_focus_titles(
+            session=session,
+            contract=contract,
+            is_negative_correction_query=is_negative_correction_query,
+        )
 
     @staticmethod
     def _filter_candidate_papers_by_excluded_titles(
@@ -2818,9 +2823,7 @@ class ResearchAssistantAgentV4(
         *,
         excluded_titles: set[str],
     ) -> list[CandidatePaper]:
-        if not excluded_titles:
-            return candidates
-        return [item for item in candidates if normalize_lookup_text(item.title) not in excluded_titles]
+        return filter_candidate_papers_by_excluded_titles(candidates, excluded_titles=excluded_titles)
 
     @staticmethod
     def _filter_evidence_by_excluded_titles(
@@ -2828,15 +2831,10 @@ class ResearchAssistantAgentV4(
         *,
         excluded_titles: set[str],
     ) -> list[EvidenceBlock]:
-        if not excluded_titles:
-            return evidence
-        return [item for item in evidence if normalize_lookup_text(item.title) not in excluded_titles]
+        return filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
 
     def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
-        goals = research_plan_goals(contract)
-        if goals & {"entity_type", "role_in_context"} and contract.targets and is_short_acronym(contract.targets[0]):
-            return max(plan.evidence_limit, 96 if excluded_titles else 72)
-        return plan.evidence_limit
+        return entity_evidence_limit(contract=contract, plan=plan, excluded_titles=excluded_titles)
 
     def _plan_agent_actions(self, *, contract: QueryContract, session: SessionContext, use_web_search: bool) -> dict[str, Any]:
         return self.planner.plan_actions(
@@ -2973,18 +2971,13 @@ class ResearchAssistantAgentV4(
         return build_web_research_claim(contract=contract, web_evidence=web_evidence)
 
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
-        titles: list[str] = []
-        by_id = {item.paper_id: item.title for item in papers}
-        for claim in claims:
-            for paper_id in claim.paper_ids:
-                title = by_id.get(paper_id)
-                if not title:
-                    doc = self.retriever.paper_doc_by_id(paper_id)
-                    if doc is not None:
-                        title = str((doc.metadata or {}).get("title", ""))
-                if title and title not in titles:
-                    titles.append(title)
-        return titles[:3] or [item.title for item in papers[:3]]
+        def paper_title_lookup(paper_id: str) -> str | None:
+            doc = self.retriever.paper_doc_by_id(paper_id)
+            if doc is None:
+                return None
+            return str((doc.metadata or {}).get("title", ""))
+
+        return claim_focus_titles(claims=claims, papers=papers, paper_title_lookup=paper_title_lookup)
 
     def _resolve_followup_seed_papers(
         self,

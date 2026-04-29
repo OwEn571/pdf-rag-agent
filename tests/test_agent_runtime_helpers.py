@@ -2,18 +2,23 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.domain.models import QueryContract, ResearchPlan
+from app.domain.models import ActiveResearch, CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn
 from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     agent_loop_execution_step,
+    claim_focus_titles,
     configured_max_steps,
     contract_needs_human_clarification,
     conversation_runtime_actions,
     conversation_runtime_state,
     dequeue_action,
+    entity_evidence_limit,
     execute_tool_loop,
+    excluded_focus_titles,
     finalize_research_runtime,
     finalize_research_verification,
+    filter_candidate_papers_by_excluded_titles,
+    filter_evidence_by_excluded_titles,
     next_conversation_action,
     next_research_action,
     record_tool_loop_ready,
@@ -84,6 +89,56 @@ def test_runtime_helpers_record_tool_loop_ready_event_and_step() -> None:
         "tool_inputs": {"search_corpus": {"query": "DPO"}},
     }
     assert execution_steps == [{"node": "agent_loop", "summary": "search_corpus -> compose"}]
+
+
+def test_runtime_helpers_filter_excluded_focus_titles_and_limits() -> None:
+    session = SessionContext(
+        session_id="s1",
+        active_research=ActiveResearch(titles=["Old Focus Paper"]),
+        turns=[SessionTurn(query="q", answer="a", titles=["Recent Paper"])],
+    )
+    contract = QueryContract(clean_query="不是这篇", notes=["exclude_previous_focus"], targets=["PBA"])
+
+    excluded = excluded_focus_titles(
+        session=session,
+        contract=contract,
+        is_negative_correction_query=lambda _: False,
+    )
+
+    assert excluded == {"old focus paper", "recent paper"}
+    candidates = [
+        CandidatePaper(paper_id="old", title="Old Focus Paper"),
+        CandidatePaper(paper_id="new", title="New Paper"),
+    ]
+    evidence = [
+        EvidenceBlock(doc_id="1", paper_id="old", title="Recent Paper", file_path="", page=1, block_type="page_text", snippet="old"),
+        EvidenceBlock(doc_id="2", paper_id="new", title="New Paper", file_path="", page=1, block_type="page_text", snippet="new"),
+    ]
+
+    assert [item.paper_id for item in filter_candidate_papers_by_excluded_titles(candidates, excluded_titles=excluded)] == ["new"]
+    assert [item.doc_id for item in filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded)] == ["2"]
+    assert entity_evidence_limit(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["role_in_context"]),
+        plan=ResearchPlan(evidence_limit=14),
+        excluded_titles=set(),
+    ) == 72
+    assert entity_evidence_limit(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["role_in_context"]),
+        plan=ResearchPlan(evidence_limit=14),
+        excluded_titles={"old focus paper"},
+    ) == 96
+
+
+def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates() -> None:
+    papers = [CandidatePaper(paper_id="p1", title="Known Paper"), CandidatePaper(paper_id="p3", title="Fallback Paper")]
+    claims = [Claim(claim_type="definition", paper_ids=["p1", "p2"])]
+
+    assert claim_focus_titles(
+        claims=claims,
+        papers=papers,
+        paper_title_lookup=lambda paper_id: "Looked Up Paper" if paper_id == "p2" else None,
+    ) == ["Known Paper", "Looked Up Paper"]
+    assert claim_focus_titles(claims=[], papers=papers, paper_title_lookup=lambda _: None) == ["Known Paper", "Fallback Paper"]
 
 
 def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:

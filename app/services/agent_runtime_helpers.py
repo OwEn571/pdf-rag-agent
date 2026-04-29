@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from app.domain.models import QueryContract, SessionContext, VerificationReport
+from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
 from app.services.confidence import (
     confidence_from_contract,
@@ -10,6 +10,9 @@ from app.services.confidence import (
     confidence_payload,
     should_ask_human,
 )
+from app.services.contract_normalization import normalize_lookup_text
+from app.services.query_shaping import is_short_acronym
+from app.services.research_planning import research_plan_goals
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
     tool_inputs_by_name,
@@ -20,6 +23,7 @@ NegativeCorrectionFn = Callable[[str], bool]
 EmitFn = Callable[[str, dict[str, Any]], None]
 FallbackNextFn = Callable[[set[str]], str | None]
 StopConditionFn = Callable[[set[str]], bool]
+PaperTitleLookupFn = Callable[[str], str | None]
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +110,66 @@ def record_tool_loop_ready(
         tool_loop_ready_observation(tool=tool, actions=actions, tool_inputs=tool_inputs),
     )
     execution_steps.append(agent_loop_execution_step(actions))
+
+
+def excluded_focus_titles(
+    *,
+    session: SessionContext,
+    contract: QueryContract,
+    is_negative_correction_query: NegativeCorrectionFn,
+) -> set[str]:
+    if "exclude_previous_focus" not in contract.notes and not is_negative_correction_query(contract.clean_query):
+        return set()
+    titles: list[str] = []
+    titles.extend(session.effective_active_research().titles)
+    if session.turns:
+        titles.extend(session.turns[-1].titles)
+    return {normalize_lookup_text(title) for title in titles if normalize_lookup_text(title)}
+
+
+def filter_candidate_papers_by_excluded_titles(
+    candidates: list[CandidatePaper],
+    *,
+    excluded_titles: set[str],
+) -> list[CandidatePaper]:
+    if not excluded_titles:
+        return candidates
+    return [item for item in candidates if normalize_lookup_text(item.title) not in excluded_titles]
+
+
+def filter_evidence_by_excluded_titles(
+    evidence: list[EvidenceBlock],
+    *,
+    excluded_titles: set[str],
+) -> list[EvidenceBlock]:
+    if not excluded_titles:
+        return evidence
+    return [item for item in evidence if normalize_lookup_text(item.title) not in excluded_titles]
+
+
+def entity_evidence_limit(*, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
+    goals = research_plan_goals(contract)
+    if goals & {"entity_type", "role_in_context"} and contract.targets and is_short_acronym(contract.targets[0]):
+        return max(plan.evidence_limit, 96 if excluded_titles else 72)
+    return plan.evidence_limit
+
+
+def claim_focus_titles(
+    *,
+    claims: list[Claim],
+    papers: list[CandidatePaper],
+    paper_title_lookup: PaperTitleLookupFn,
+) -> list[str]:
+    titles: list[str] = []
+    by_id = {item.paper_id: item.title for item in papers}
+    for claim in claims:
+        for paper_id in claim.paper_ids:
+            title = by_id.get(paper_id)
+            if not title:
+                title = str(paper_title_lookup(paper_id) or "")
+            if title and title not in titles:
+                titles.append(title)
+    return titles[:3] or [item.title for item in papers[:3]]
 
 
 def finalize_research_verification(state: dict[str, Any]) -> tuple[VerificationReport, dict[str, Any]]:
