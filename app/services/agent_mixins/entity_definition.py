@@ -37,6 +37,70 @@ ENTITY_DEFINITION_MARKERS: dict[str, MarkerProfile] = {
     "dataset_type": ("dataset", "benchmark", "corpus", "leaderboard", "数据集", "基准"),
     "framework_type": ("framework", "system", "platform", "agent", "架构", "系统", "框架"),
     "model_type": ("model", "llm", "language model", "simulator", "classifier", "policy", "模型"),
+    "intro_dataset": ("dataset", "benchmark", "corpus", "数据集", "基准"),
+    "intro_algorithm": ("algorithm", "policy optimization", "reinforcement learning", "算法", "优化"),
+    "group_comparison": (
+        "group of outputs",
+        "group scores",
+        "relative rewards",
+        "group-based reward",
+        "group relative",
+    ),
+    "critic_free": ("critic", "value model", "value function", "foregoes the critic", "obviates the need"),
+    "resource_saving": (
+        "training resources",
+        "memory usage",
+        "computational burden",
+        "overhead",
+        "sample-efficient",
+        "reduce training resources",
+    ),
+    "reasoning_alignment": (
+        "reasoning",
+        "alignment",
+        "instruction following",
+        "mathematical reasoning",
+        "推理",
+    ),
+    "workflow_sampling": (
+        "sample a group",
+        "sampled output",
+        "sample 64 outputs",
+        "group of outputs",
+        "sample g outputs",
+    ),
+    "workflow_reward": (
+        "compute rewards",
+        "reward model",
+        "score the outputs",
+        "rule refers",
+        "rule judgment",
+        "average reward",
+        "group scores",
+        "baseline",
+    ),
+    "workflow_advantage": (
+        "group average",
+        "group standard deviation",
+        "relative rewards",
+        "mean(r)",
+        "std(r)",
+        "advantage",
+        "advantage estimation",
+        "group relative",
+    ),
+    "workflow_policy_update": (
+        "update the policy",
+        "policy model",
+        "objective",
+        "clip",
+        "kl penalty",
+        "maximizing the grpo objective",
+    ),
+    "summary_group_comparison": ("group scores", "relative rewards", "group relative", "advantage"),
+    "summary_critic": ("critic", "value model", "value function"),
+    "summary_resource": ("training resources", "memory", "computational burden", "less memory", "reduce"),
+    "summary_reasoning": ("reasoning", "alignment", "mathematical reasoning", "推理"),
 }
 
 
@@ -754,20 +818,20 @@ class EntityDefinitionMixin:
         joined = " \n".join([*definition_lines, *mechanism_lines, *application_lines, *[item.snippet for item in evidence[:6]]]).lower()
         if "ppo" in joined and ("variant" in joined or "from ppo to grpo" in joined):
             lead = f"{target} 更接近一种基于 PPO 的 `{label}`。"
-        elif any(token in joined for token in ["dataset", "benchmark", "corpus", "数据集", "基准"]):
+        elif query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["intro_dataset"]):
             lead = f"{target} 更接近一个 `{label}`。"
-        elif any(token in joined for token in ["algorithm", "policy optimization", "reinforcement learning", "算法", "优化"]):
+        elif query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["intro_algorithm"]):
             lead = f"{target} 更接近一种 `{label}`。"
         else:
             lead = f"{target} 可以定位为 `{label}`。"
         details: list[str] = []
-        if any(token in joined for token in ["group of outputs", "group scores", "relative rewards", "group-based reward", "group relative"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["group_comparison"]):
             details.append("它会把同一问题的多个候选输出放在一组里比较，并利用组内相对 reward 计算 advantage")
-        if any(token in joined for token in ["critic", "value model", "value function", "foregoes the critic", "obviates the need"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["critic_free"]):
             details.append("这样可以不再依赖单独的 value model / critic")
-        if any(token in joined for token in ["training resources", "memory usage", "computational burden", "overhead", "sample-efficient", "reduce training resources"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["resource_saving"]):
             details.append("设计动机之一是降低 PPO 类方法的训练资源开销")
-        if any(token in joined for token in ["reasoning", "alignment", "instruction following", "mathematical reasoning", "推理"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["reasoning_alignment"]):
             details.append("常见目标是提升推理或对齐表现")
         if details:
             return lead + " " + "；".join(details[:3]) + "。"
@@ -810,37 +874,13 @@ class EntityDefinitionMixin:
     def _entity_workflow_steps(self, *, evidence: list[EvidenceBlock]) -> list[str]:
         joined = " \n".join(item.snippet for item in evidence[:8]).lower()
         steps: list[str] = []
-        if any(token in joined for token in ["sample a group", "sampled output", "sample 64 outputs", "group of outputs", "sample g outputs"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["workflow_sampling"]):
             steps.append("先对同一个问题采样一组候选输出。")
-        if any(
-            token in joined
-            for token in [
-                "compute rewards",
-                "reward model",
-                "score the outputs",
-                "rule refers",
-                "rule judgment",
-                "average reward",
-                "group scores",
-                "baseline",
-            ]
-        ):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["workflow_reward"]):
             steps.append("再根据组内 reward 或 baseline 信息，为每个输出构造训练信号。")
-        if any(
-            token in joined
-            for token in [
-                "group average",
-                "group standard deviation",
-                "relative rewards",
-                "mean(r)",
-                "std(r)",
-                "advantage",
-                "advantage estimation",
-                "group relative",
-            ]
-        ):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["workflow_advantage"]):
             steps.append("随后把组内 reward 做相对化或归一化，构造 advantage，而不是依赖单独的 value critic。")
-        if any(token in joined for token in ["update the policy", "policy model", "objective", "clip", "kl penalty", "maximizing the grpo objective"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["workflow_policy_update"]):
             steps.append("最后在 clipping / KL 约束下更新 policy model。")
         return steps[:4]
 
@@ -867,13 +907,13 @@ class EntityDefinitionMixin:
         bullets: list[str] = []
         if "ppo" in joined and "variant" in joined:
             bullets.append("它可以看作 PPO 的一个变体。")
-        if any(token in joined for token in ["group scores", "relative rewards", "group relative", "advantage"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["summary_group_comparison"]):
             bullets.append("它通过组内相对 reward / group scores 来估计 baseline 或 advantage。")
-        if any(token in joined for token in ["critic", "value model", "value function"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["summary_critic"]):
             bullets.append("它的关键区别是不再依赖单独的 value critic。")
-        if any(token in joined for token in ["training resources", "memory", "computational burden", "less memory", "reduce"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["summary_resource"]):
             bullets.append("这样做的直接收益是减少训练资源和内存开销。")
-        if any(token in joined for token in ["reasoning", "alignment", "mathematical reasoning", "推理"]):
+        if query_matches_any(joined, "", ENTITY_DEFINITION_MARKERS["summary_reasoning"]):
             bullets.append("常见用途是提升推理或对齐表现。")
         if not bullets:
             bullets = self._entity_clean_lines(definition_lines, limit=2)
