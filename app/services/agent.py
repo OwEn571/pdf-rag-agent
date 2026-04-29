@@ -168,9 +168,9 @@ from app.services.research_memory import remember_compound_outcome, remember_res
 from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
+    claims_with_web_research_claim,
     collect_web_evidence,
     search_agent_web_evidence,
-    should_add_web_claim,
 )
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -1100,12 +1100,16 @@ class ResearchAssistantAgentV4(
                     max_web_results=max_web_results,
                 )
                 web_evidence: list[EvidenceBlock] = state["web_evidence"]
-                if web_evidence and should_add_web_claim(
+                claims = claims_with_web_research_claim(
                     contract=contract,
                     claims=claims,
+                    web_evidence=web_evidence,
                     explicit_web=explicit_web_search,
-                ):
-                    claims.append(self._build_web_research_claim(contract=contract, web_evidence=web_evidence))
+                    build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
+                        contract=item_contract,
+                        web_evidence=item_evidence,
+                    ),
+                )
                 state["claims"] = claims
             else:
                 ambiguity_options = self._apply_disambiguation_judge_recommendation(
@@ -1131,12 +1135,16 @@ class ResearchAssistantAgentV4(
                 max_web_results=max_web_results,
             )
             web_evidence: list[EvidenceBlock] = state["web_evidence"]
-            if web_evidence and should_add_web_claim(
+            claims = claims_with_web_research_claim(
                 contract=contract,
                 claims=claims,
+                web_evidence=web_evidence,
                 explicit_web=explicit_web_search,
-            ):
-                claims.append(self._build_web_research_claim(contract=contract, web_evidence=web_evidence))
+                build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
+                    contract=item_contract,
+                    web_evidence=item_evidence,
+                ),
+            )
             state["claims"] = claims
         claims = state["claims"]
         emit("claims", {"count": len(claims), "items": [item.model_dump() for item in claims]})

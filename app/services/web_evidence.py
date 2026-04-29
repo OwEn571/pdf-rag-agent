@@ -19,6 +19,7 @@ WEB_RESEARCH_DOMAINS = [
 ]
 
 WebEvidenceCollector = Callable[[QueryContract, bool, int, str], list[EvidenceBlock]]
+WebClaimBuilder = Callable[[QueryContract, list[EvidenceBlock]], Claim]
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,23 @@ def should_add_web_claim(*, contract: QueryContract, claims: list[Claim], explic
     if contract.allow_web_search and goals & {"answer", "general_answer", "recommended_papers", "followup_papers"}:
         return True
     return not claims
+
+
+def claims_with_web_research_claim(
+    *,
+    contract: QueryContract,
+    claims: list[Claim],
+    web_evidence: list[EvidenceBlock],
+    explicit_web: bool,
+    build_claim: WebClaimBuilder,
+) -> list[Claim]:
+    if web_evidence and should_add_web_claim(
+        contract=contract,
+        claims=claims,
+        explicit_web=explicit_web,
+    ):
+        return [*claims, build_claim(contract, web_evidence)]
+    return claims
 
 
 def build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:

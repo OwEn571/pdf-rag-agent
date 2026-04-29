@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.domain.models import Claim, EvidenceBlock, QueryContract
 from app.services.web_evidence import (
     build_web_research_claim,
+    claims_with_web_research_claim,
     collect_web_evidence,
     merge_evidence,
     search_agent_web_evidence,
@@ -197,3 +198,39 @@ def test_web_evidence_claim_decision_and_payload() -> None:
     claim = build_web_research_claim(contract=contract, web_evidence=evidence)
     assert claim.claim_type == "web_research"
     assert claim.evidence_ids == ["web-a"]
+
+
+def test_web_evidence_claims_with_web_research_claim_appends_when_needed() -> None:
+    contract = QueryContract(clean_query="最新 RAG 论文", allow_web_search=True)
+    web = [
+        EvidenceBlock(
+            doc_id="web-a",
+            paper_id="web-a",
+            title="Web",
+            file_path="https://example.com",
+            page=0,
+            block_type="web",
+            snippet="web",
+        )
+    ]
+
+    claims = claims_with_web_research_claim(
+        contract=contract,
+        claims=[],
+        web_evidence=web,
+        explicit_web=False,
+        build_claim=lambda item_contract, evidence: Claim(
+            claim_type="web_research",
+            entity=item_contract.clean_query,
+            value=str(len(evidence)),
+        ),
+    )
+
+    assert [item.claim_type for item in claims] == ["web_research"]
+    assert claims_with_web_research_claim(
+        contract=contract,
+        claims=claims,
+        web_evidence=[],
+        explicit_web=True,
+        build_claim=lambda *_: Claim(claim_type="unused", entity="", value=""),
+    ) == claims
