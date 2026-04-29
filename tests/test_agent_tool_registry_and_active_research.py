@@ -381,6 +381,7 @@ def test_tool_registry_builders_are_outside_agent_class() -> None:
         "query_rewrite",
         "summarize",
         "verify_claim",
+        "Task",
         "web_search",
         "fetch_url",
         "compose",
@@ -670,6 +671,41 @@ def test_task_tool_runs_subtask_through_conversation_runtime() -> None:
     assert state["task_results"][0]["answer"] == "hello from runtime"
     assert "子问题：你好" in state["answer"]
     assert "hello from runtime" in state["answer"]
+    assert any(event == "observation" and payload["tool"] == "Task" for event, payload in events)
+
+
+def test_task_tool_runs_subtask_through_research_runtime() -> None:
+    probe = _RegistryProbeAgent()
+    runtime = AgentRuntime(agent=probe)
+    session = SessionContext(session_id="demo")
+    events: list[tuple[str, dict[str, object]]] = []
+    steps: list[dict[str, object]] = []
+
+    state = runtime.run_research_agent_loop(
+        contract=QueryContract(clean_query="研究子任务", relation="general_question"),
+        session=session,
+        agent_plan={
+            "actions": ["Task", "compose"],
+            "tool_call_args": [
+                {
+                    "name": "Task",
+                    "args": {
+                        "description": "研究一个子问题",
+                        "prompt": "子问题：DPO 是什么？",
+                        "tools_allowed": ["compose"],
+                    },
+                }
+            ],
+        },
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=0,
+        emit=lambda event, payload: events.append((event, payload)),
+        execution_steps=steps,
+    )
+
+    assert state["task_results"][0]["prompt"] == "子问题：DPO 是什么？"
+    assert state["task_results"][0]["answer"] == "hello from runtime"
     assert any(event == "observation" and payload["tool"] == "Task" for event, payload in events)
 
 

@@ -579,6 +579,7 @@ AGENT_TOOL_SPECS: tuple[AgentToolSpec, ...] = (
             "required": ["description", "prompt"],
             "additionalProperties": False,
         },
+        research_executable=True,
         conversation_executable=True,
     ),
     AgentToolSpec(

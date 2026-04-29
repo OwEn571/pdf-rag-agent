@@ -647,6 +647,31 @@ def build_research_tool_registry(
             payload=payload,
         )
 
+    def run_task() -> None:
+        planned_input = planned_tool_input_from_state(state, "Task")
+        contract: QueryContract = state["contract"]
+        request = task_tool_request(planned_input=planned_input, fallback_prompt=contract.clean_query)
+        if not request["prompt"]:
+            return
+        result = run_task_subagent(
+            agent=agent,
+            prompt=str(request["prompt"]),
+            description=str(request["description"]),
+            tools_allowed=list(request["tools_allowed"]),
+            max_steps=request["max_steps"],
+            session=session,
+            max_web_results=max_web_results,
+            emit=emit,
+            execution_steps=execution_steps,
+        )
+        state.setdefault("task_results", []).append(result)
+        summary, payload = task_result_observation_payload(request=request, result=result)
+        record_observation(
+            tool="Task",
+            summary=summary,
+            payload=payload,
+        )
+
     def web_search() -> None:
         agent._agent_web_search(
             state=state,
@@ -732,6 +757,7 @@ def build_research_tool_registry(
         "query_rewrite": RegisteredAgentTool("query_rewrite", query_rewrite),
         "summarize": RegisteredAgentTool("summarize", summarize),
         "verify_claim": RegisteredAgentTool("verify_claim", verify_claim),
+        "Task": RegisteredAgentTool("Task", run_task),
         "search_corpus": RegisteredAgentTool("search_corpus", search_corpus),
         "compose": RegisteredAgentTool("compose", compose, terminal=True),
         "web_search": RegisteredAgentTool("web_search", web_search),
