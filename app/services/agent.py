@@ -109,7 +109,9 @@ from app.services.library_intents import (
     is_library_count_query,
     is_library_status_query,
     is_scoped_library_recommendation_query,
+    library_recommendation_contract,
     library_query_prefers_previous_candidates,
+    library_status_contract,
 )
 from app.services.memory_artifact_helpers import answer_from_recent_tool_artifact_reference
 from app.services.memory_intents import is_memory_comparison_query
@@ -2043,36 +2045,6 @@ class ResearchAssistantAgentV4(
         refined_contract = self._normalize_followup_direction_contract(contract=refined_contract)
         return self._apply_conversation_memory_to_contract(contract=refined_contract, session=session)
 
-    @staticmethod
-    def _library_status_contract(clean_query: str) -> QueryContract:
-        return QueryContract(
-            clean_query=clean_query,
-            interaction_mode="conversation",
-            relation="library_status",
-            targets=[],
-            requested_fields=[],
-            required_modalities=[],
-            answer_shape="bullets",
-            precision_requirement="exact",
-            continuation_mode="fresh",
-            notes=["self_knowledge", "dynamic_library_stats"],
-        )
-
-    @staticmethod
-    def _library_recommendation_contract(clean_query: str) -> QueryContract:
-        return QueryContract(
-            clean_query=clean_query,
-            interaction_mode="conversation",
-            relation="library_recommendation",
-            targets=[],
-            requested_fields=[],
-            required_modalities=[],
-            answer_shape="bullets",
-            precision_requirement="normal",
-            continuation_mode="fresh",
-            notes=["self_knowledge", "dynamic_library_recommendation"],
-        )
-
     def _normalize_conversation_tool_contract(
         self,
         *,
@@ -2146,11 +2118,11 @@ class ResearchAssistantAgentV4(
                 notes=["agent_tool", "conversation_memory_synthesis"],
             )
         if is_scoped_library_recommendation_query(clean_query) and not is_library_count_query(clean_query):
-            return self._library_recommendation_contract(clean_query).model_copy(
+            return library_recommendation_contract(clean_query).model_copy(
                 update={"notes": list(dict.fromkeys([*contract.notes, "agent_tool", "dynamic_library_recommendation"]))}
             )
         if is_library_status_query(clean_query):
-            return self._library_status_contract(clean_query).model_copy(
+            return library_status_contract(clean_query).model_copy(
                 update={"notes": list(dict.fromkeys([*contract.notes, "agent_tool", "dynamic_library_stats"]))}
             )
         if contract.relation in {

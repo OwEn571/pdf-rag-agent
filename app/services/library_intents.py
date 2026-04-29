@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domain.models import SessionContext
+from app.domain.models import QueryContract, SessionContext
 
 
 def normalized_query_text(query: str) -> tuple[str, str]:
@@ -62,6 +62,36 @@ def is_library_recommendation_query(query: str) -> bool:
 
 def is_scoped_library_recommendation_query(query: str) -> bool:
     return is_library_recommendation_query(query) and has_library_scope(query)
+
+
+def library_status_contract(clean_query: str) -> QueryContract:
+    return QueryContract(
+        clean_query=clean_query,
+        interaction_mode="conversation",
+        relation="library_status",
+        targets=[],
+        requested_fields=[],
+        required_modalities=[],
+        answer_shape="bullets",
+        precision_requirement="exact",
+        continuation_mode="fresh",
+        notes=["self_knowledge", "dynamic_library_stats"],
+    )
+
+
+def library_recommendation_contract(clean_query: str) -> QueryContract:
+    return QueryContract(
+        clean_query=clean_query,
+        interaction_mode="conversation",
+        relation="library_recommendation",
+        targets=[],
+        requested_fields=[],
+        required_modalities=[],
+        answer_shape="bullets",
+        precision_requirement="normal",
+        continuation_mode="fresh",
+        notes=["self_knowledge", "dynamic_library_recommendation"],
+    )
 
 
 def library_query_prefers_previous_candidates(query: str) -> bool:
