@@ -4,6 +4,7 @@ import json
 
 from app.domain.models import QueryContract, SessionContext, VerificationReport
 from app.services.compound_task_helpers import (
+    compose_compound_comparison_answer,
     comparison_results_with_memory,
     compound_contracts_from_decomposer_payload,
     compound_subtask_contract_from_payload,
@@ -217,3 +218,35 @@ def test_comparison_results_with_memory_restores_missing_target_binding() -> Non
     assert restored["contract"].targets == ["PPO"]
     assert restored["answer"] == "PPO uses a clipped objective."
     assert restored["verification"].recommended_action == "memory_comparison_context"
+
+
+def test_compose_compound_comparison_answer_fallback_uses_augmented_results() -> None:
+    class NoChatClients:
+        chat = None
+
+    session = SessionContext(
+        session_id="comparison-answer",
+        working_memory={
+            "target_bindings": {
+                "ppo": {
+                    "target": "PPO",
+                    "relation": "formula_lookup",
+                    "answer_preview": "PPO answer from memory.",
+                }
+            }
+        },
+    )
+    dpo_contract = QueryContract(clean_query="DPO", relation="formula_lookup", targets=["DPO"])
+    comparison_contract = QueryContract(clean_query="比较", relation="comparison_synthesis", targets=["DPO", "PPO"])
+
+    answer = compose_compound_comparison_answer(
+        query="比较 DPO 和 PPO",
+        subtask_results=[{"contract": dpo_contract, "answer": "DPO answer."}],
+        session=session,
+        comparison_contract=comparison_contract,
+        clients=NoChatClients(),
+        clean_text=lambda text: text,
+    )
+
+    assert "DPO answer" in answer
+    assert "PPO answer from memory" in answer

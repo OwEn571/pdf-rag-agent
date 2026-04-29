@@ -76,6 +76,7 @@ from app.services.citation_ranking import (
 )
 from app.services.compound_intents import should_try_compound_decomposition_heuristic
 from app.services.compound_task_helpers import (
+    compose_compound_comparison_answer,
     comparison_results_with_memory,
     compound_subtask_contract_from_payload,
     compound_subtask_relation_from_slots,
@@ -659,46 +660,14 @@ class ResearchAssistantAgentV4(
         session: SessionContext,
         comparison_contract: QueryContract | None = None,
     ) -> str:
-        comparable_results = self._comparison_results_with_memory(
+        return compose_compound_comparison_answer(
+            query=query,
             subtask_results=subtask_results,
             session=session,
             comparison_contract=comparison_contract,
+            clients=self.clients,
+            clean_text=self._clean_common_ocr_artifacts,
         )
-        comparable = [
-            {
-                "relation": result["contract"].relation if isinstance(result.get("contract"), QueryContract) else "",
-                "targets": result["contract"].targets if isinstance(result.get("contract"), QueryContract) else [],
-                "answer": str(result.get("answer", "")),
-                "claims": [claim.model_dump() for claim in list(result.get("claims", []) or []) if isinstance(claim, Claim)],
-            }
-            for result in comparable_results
-        ]
-        if self.clients.chat is not None:
-            text = self.clients.invoke_text(
-                system_prompt=(
-                    "你是论文研究助手的多子任务综合器。"
-                    "只基于输入的子任务答案和 claims 做比较，不要引入外部记忆。"
-                    "请用简洁中文 Markdown 输出：先给 1 句总览，再用表格比较目标函数/优化信号/是否需要 reward model/使用场景，最后给读法建议。"
-                    "如果某个子任务证据不足，要明确说证据不足，不要补公式。"
-                ),
-                human_prompt=json.dumps(
-                    {
-                        "query": query,
-                        "subtasks": comparable,
-                    },
-                    ensure_ascii=False,
-                ),
-                fallback="",
-            ).strip()
-            if text:
-                return self._clean_common_ocr_artifacts(text)
-        rows: list[str] = []
-        for result in comparable:
-            targets = result.get("targets") or []
-            target = str(targets[0]) if targets else "对象"
-            answer = " ".join(str(result.get("answer", "")).split())
-            rows.append(f"- **{target}**：{answer[:260] if answer else '当前证据不足。'}")
-        return "基于前两个子任务的证据，可以先做保守比较：\n\n" + "\n".join(rows)
 
     def _comparison_results_with_memory(
         self,

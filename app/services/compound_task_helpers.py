@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from app.domain.models import QueryContract, SessionContext, VerificationReport
+from app.domain.models import Claim, QueryContract, SessionContext, VerificationReport
 from app.services.conversation_memory_contract import active_memory_bindings
 from app.services.contract_normalization import normalize_contract_targets, normalize_lookup_text, normalize_modalities
 
@@ -370,6 +370,57 @@ def comparison_results_with_memory(
         )
         present_targets.add(key)
     return augmented
+
+
+def compose_compound_comparison_answer(
+    *,
+    query: str,
+    subtask_results: list[dict[str, Any]],
+    session: SessionContext,
+    comparison_contract: QueryContract | None,
+    clients: Any,
+    clean_text: Callable[[str], str],
+) -> str:
+    comparable_results = comparison_results_with_memory(
+        subtask_results=subtask_results,
+        session=session,
+        comparison_contract=comparison_contract,
+    )
+    comparable = [
+        {
+            "relation": result["contract"].relation if isinstance(result.get("contract"), QueryContract) else "",
+            "targets": result["contract"].targets if isinstance(result.get("contract"), QueryContract) else [],
+            "answer": str(result.get("answer", "")),
+            "claims": [claim.model_dump() for claim in list(result.get("claims", []) or []) if isinstance(claim, Claim)],
+        }
+        for result in comparable_results
+    ]
+    if getattr(clients, "chat", None) is not None:
+        text = clients.invoke_text(
+            system_prompt=(
+                "你是论文研究助手的多子任务综合器。"
+                "只基于输入的子任务答案和 claims 做比较，不要引入外部记忆。"
+                "请用简洁中文 Markdown 输出：先给 1 句总览，再用表格比较目标函数/优化信号/是否需要 reward model/使用场景，最后给读法建议。"
+                "如果某个子任务证据不足，要明确说证据不足，不要补公式。"
+            ),
+            human_prompt=json.dumps(
+                {
+                    "query": query,
+                    "subtasks": comparable,
+                },
+                ensure_ascii=False,
+            ),
+            fallback="",
+        ).strip()
+        if text:
+            return clean_text(text)
+    rows: list[str] = []
+    for result in comparable:
+        targets = result.get("targets") or []
+        target = str(targets[0]) if targets else "对象"
+        answer = " ".join(str(result.get("answer", "")).split())
+        rows.append(f"- **{target}**：{answer[:260] if answer else '当前证据不足。'}")
+    return "基于前两个子任务的证据，可以先做保守比较：\n\n" + "\n".join(rows)
 
 
 def compound_section_heading(*, contract: QueryContract, index: int) -> str:
