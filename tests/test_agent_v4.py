@@ -2944,28 +2944,6 @@ def test_followup_relevance_boost_prioritizes_personalization_continuations(tmp_
     assert all(item["paper"].paper_id != "ALIGNX" for item in ranked)
 
 
-def test_followup_expansion_terms_are_topic_based_not_example_titles(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    paper = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        metadata={
-            "paper_card_text": (
-                "This work introduces a user-level alignment benchmark for personalized preference, "
-                "preference inference, and conditioned generation."
-            )
-        },
-    )
-
-    terms = agent._followup_expansion_terms(paper)
-
-    assert "preference inference" in terms
-    assert "conditioned generation" in terms
-    assert "POPI" not in terms
-    assert "PersonaDual" not in terms
-    assert "Text as a Universal Interface" not in terms
-
-
 def test_followup_answer_composer_lists_structured_candidates(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     claim = Claim(

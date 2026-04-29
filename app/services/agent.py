@@ -117,12 +117,16 @@ from app.services.evidence_presentation import (
 )
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
+    extract_followup_keyphrases,
     filter_followup_candidates,
+    followup_expansion_terms,
+    followup_reason_fallback,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
+    infer_followup_relation_type,
     merge_followup_rankings,
     selected_followup_candidate_title,
 )
@@ -3569,7 +3573,12 @@ class ResearchAssistantAgentV4(
         query_parts = [contract.clean_query, *contract.targets]
         for paper in seed_papers[:2]:
             query_parts.append(self._paper_anchor_text(paper))
-            query_parts.append(self._followup_expansion_terms(paper))
+            query_parts.append(
+                followup_expansion_terms(
+                    paper=paper,
+                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                )
+            )
         search_query = " ".join(part.strip() for part in query_parts if str(part).strip())
         if search_query:
             expanded = self.retriever.search_papers(
@@ -3823,7 +3832,7 @@ class ResearchAssistantAgentV4(
         seed_phrases: set[str] = set()
         for seed in seed_papers:
             seed_text = f"{seed.title}\n{self._paper_summary_text(seed.paper_id)}\n{seed.metadata.get('paper_card_text', '')}"
-            seed_phrases.update(self._extract_followup_keyphrases(seed_text))
+            seed_phrases.update(extract_followup_keyphrases(seed_text))
         seed_author_tokens = self._paper_author_tokens(seed_papers)
         summary = self._paper_summary_text(paper.paper_id)
         haystack = f"{paper.title}\n{summary}\n{paper.metadata.get('paper_card_text', '')}\n{paper.metadata.get('abstract_note', '')}"
@@ -3842,7 +3851,7 @@ class ResearchAssistantAgentV4(
                     score += 1.2
                     support_signals.append(f"候选摘要/元数据提到 {alias}")
                 break
-        candidate_phrases = set(self._extract_followup_keyphrases(haystack))
+        candidate_phrases = set(extract_followup_keyphrases(haystack))
         phrase_overlap = {
             phrase
             for phrase in seed_phrases & candidate_phrases
@@ -3888,7 +3897,11 @@ class ResearchAssistantAgentV4(
             support_signals.append("主题属于 personalized preference / alignment 相邻方向")
         if explicit_direct_signals:
             strength = "direct"
-            relation_type = self._infer_followup_relation_type(paper, strict=True)
+            relation_type = infer_followup_relation_type(
+                paper=paper,
+                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                strict=True,
+            )
             reason_bits = explicit_direct_signals + support_signals[:2]
             confidence = 0.86
         elif score >= 1.4 and (target_seen or support_signals):
@@ -3901,7 +3914,11 @@ class ResearchAssistantAgentV4(
             relation_type = "同主题待确认候选"
             reason_bits = support_signals
             confidence = 0.48
-        reason = "；".join(dict.fromkeys(reason_bits)) if reason_bits else self._followup_reason_fallback(seed_papers=seed_papers, paper=paper)
+        reason = "；".join(dict.fromkeys(reason_bits)) if reason_bits else followup_reason_fallback(
+            seed_papers=seed_papers,
+            paper=paper,
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+        )
         if strength != "direct" and reason:
             reason = f"{reason}；目前证据不足以确认它严格继承、引用或使用种子论文/数据集。"
         return {
@@ -3943,44 +3960,6 @@ class ResearchAssistantAgentV4(
             if separator in title:
                 return title.split(separator, 1)[0].strip()
         return title
-
-    def _followup_expansion_terms(self, paper: CandidatePaper) -> str:
-        text = f"{paper.title}\n{self._paper_summary_text(paper.paper_id)}\n{paper.metadata.get('paper_card_text', '')}".lower()
-        terms = self._extract_followup_keyphrases(text)
-        if has_followup_domain_signal(text):
-            terms.extend(["follow-up", "extension", "downstream", "benchmark", "transfer", "personalization", "preference"])
-        return " ".join(dict.fromkeys(item for item in terms if item))[:600]
-
-    @staticmethod
-    def _extract_followup_keyphrases(text: str) -> list[str]:
-        lowered = str(text or "").lower()
-        phrase_bank = [
-            "user-level alignment",
-            "personalized preference",
-            "personalized alignment",
-            "preference inference",
-            "conditioned generation",
-            "transferable personalization",
-            "modular personalization",
-            "user preference",
-            "preference summary",
-            "personalization",
-            "alignment",
-            "benchmark",
-            "dataset",
-        ]
-        phrases = [phrase for phrase in phrase_bank if phrase in lowered]
-        title_like = re.sub(r"[^a-z0-9\s-]", " ", lowered)
-        words = [
-            word
-            for word in title_like.split()
-            if len(word) >= 5 and word not in {"large", "language", "models", "paper", "using", "through", "across"}
-        ]
-        frequent: list[str] = []
-        for word in words:
-            if words.count(word) >= 2 and word not in frequent:
-                frequent.append(word)
-        return [*phrases, *frequent[:8]]
 
     def _paper_brief(self, paper: CandidatePaper) -> dict[str, Any]:
         return {
@@ -4046,29 +4025,6 @@ class ResearchAssistantAgentV4(
                 if token not in {"and", "et", "al"}:
                     tokens.add(token)
         return tokens
-
-    def _followup_reason_fallback(self, *, seed_papers: list[CandidatePaper], paper: CandidatePaper) -> str:
-        seed_titles = ", ".join(item.title for item in seed_papers[:1])
-        summary = " ".join(self._paper_summary_text(paper.paper_id).split())
-        if len(summary) > 120:
-            summary = summary[:117].rstrip() + "..."
-        if seed_titles:
-            return f"它延续了《{seed_titles}》相关主题，重点在于：{summary or '与该方向直接相关。'}"
-        return summary or "与当前研究方向直接相关。"
-
-    def _infer_followup_relation_type(self, paper: CandidatePaper, *, strict: bool = False) -> str:
-        summary = self._paper_summary_text(paper.paper_id).lower()
-        if strict and any(token in summary for token in ["uses", "using", "evaluate", "evaluates", "benchmark", "dataset"]):
-            return "直接使用/评测证据"
-        if strict:
-            return "直接后续/扩展证据"
-        if any(token in summary for token in ["dataset", "benchmark", "evaluation"]):
-            return "dataset/benchmark continuation"
-        if any(token in summary for token in ["transfer", "cross-task", "cross model"]):
-            return "transfer extension"
-        if any(token in summary for token in ["reasoning", "behavioral", "preference inference"]):
-            return "method/model extension"
-        return "related continuation"
 
     def _paper_summary_text(self, paper_id: str) -> str:
         doc = self.retriever.paper_doc_by_id(paper_id)

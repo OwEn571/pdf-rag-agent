@@ -89,6 +89,84 @@ def filter_followup_candidates(
     return filtered or candidates[: min(8, len(candidates))]
 
 
+def extract_followup_keyphrases(text: str) -> list[str]:
+    lowered = str(text or "").lower()
+    phrase_bank = [
+        "user-level alignment",
+        "personalized preference",
+        "personalized alignment",
+        "preference inference",
+        "conditioned generation",
+        "transferable personalization",
+        "modular personalization",
+        "user preference",
+        "preference summary",
+        "personalization",
+        "alignment",
+        "benchmark",
+        "dataset",
+    ]
+    phrases = [phrase for phrase in phrase_bank if phrase in lowered]
+    title_like = re.sub(r"[^a-z0-9\s-]", " ", lowered)
+    words = [
+        word
+        for word in title_like.split()
+        if len(word) >= 5 and word not in {"large", "language", "models", "paper", "using", "through", "across"}
+    ]
+    frequent: list[str] = []
+    for word in words:
+        if words.count(word) >= 2 and word not in frequent:
+            frequent.append(word)
+    return [*phrases, *frequent[:8]]
+
+
+def followup_expansion_terms(
+    *,
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+) -> str:
+    text = f"{paper.title}\n{paper_summary_text(paper.paper_id)}\n{paper.metadata.get('paper_card_text', '')}".lower()
+    terms = extract_followup_keyphrases(text)
+    if has_followup_domain_signal(text):
+        terms.extend(["follow-up", "extension", "downstream", "benchmark", "transfer", "personalization", "preference"])
+    return " ".join(dict.fromkeys(item for item in terms if item))[:600]
+
+
+def followup_reason_fallback(
+    *,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+) -> str:
+    seed_titles = ", ".join(item.title for item in seed_papers[:1])
+    summary = " ".join(paper_summary_text(paper.paper_id).split())
+    if len(summary) > 120:
+        summary = summary[:117].rstrip() + "..."
+    if seed_titles:
+        return f"它延续了《{seed_titles}》相关主题，重点在于：{summary or '与该方向直接相关。'}"
+    return summary or "与当前研究方向直接相关。"
+
+
+def infer_followup_relation_type(
+    *,
+    paper: CandidatePaper,
+    paper_summary_text: PaperText,
+    strict: bool = False,
+) -> str:
+    summary = paper_summary_text(paper.paper_id).lower()
+    if strict and any(token in summary for token in ["uses", "using", "evaluate", "evaluates", "benchmark", "dataset"]):
+        return "直接使用/评测证据"
+    if strict:
+        return "直接后续/扩展证据"
+    if any(token in summary for token in ["dataset", "benchmark", "evaluation"]):
+        return "dataset/benchmark continuation"
+    if any(token in summary for token in ["transfer", "cross-task", "cross model"]):
+        return "transfer extension"
+    if any(token in summary for token in ["reasoning", "behavioral", "preference inference"]):
+        return "method/model extension"
+    return "related continuation"
+
+
 def merge_followup_rankings(
     *,
     primary: list[dict[str, Any]],

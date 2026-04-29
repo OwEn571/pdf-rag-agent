@@ -5,12 +5,16 @@ import json
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
+    extract_followup_keyphrases,
     filter_followup_candidates,
+    followup_expansion_terms,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
+    followup_reason_fallback,
     followup_target_aliases,
     followup_validator_assessment_from_payload,
+    infer_followup_relation_type,
     merge_followup_rankings,
     paper_relationship_brief,
     relationship_evidence_ids_from_payload,
@@ -101,6 +105,70 @@ def test_filter_followup_candidates_keeps_domain_related_without_literal_target(
     )
 
     assert [item.paper_id for item in filtered] == ["ALIGNX", "PERSONADUAL"]
+
+
+def test_extract_followup_keyphrases_keeps_topic_terms_and_repeated_words() -> None:
+    phrases = extract_followup_keyphrases(
+        "Personalized preference inference uses profile signals. Profile evidence supports preference inference."
+    )
+
+    assert "personalized preference" in phrases
+    assert "preference inference" in phrases
+    assert "profile" in phrases
+
+
+def test_followup_expansion_terms_are_topic_based_not_example_titles() -> None:
+    paper = CandidatePaper(
+        paper_id="ALIGNX",
+        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+        metadata={
+            "paper_card_text": (
+                "This work introduces a user-level alignment benchmark for personalized preference, "
+                "preference inference, and conditioned generation."
+            )
+        },
+    )
+
+    terms = followup_expansion_terms(paper=paper, paper_summary_text=lambda _: "")
+
+    assert "preference inference" in terms
+    assert "conditioned generation" in terms
+    assert "POPI" not in terms
+    assert "PersonaDual" not in terms
+    assert "Text as a Universal Interface" not in terms
+
+
+def test_followup_reason_fallback_truncates_summary_and_mentions_seed() -> None:
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper")
+    paper = CandidatePaper(paper_id="candidate", title="Candidate Paper")
+    reason = followup_reason_fallback(
+        seed_papers=[seed],
+        paper=paper,
+        paper_summary_text=lambda _: "x" * 140,
+    )
+
+    assert reason.startswith("它延续了《Seed Paper》相关主题")
+    assert reason.endswith("...")
+
+
+def test_infer_followup_relation_type_uses_summary_and_strict_flag() -> None:
+    paper = CandidatePaper(paper_id="candidate", title="Candidate Paper")
+
+    assert (
+        infer_followup_relation_type(
+            paper=paper,
+            paper_summary_text=lambda _: "The candidate uses the benchmark dataset.",
+            strict=True,
+        )
+        == "直接使用/评测证据"
+    )
+    assert (
+        infer_followup_relation_type(
+            paper=paper,
+            paper_summary_text=lambda _: "A transfer method for cross-task personalization.",
+        )
+        == "transfer extension"
+    )
 
 
 def test_merge_followup_rankings_deduplicates_by_paper_id() -> None:
