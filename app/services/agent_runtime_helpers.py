@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
@@ -13,12 +14,13 @@ from app.services.confidence import (
 )
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.followup_candidate_helpers import filter_followup_candidates
-from app.services.query_shaping import evidence_query_text, is_short_acronym
+from app.services.query_shaping import evidence_query_text, is_short_acronym, should_use_concept_evidence
 from app.services.research_planning import research_plan_goals
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
     tool_inputs_by_name,
     tool_loop_ready_observation,
+    coerce_int,
 )
 
 NegativeCorrectionFn = Callable[[str], bool]
@@ -31,6 +33,15 @@ PaperSummaryFn = Callable[[str], str]
 PaperIdentityMatcherFn = Callable[[list[CandidatePaper], list[str]], list[CandidatePaper]]
 EntityEvidenceSearchFn = Callable[[str, QueryContract, int], list[EvidenceBlock]]
 GroundEntityPapersFn = Callable[[list[CandidatePaper], list[EvidenceBlock], int], list[CandidatePaper]]
+ConceptEvidenceSearchFn = Callable[[str, QueryContract, list[str], int], list[EvidenceBlock]]
+ExpandEvidenceFn = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
+
+
+@dataclass(frozen=True)
+class AgentEvidenceSearchResult:
+    evidence: list[EvidenceBlock]
+    query: str
+    limit: int
 
 
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
@@ -230,6 +241,54 @@ def screen_agent_papers(
         if grounded_papers:
             screened_papers = grounded_papers
     return screened_papers, precomputed_evidence
+
+
+def search_agent_evidence(
+    *,
+    contract: QueryContract,
+    plan: ResearchPlan,
+    tool_input: dict[str, Any],
+    screened_papers: list[CandidatePaper],
+    precomputed_evidence: list[EvidenceBlock] | None,
+    excluded_titles: set[str],
+    search_concept_evidence: ConceptEvidenceSearchFn,
+    expand_evidence: ExpandEvidenceFn,
+) -> AgentEvidenceSearchResult:
+    evidence_limit = coerce_int(
+        tool_input.get("top_k", plan.evidence_limit),
+        default=plan.evidence_limit,
+        minimum=1,
+        maximum=50,
+    )
+    evidence_query = str(tool_input.get("query", "") or "").strip() or evidence_query_text(contract)
+    paper_ids = [item.paper_id for item in screened_papers]
+    if should_use_concept_evidence(contract):
+        evidence = search_concept_evidence(
+            evidence_query,
+            contract,
+            paper_ids,
+            evidence_limit,
+        )
+        if not evidence:
+            evidence = expand_evidence(
+                paper_ids,
+                evidence_query,
+                contract,
+                evidence_limit,
+            )
+    else:
+        evidence = precomputed_evidence or expand_evidence(
+            paper_ids,
+            evidence_query,
+            contract,
+            evidence_limit,
+        )
+    if excluded_titles:
+        evidence = filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
+    selected_paper_id = selected_clarification_paper_id(contract)
+    if selected_paper_id:
+        evidence = [item for item in evidence if item.paper_id == selected_paper_id]
+    return AgentEvidenceSearchResult(evidence=evidence, query=evidence_query, limit=evidence_limit)
 
 
 def claim_focus_titles(

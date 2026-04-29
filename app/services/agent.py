@@ -42,6 +42,7 @@ from app.services.agent_runtime_helpers import (
     filter_evidence_by_excluded_titles,
     prefer_selected_clarification_paper,
     screen_agent_papers,
+    search_agent_evidence,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
@@ -942,55 +943,40 @@ class ResearchAssistantAgentV4(
         contract: QueryContract = state["contract"]
         plan: ResearchPlan = state["plan"]
         tool_input = tool_input_from_state(state, "search_corpus")
-        evidence_limit = coerce_int(
-            tool_input.get("top_k", plan.evidence_limit),
-            default=plan.evidence_limit,
-            minimum=1,
-            maximum=50,
-        )
-        if evidence_limit != plan.evidence_limit:
-            plan = plan.model_copy(update={"evidence_limit": evidence_limit})
         screened_papers: list[CandidatePaper] = state["screened_papers"]
         excluded_titles: set[str] = state["excluded_titles"]
-        evidence_query = str(tool_input.get("query", "") or "").strip() or evidence_query_text(contract)
+        result = search_agent_evidence(
+            contract=contract,
+            plan=plan,
+            tool_input=tool_input,
+            screened_papers=screened_papers,
+            precomputed_evidence=state.get("precomputed_evidence"),
+            excluded_titles=excluded_titles,
+            search_concept_evidence=lambda query, search_contract, paper_ids, limit: self.retriever.search_concept_evidence(
+                query=query,
+                contract=search_contract,
+                paper_ids=paper_ids,
+                limit=limit,
+            ),
+            expand_evidence=lambda paper_ids, query, search_contract, limit: self.retriever.expand_evidence(
+                paper_ids=paper_ids,
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+        )
         self._emit_agent_tool_call(
             emit=emit,
             tool="search_corpus",
             arguments={
                 "stage": "search_evidence",
-                "query": evidence_query,
+                "query": result.query,
                 "paper_ids": [item.paper_id for item in screened_papers],
-                "limit": plan.evidence_limit,
+                "limit": result.limit,
                 "modalities": contract.required_modalities,
             },
         )
-        precomputed_evidence = state.get("precomputed_evidence")
-        if should_use_concept_evidence(contract):
-            evidence = self.retriever.search_concept_evidence(
-                query=evidence_query,
-                contract=contract,
-                paper_ids=[item.paper_id for item in screened_papers],
-                limit=plan.evidence_limit,
-            )
-            if not evidence:
-                evidence = self.retriever.expand_evidence(
-                    paper_ids=[item.paper_id for item in screened_papers],
-                    query=evidence_query,
-                    contract=contract,
-                    limit=plan.evidence_limit,
-                )
-        else:
-            evidence = precomputed_evidence or self.retriever.expand_evidence(
-                paper_ids=[item.paper_id for item in screened_papers],
-                query=evidence_query,
-                contract=contract,
-                limit=plan.evidence_limit,
-            )
-        if excluded_titles:
-            evidence = self._filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
-        selected_paper_id = selected_clarification_paper_id(contract)
-        if selected_paper_id:
-            evidence = [item for item in evidence if item.paper_id == selected_paper_id]
+        evidence = result.evidence
         state["evidence"] = evidence
         emit("evidence", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
         self._record_agent_observation(

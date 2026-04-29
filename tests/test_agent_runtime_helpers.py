@@ -27,6 +27,7 @@ from app.services.agent_runtime_helpers import (
     research_runtime_actions,
     research_runtime_state,
     screen_agent_papers,
+    search_agent_evidence,
     tool_loop_ready_tool,
     verification_execution_step,
 )
@@ -220,6 +221,63 @@ def test_runtime_helpers_screen_agent_papers_formula_path_uses_identity_matcher(
 
     assert [item.paper_id for item in screened] == ["p2"]
     assert precomputed is None
+
+
+def test_runtime_helpers_search_agent_evidence_uses_precomputed_when_available() -> None:
+    papers = [CandidatePaper(paper_id="p1", title="Paper")]
+    precomputed = [
+        EvidenceBlock(doc_id="e1", paper_id="p1", title="Paper", file_path="", page=1, block_type="page_text", snippet="hit")
+    ]
+    calls: list[str] = []
+
+    result = search_agent_evidence(
+        contract=QueryContract(clean_query="DPO", targets=["DPO"]),
+        plan=ResearchPlan(evidence_limit=8),
+        tool_input={"query": "custom DPO", "top_k": 3},
+        screened_papers=papers,
+        precomputed_evidence=precomputed,
+        excluded_titles=set(),
+        search_concept_evidence=lambda *_: [],
+        expand_evidence=lambda *_: calls.append("expand") or [],
+    )
+
+    assert result.evidence == precomputed
+    assert result.query == "custom DPO"
+    assert result.limit == 3
+    assert calls == []
+
+
+def test_runtime_helpers_search_agent_evidence_concept_fallback_filters_selection_and_excluded() -> None:
+    papers = [
+        CandidatePaper(paper_id="p1", title="Old Focus"),
+        CandidatePaper(paper_id="p2", title="Selected"),
+    ]
+    expanded = [
+        EvidenceBlock(doc_id="old", paper_id="p1", title="Old Focus", file_path="", page=1, block_type="page_text", snippet="old"),
+        EvidenceBlock(doc_id="selected", paper_id="p2", title="Selected", file_path="", page=1, block_type="page_text", snippet="selected"),
+    ]
+    calls: list[tuple[str, int]] = []
+
+    result = search_agent_evidence(
+        contract=QueryContract(
+            clean_query="PBA是什么",
+            relation="concept_definition",
+            targets=["PBA"],
+            requested_fields=["definition"],
+            notes=["selected_paper_id=p2"],
+        ),
+        plan=ResearchPlan(evidence_limit=8),
+        tool_input={},
+        screened_papers=papers,
+        precomputed_evidence=None,
+        excluded_titles={"old focus"},
+        search_concept_evidence=lambda query, _contract, _paper_ids, limit: calls.append((query, limit)) or [],
+        expand_evidence=lambda _paper_ids, _query, _contract, _limit: expanded,
+    )
+
+    assert calls and "PBA" in calls[0][0]
+    assert calls[0][1] == 8
+    assert [item.doc_id for item in result.evidence] == ["selected"]
 
 
 def test_runtime_helpers_claim_focus_titles_falls_back_to_lookup_and_candidates() -> None:
