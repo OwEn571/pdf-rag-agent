@@ -51,6 +51,20 @@ class AgentCandidatePaperSearchResult:
     candidate_papers: list[CandidatePaper]
 
 
+@dataclass(frozen=True)
+class RetryResearchLimits:
+    paper_limit: int
+    evidence_limit: int
+
+
+@dataclass(frozen=True)
+class RetryResearchMaterials:
+    candidate_papers: list[CandidatePaper]
+    evidence: list[EvidenceBlock]
+    limits: RetryResearchLimits
+    goals: set[str]
+
+
 def conversation_runtime_state(*, contract: QueryContract, agent_plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "contract": contract,
@@ -334,6 +348,92 @@ def search_agent_candidate_papers(
         paper_lookup=paper_lookup,
     )
     return AgentCandidatePaperSearchResult(contract=effective_contract, candidate_papers=candidate_papers)
+
+
+def retry_research_limits(plan: ResearchPlan) -> RetryResearchLimits:
+    return RetryResearchLimits(
+        paper_limit=max(plan.paper_limit + 4, 10),
+        evidence_limit=max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
+    )
+
+
+def prepare_retry_research_materials(
+    *,
+    contract: QueryContract,
+    plan: ResearchPlan,
+    excluded_titles: set[str],
+    search_papers: CandidatePaperSearchFn,
+    paper_lookup: PaperLookupFn,
+    search_concept_evidence: ConceptEvidenceSearchFn,
+    search_entity_evidence: EntityEvidenceSearchFn,
+    expand_evidence: ExpandEvidenceFn,
+    ground_entity_papers: GroundEntityPapersFn,
+) -> RetryResearchMaterials:
+    limits = retry_research_limits(plan)
+    broader_candidates = search_papers(
+        paper_query_text(contract),
+        contract,
+        limits.paper_limit,
+    )
+    if excluded_titles:
+        broader_candidates = filter_candidate_papers_by_excluded_titles(
+            broader_candidates,
+            excluded_titles=excluded_titles,
+        )
+    selected_paper_id = selected_clarification_paper_id(contract)
+    broader_candidates = prefer_selected_clarification_paper(
+        broader_candidates,
+        contract=contract,
+        paper_lookup=paper_lookup,
+    )
+    goals = research_plan_goals(contract)
+    evidence_query = evidence_query_text(contract)
+    if should_use_concept_evidence(contract):
+        broader_evidence = search_concept_evidence(
+            evidence_query,
+            contract,
+            [item.paper_id for item in broader_candidates],
+            limits.evidence_limit,
+        )
+    elif goals & {"entity_type", "role_in_context"}:
+        broader_evidence = search_entity_evidence(
+            evidence_query,
+            contract,
+            max(
+                entity_evidence_limit(contract=contract, plan=plan, excluded_titles=excluded_titles),
+                limits.evidence_limit,
+            ),
+        )
+        if excluded_titles:
+            broader_evidence = filter_evidence_by_excluded_titles(
+                broader_evidence,
+                excluded_titles=excluded_titles,
+            )
+        broader_candidates = ground_entity_papers(
+            broader_candidates,
+            broader_evidence,
+            limits.paper_limit,
+        )
+    else:
+        broader_evidence = expand_evidence(
+            [item.paper_id for item in broader_candidates],
+            evidence_query,
+            contract,
+            limits.evidence_limit,
+        )
+    if excluded_titles:
+        broader_evidence = filter_evidence_by_excluded_titles(
+            broader_evidence,
+            excluded_titles=excluded_titles,
+        )
+    if selected_paper_id:
+        broader_evidence = [item for item in broader_evidence if item.paper_id == selected_paper_id]
+    return RetryResearchMaterials(
+        candidate_papers=broader_candidates,
+        evidence=broader_evidence,
+        limits=limits,
+        goals=goals,
+    )
 
 
 def claim_focus_titles(

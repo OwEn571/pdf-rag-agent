@@ -32,11 +32,13 @@ from app.services.agent_runtime_helpers import (
     filter_evidence_by_excluded_titles,
     next_conversation_action,
     next_research_action,
+    prepare_retry_research_materials,
     record_tool_loop_ready,
     planner_next_action,
     prefer_selected_clarification_paper,
     research_runtime_actions,
     research_runtime_state,
+    retry_research_limits,
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
@@ -302,6 +304,69 @@ def test_runtime_helpers_search_agent_candidate_papers_prefers_selected_lookup()
 
     assert result.contract.notes == ["selected_paper_id=p2"]
     assert result.candidate_papers == [selected]
+
+
+def test_runtime_helpers_prepare_retry_research_materials_expands_limits_and_filters_selection() -> None:
+    candidates = [
+        CandidatePaper(paper_id="p1", title="Old Focus"),
+        CandidatePaper(paper_id="p2", title="Selected"),
+    ]
+    evidence = [
+        EvidenceBlock(doc_id="old", paper_id="p1", title="Old Focus", file_path="", page=1, block_type="page_text", snippet="old"),
+        EvidenceBlock(doc_id="selected", paper_id="p2", title="Selected", file_path="", page=1, block_type="page_text", snippet="selected"),
+    ]
+    search_calls: list[tuple[str, int]] = []
+    expand_calls: list[tuple[list[str], int]] = []
+    plan = ResearchPlan(paper_limit=4, evidence_limit=8)
+
+    materials = prepare_retry_research_materials(
+        contract=QueryContract(clean_query="DPO", targets=["DPO"], notes=["selected_paper_id=p2"]),
+        plan=plan,
+        excluded_titles={"old focus"},
+        search_papers=lambda query, _contract, limit: search_calls.append((query, limit)) or candidates,
+        paper_lookup=lambda _: None,
+        search_concept_evidence=lambda *_: [],
+        search_entity_evidence=lambda *_: [],
+        expand_evidence=lambda paper_ids, _query, _contract, limit: expand_calls.append((paper_ids, limit)) or evidence,
+        ground_entity_papers=lambda papers, *_: papers,
+    )
+
+    assert retry_research_limits(plan).paper_limit == 10
+    assert retry_research_limits(plan).evidence_limit == 20
+    assert [item.paper_id for item in materials.candidate_papers] == ["p2"]
+    assert [item.doc_id for item in materials.evidence] == ["selected"]
+    assert search_calls == [("DPO", 10)]
+    assert expand_calls == [(["p2"], 20)]
+
+
+def test_runtime_helpers_prepare_retry_research_materials_entity_path_grounds_candidates() -> None:
+    candidates = [
+        CandidatePaper(paper_id="p1", title="First"),
+        CandidatePaper(paper_id="p2", title="Second"),
+    ]
+    evidence = [
+        EvidenceBlock(doc_id="e2", paper_id="p2", title="Second", file_path="", page=1, block_type="page_text", snippet="PBA")
+    ]
+    entity_limits: list[int] = []
+
+    materials = prepare_retry_research_materials(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["role_in_context"]),
+        plan=ResearchPlan(paper_limit=4, evidence_limit=8),
+        excluded_titles=set(),
+        search_papers=lambda _query, _contract, _limit: candidates,
+        paper_lookup=lambda _: None,
+        search_concept_evidence=lambda *_: [],
+        search_entity_evidence=lambda _query, _contract, limit: entity_limits.append(limit) or evidence,
+        expand_evidence=lambda *_: [],
+        ground_entity_papers=lambda papers, found_evidence, limit: [
+            paper for paper in papers[:limit] if paper.paper_id in {item.paper_id for item in found_evidence}
+        ],
+    )
+
+    assert [item.paper_id for item in materials.candidate_papers] == ["p2"]
+    assert materials.evidence == evidence
+    assert entity_limits == [72]
+    assert "role_in_context" in materials.goals
 
 
 def test_runtime_helpers_search_agent_evidence_concept_fallback_filters_selection_and_excluded() -> None:

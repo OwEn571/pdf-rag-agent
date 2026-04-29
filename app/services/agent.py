@@ -41,7 +41,8 @@ from app.services.agent_runtime_helpers import (
     excluded_focus_titles,
     filter_candidate_papers_by_excluded_titles,
     filter_evidence_by_excluded_titles,
-    prefer_selected_clarification_paper,
+    prepare_retry_research_materials,
+    retry_research_limits,
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
@@ -1228,76 +1229,56 @@ class ResearchAssistantAgentV4(
         contract: QueryContract = state["contract"]
         plan: ResearchPlan = state["plan"]
         excluded_titles: set[str] = state["excluded_titles"]
+        retry_limits = retry_research_limits(plan)
         self._emit_agent_tool_call(
             emit=emit,
             tool="retry_research",
             arguments={
                 "reason": state["verification"].recommended_action if state.get("verification") else "",
-                "paper_limit": max(plan.paper_limit + 4, 10),
-                "evidence_limit": max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
+                "paper_limit": retry_limits.paper_limit,
+                "evidence_limit": retry_limits.evidence_limit,
             },
         )
-        broader_candidates = self.retriever.search_papers(
-            query=paper_query_text(contract),
+        retry_materials = prepare_retry_research_materials(
             contract=contract,
-            limit=max(plan.paper_limit + 4, 10),
-        )
-        if excluded_titles:
-            broader_candidates = self._filter_candidate_papers_by_excluded_titles(
-                broader_candidates,
-                excluded_titles=excluded_titles,
-            )
-        selected_paper_id = selected_clarification_paper_id(contract)
-        broader_candidates = prefer_selected_clarification_paper(
-            broader_candidates,
-            contract=contract,
+            plan=plan,
+            excluded_titles=excluded_titles,
+            search_papers=lambda query, search_contract, limit: self.retriever.search_papers(
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
             paper_lookup=self._candidate_from_paper_id,
+            search_concept_evidence=lambda query, search_contract, paper_ids, limit: self.retriever.search_concept_evidence(
+                query=query,
+                contract=search_contract,
+                paper_ids=paper_ids,
+                limit=limit,
+            ),
+            search_entity_evidence=lambda query, search_contract, limit: self.retriever.search_entity_evidence(
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+            expand_evidence=lambda paper_ids, query, search_contract, limit: self.retriever.expand_evidence(
+                paper_ids=paper_ids,
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+            ground_entity_papers=lambda candidates, evidence, limit: self._ground_entity_papers(
+                candidates=candidates,
+                evidence=evidence,
+                limit=limit,
+            ),
         )
-        goals = research_plan_goals(contract)
-        if should_use_concept_evidence(contract):
-            broader_evidence = self.retriever.search_concept_evidence(
-                query=evidence_query_text(contract),
-                contract=contract,
-                paper_ids=[item.paper_id for item in broader_candidates],
-                limit=max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
-            )
-        elif goals & {"entity_type", "role_in_context"}:
-            broader_evidence = self.retriever.search_entity_evidence(
-                query=evidence_query_text(contract),
-                contract=contract,
-                limit=max(
-                    self._entity_evidence_limit(contract=contract, plan=plan, excluded_titles=excluded_titles),
-                    plan.evidence_limit + 12,
-                    int(plan.evidence_limit * 1.5),
-                ),
-            )
-            if excluded_titles:
-                broader_evidence = self._filter_evidence_by_excluded_titles(
-                    broader_evidence,
-                    excluded_titles=excluded_titles,
-                )
-            broader_candidates = self._ground_entity_papers(
-                candidates=broader_candidates,
-                evidence=broader_evidence,
-                limit=max(plan.paper_limit + 4, 10),
-            )
-        else:
-            broader_evidence = self.retriever.expand_evidence(
-                paper_ids=[item.paper_id for item in broader_candidates],
-                query=evidence_query_text(contract),
-                contract=contract,
-                limit=max(plan.evidence_limit + 12, int(plan.evidence_limit * 1.5)),
-            )
-        if excluded_titles:
-            broader_evidence = self._filter_evidence_by_excluded_titles(
-                broader_evidence,
-                excluded_titles=excluded_titles,
-            )
-        if selected_paper_id:
-            broader_evidence = [item for item in broader_evidence if item.paper_id == selected_paper_id]
+        broader_candidates = retry_materials.candidate_papers
+        broader_evidence = retry_materials.evidence
+        goals = retry_materials.goals
+        retry_plan = plan.model_copy(update={"retry_budget": 0})
         retry_claims = self._run_solvers(
             contract=contract,
-            plan=plan.model_copy(update={"retry_budget": 0}),
+            plan=retry_plan,
             papers=broader_candidates,
             evidence=broader_evidence,
             session=session,
@@ -1306,7 +1287,7 @@ class ResearchAssistantAgentV4(
         )
         retry_report = self._verify_claims(
             contract=contract,
-            plan=plan.model_copy(update={"retry_budget": 0}),
+            plan=retry_plan,
             claims=retry_claims,
             papers=broader_candidates,
             evidence=broader_evidence,
