@@ -22,6 +22,7 @@ PaperText = Callable[[str], str]
 PaperAnchor = Callable[[CandidatePaper], str]
 ConfidenceCoercer = Callable[[Any], float]
 EvidenceExpander = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
+PaperSearch = Callable[[str, QueryContract, int], list[CandidatePaper]]
 
 
 def selected_followup_candidate_title(contract: QueryContract) -> str:
@@ -136,6 +137,39 @@ def resolve_followup_seed_papers(
         ),
     )
     return ranked[:1]
+
+
+def expand_followup_candidate_pool(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    initial_candidates: list[CandidatePaper],
+    paper_limit_default: int,
+    paper_summary_text: PaperText,
+    search_papers: PaperSearch,
+) -> list[CandidatePaper]:
+    pool = {item.paper_id: item for item in initial_candidates}
+    query_parts = [contract.clean_query, *contract.targets]
+    for paper in seed_papers[:2]:
+        query_parts.append(paper_anchor_text(paper))
+        query_parts.append(
+            followup_expansion_terms(
+                paper=paper,
+                paper_summary_text=paper_summary_text,
+            )
+        )
+    search_query = " ".join(part.strip() for part in query_parts if str(part).strip())
+    if search_query:
+        expanded = search_papers(
+            search_query,
+            contract.model_copy(update={"continuation_mode": "fresh"}),
+            max(16, paper_limit_default + 10),
+        )
+        for item in expanded:
+            pool.setdefault(item.paper_id, item)
+    ranked = list(pool.values())
+    ranked.sort(key=lambda item: (-item.score, safe_year(item.year), item.title))
+    return ranked
 
 
 def followup_candidate_ranker_system_prompt() -> str:

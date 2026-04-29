@@ -130,21 +130,19 @@ from app.services.evidence_presentation import (
     chunk_text,
     citations_from_doc_ids,
     paper_recommendation_reason,
-    safe_year,
 )
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
+    expand_followup_candidate_pool,
     filter_followup_candidates,
     followup_candidate_ranker_human_prompt,
     followup_candidate_ranker_system_prompt,
-    followup_expansion_terms,
     followup_relationship_assessment,
     followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_validator_assessment_from_payload,
     merge_followup_rankings,
-    paper_anchor_text,
     rank_followup_candidates_fallback,
     resolve_followup_seed_papers,
     selected_followup_candidate_title,
@@ -2288,28 +2286,18 @@ class ResearchAssistantAgentV4(
         seed_papers: list[CandidatePaper],
         initial_candidates: list[CandidatePaper],
     ) -> list[CandidatePaper]:
-        pool = {item.paper_id: item for item in initial_candidates}
-        query_parts = [contract.clean_query, *contract.targets]
-        for paper in seed_papers[:2]:
-            query_parts.append(paper_anchor_text(paper))
-            query_parts.append(
-                followup_expansion_terms(
-                    paper=paper,
-                    paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-                )
-            )
-        search_query = " ".join(part.strip() for part in query_parts if str(part).strip())
-        if search_query:
-            expanded = self.retriever.search_papers(
-                query=search_query,
-                contract=contract.model_copy(update={"continuation_mode": "fresh"}),
-                limit=max(16, self.settings.paper_limit_default + 10),
-            )
-            for item in expanded:
-                pool.setdefault(item.paper_id, item)
-        ranked = list(pool.values())
-        ranked.sort(key=lambda item: (-item.score, safe_year(item.year), item.title))
-        return ranked
+        return expand_followup_candidate_pool(
+            contract=contract,
+            seed_papers=seed_papers,
+            initial_candidates=initial_candidates,
+            paper_limit_default=int(self.settings.paper_limit_default),
+            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+            search_papers=lambda query, search_contract, limit: self.retriever.search_papers(
+                query=query,
+                contract=search_contract,
+                limit=limit,
+            ),
+        )
 
     def _rank_followup_candidates(
         self,

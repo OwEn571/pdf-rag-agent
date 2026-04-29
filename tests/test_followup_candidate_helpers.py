@@ -5,6 +5,7 @@ import json
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
+    expand_followup_candidate_pool,
     extract_followup_keyphrases,
     filter_followup_candidates,
     followup_candidate_ranker_human_prompt,
@@ -334,6 +335,37 @@ def test_resolve_followup_seed_papers_falls_back_to_seed_score() -> None:
     )
 
     assert selected == [intro]
+
+
+def test_expand_followup_candidate_pool_searches_with_seed_context_and_dedupes() -> None:
+    contract = QueryContract(clean_query="AlignX 后续工作", targets=["AlignX"])
+    seed = CandidatePaper(
+        paper_id="seed",
+        title="AlignX: Scaling Personalized Preference",
+        year="2024",
+        score=2.0,
+    )
+    initial = CandidatePaper(paper_id="initial", title="Initial Candidate", year="2026", score=1.0)
+    expanded = CandidatePaper(paper_id="expanded", title="Expanded Candidate", year="2025", score=5.0)
+    calls: list[tuple[str, QueryContract, int]] = []
+
+    def search(query: str, search_contract: QueryContract, limit: int) -> list[CandidatePaper]:
+        calls.append((query, search_contract, limit))
+        return [expanded, initial]
+
+    ranked = expand_followup_candidate_pool(
+        contract=contract,
+        seed_papers=[seed],
+        initial_candidates=[initial],
+        paper_limit_default=4,
+        paper_summary_text=lambda _: "This paper introduces AlignX and personalized preference inference.",
+        search_papers=search,
+    )
+
+    assert [paper.paper_id for paper in ranked] == ["expanded", "initial"]
+    assert "AlignX" in calls[0][0]
+    assert calls[0][1].continuation_mode == "fresh"
+    assert calls[0][2] == 16
 
 
 def test_followup_relationship_assessment_does_not_mark_loose_topic_as_direct() -> None:
