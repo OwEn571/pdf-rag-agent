@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.services.visual_claim_helpers import (
     figure_conclusion_claim_from_vlm_payload,
+    figure_conclusion_text_claim,
     figure_vlm_human_content,
     figure_vlm_system_prompt,
     table_metric_claim_from_vlm_payload,
@@ -112,3 +113,20 @@ def test_figure_conclusion_claim_requires_signal_above_fallback() -> None:
     assert strong is not None
     assert strong.structured_data["mode"] == "vlm"
     assert strong.confidence == 0.72
+
+
+def test_figure_conclusion_text_claim_uses_context_ids_and_mode() -> None:
+    claim = figure_conclusion_text_claim(
+        entity="Figure 1",
+        text="The figure compares benchmark accuracy.",
+        figure_context={"doc_ids": ["fig-1", "page-1"], "paper_id": "paper-1"},
+        mode="caption_fallback",
+        confidence=0.74,
+    )
+
+    assert claim.claim_type == "figure_conclusion"
+    assert claim.value == "The figure compares benchmark accuracy."
+    assert claim.structured_data == {"mode": "caption_fallback"}
+    assert claim.evidence_ids == ["fig-1", "page-1"]
+    assert claim.paper_ids == ["paper-1"]
+    assert claim.confidence == 0.74

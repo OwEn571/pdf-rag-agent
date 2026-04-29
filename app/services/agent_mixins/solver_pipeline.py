@@ -27,6 +27,7 @@ from app.services.topology_recommendation_helpers import (
 )
 from app.services.visual_claim_helpers import (
     figure_conclusion_claim_from_vlm_payload,
+    figure_conclusion_text_claim,
     figure_vlm_human_content,
     figure_vlm_system_prompt,
     table_metric_claim_from_vlm_payload,
@@ -702,6 +703,8 @@ class SolverPipelineMixin:
         figure_contexts = self._build_figure_contexts(evidence)
         if not figure_contexts:
             return []
+        primary_context = figure_contexts[0]
+        entity = contract.targets[0] if contract.targets else primary_context["title"]
         fallback_text = self._figure_fallback_summary(figure_contexts)
         evidence_benchmarks = self._extract_figure_benchmarks("\n".join(item.snippet for item in evidence[:10]))
         if len(evidence_benchmarks) >= 3:
@@ -724,9 +727,9 @@ class SolverPipelineMixin:
                 )
         vlm_claim = figure_conclusion_claim_from_vlm_payload(
             payload,
-            entity=contract.targets[0] if contract.targets else figure_contexts[0]["title"],
-            evidence_ids=figure_contexts[0]["doc_ids"],
-            paper_id=figure_contexts[0]["paper_id"],
+            entity=entity,
+            evidence_ids=primary_context["doc_ids"],
+            paper_id=primary_context["paper_id"],
             fallback_text=fallback_text,
             signal_score=self._figure_signal_score,
         )
@@ -735,24 +738,20 @@ class SolverPipelineMixin:
         text_summary = self._summarize_figure_text(contract=contract, fallback_text=fallback_text, evidence=evidence)
         if text_summary:
             return [
-                Claim(
-                    claim_type="figure_conclusion",
-                    entity=contract.targets[0] if contract.targets else figure_contexts[0]["title"],
-                    value=text_summary,
-                    structured_data={"mode": "text_summary"},
-                    evidence_ids=figure_contexts[0]["doc_ids"],
-                    paper_ids=[figure_contexts[0]["paper_id"]],
+                figure_conclusion_text_claim(
+                    entity=entity,
+                    text=text_summary,
+                    figure_context=primary_context,
+                    mode="text_summary",
                     confidence=0.82,
                 )
             ]
         return [
-            Claim(
-                claim_type="figure_conclusion",
-                entity=contract.targets[0] if contract.targets else figure_contexts[0]["title"],
-                value=fallback_text,
-                structured_data={"mode": "caption_fallback"},
-                evidence_ids=figure_contexts[0]["doc_ids"],
-                paper_ids=[figure_contexts[0]["paper_id"]],
+            figure_conclusion_text_claim(
+                entity=entity,
+                text=fallback_text,
+                figure_context=primary_context,
+                mode="caption_fallback",
                 confidence=0.74,
             )
         ]

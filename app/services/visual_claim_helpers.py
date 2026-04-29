@@ -143,6 +143,25 @@ def figure_conclusion_claim_from_vlm_payload(
     )
 
 
+def figure_conclusion_text_claim(
+    *,
+    entity: str,
+    text: str,
+    figure_context: dict[str, Any],
+    mode: str,
+    confidence: float,
+) -> Claim:
+    return Claim(
+        claim_type="figure_conclusion",
+        entity=entity,
+        value=text,
+        structured_data={"mode": mode},
+        evidence_ids=list(figure_context["doc_ids"]),
+        paper_ids=[str(figure_context["paper_id"])],
+        confidence=confidence,
+    )
+
+
 def _first_raw_claim(payload: Any) -> dict[str, Any]:
     raw_claims = payload.get("claims", []) if isinstance(payload, dict) else []
     if isinstance(raw_claims, list) and raw_claims and isinstance(raw_claims[0], dict):
