@@ -102,6 +102,7 @@ from app.services.contextual_contract_helpers import (
 from app.services.conversation_memory_contract import (
     active_memory_bindings,
     apply_conversation_memory_to_contract,
+    llm_memory_followup_contract,
     target_binding_from_memory,
 )
 from app.services.followup_intents import (
@@ -497,49 +498,12 @@ class ResearchAssistantAgentV4(
         session: SessionContext,
         current_contract: QueryContract,
     ) -> QueryContract | None:
-        if self.clients.chat is None or not session.turns:
-            return None
-        payload = self.clients.invoke_json(
-            system_prompt=(
-                "你是论文研究 Agent 的会话记忆追问判别器。"
-                "判断当前用户问题是否只是在追问上一轮工具输出本身，而不需要读取新的论文证据。"
-                "只有当问题可以主要基于 conversation_context 回答时，返回 should_use_memory=true。"
-                "典型 true：为什么这么推荐、推荐理由、上一轮排序依据、上一轮回答里的某个结论依据。"
-                "典型 false：用户问某篇论文具体说了什么、核心结论、方法、实验结果、图表、公式、更多细节；"
-                "这类问题虽然要用记忆解析指代，但必须交给后续研究工具检索正文证据。"
-                "如果当前问题需要新的论文检索、外部动态信息、全新主题，返回 false。"
-                "只输出 JSON：should_use_memory, reason, targets, requested_fields, answer_shape。"
-            ),
-            human_prompt=json.dumps(
-                {
-                    "current_query": clean_query,
-                    "current_contract": current_contract.model_dump(),
-                    "conversation_context": self._session_conversation_context(session),
-                },
-                ensure_ascii=False,
-            ),
-            fallback={},
-        )
-        if not isinstance(payload, dict) or not bool(payload.get("should_use_memory")):
-            return None
-        raw_targets = payload.get("targets", [])
-        targets = [str(item).strip() for item in raw_targets if str(item).strip()] if isinstance(raw_targets, list) else []
-        raw_fields = payload.get("requested_fields", [])
-        requested_fields = [str(item).strip() for item in raw_fields if str(item).strip()] if isinstance(raw_fields, list) else ["answer"]
-        answer_shape = str(payload.get("answer_shape", current_contract.answer_shape) or "").strip().lower()
-        if answer_shape not in {"bullets", "narrative", "table"}:
-            answer_shape = "narrative"
-        return QueryContract(
+        return llm_memory_followup_contract(
             clean_query=clean_query,
-            interaction_mode="conversation",
-            relation="memory_followup",
-            targets=targets,
-            requested_fields=requested_fields or ["answer"],
-            required_modalities=[],
-            answer_shape=answer_shape,
-            precision_requirement="normal",
-            continuation_mode="followup",
-            notes=["agent_tool", "llm_memory_followup", str(payload.get("reason", ""))[:180]],
+            session=session,
+            current_contract=current_contract,
+            clients=self.clients,
+            conversation_context=self._session_conversation_context,
         )
 
     @staticmethod
