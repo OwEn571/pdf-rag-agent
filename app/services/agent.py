@@ -127,6 +127,7 @@ from app.services.research_planning import (
     build_research_plan,
     research_plan_goals,
 )
+from app.services.tool_registry_helpers import coerce_int, tool_input_from_state
 from app.services.web_evidence import (
     build_web_research_claim,
     merge_evidence,
@@ -1723,29 +1724,6 @@ class ResearchAssistantAgentV4(
         }
         return messages.get(action, action)
 
-    @staticmethod
-    def _state_tool_input(state: dict[str, Any], tool: str) -> dict[str, Any]:
-        tool_inputs = state.get("tool_inputs", {})
-        if not isinstance(tool_inputs, dict):
-            return {}
-        payload = tool_inputs.get(tool, {})
-        return dict(payload) if isinstance(payload, dict) else {}
-
-    @staticmethod
-    def _tool_int_arg(
-        payload: dict[str, Any],
-        key: str,
-        *,
-        default: int,
-        minimum: int,
-        maximum: int,
-    ) -> int:
-        try:
-            parsed = int(payload.get(key, default))
-        except (TypeError, ValueError):
-            parsed = default
-        return max(minimum, min(maximum, parsed))
-
     def _agent_search_papers(
         self,
         *,
@@ -1756,8 +1734,13 @@ class ResearchAssistantAgentV4(
     ) -> None:
         contract: QueryContract = state["contract"]
         plan: ResearchPlan = state["plan"]
-        tool_input = self._state_tool_input(state, "search_corpus")
-        paper_limit = self._tool_int_arg(tool_input, "top_k", default=plan.paper_limit, minimum=1, maximum=50)
+        tool_input = tool_input_from_state(state, "search_corpus")
+        paper_limit = coerce_int(
+            tool_input.get("top_k", plan.paper_limit),
+            default=plan.paper_limit,
+            minimum=1,
+            maximum=50,
+        )
         if paper_limit != plan.paper_limit:
             plan = plan.model_copy(update={"paper_limit": paper_limit})
         excluded_titles: set[str] = state["excluded_titles"]
@@ -1887,8 +1870,13 @@ class ResearchAssistantAgentV4(
     ) -> None:
         contract: QueryContract = state["contract"]
         plan: ResearchPlan = state["plan"]
-        tool_input = self._state_tool_input(state, "search_corpus")
-        evidence_limit = self._tool_int_arg(tool_input, "top_k", default=plan.evidence_limit, minimum=1, maximum=50)
+        tool_input = tool_input_from_state(state, "search_corpus")
+        evidence_limit = coerce_int(
+            tool_input.get("top_k", plan.evidence_limit),
+            default=plan.evidence_limit,
+            minimum=1,
+            maximum=50,
+        )
         if evidence_limit != plan.evidence_limit:
             plan = plan.model_copy(update={"evidence_limit": evidence_limit})
         screened_papers: list[CandidatePaper] = state["screened_papers"]
@@ -1956,9 +1944,14 @@ class ResearchAssistantAgentV4(
         execution_steps: list[dict[str, Any]],
     ) -> None:
         contract: QueryContract = state["contract"]
-        tool_input = self._state_tool_input(state, "web_search")
+        tool_input = tool_input_from_state(state, "web_search")
         web_query = str(tool_input.get("query", "") or "").strip() or web_query_text(contract)
-        result_limit = self._tool_int_arg(tool_input, "max_results", default=max_web_results, minimum=1, maximum=20)
+        result_limit = coerce_int(
+            tool_input.get("max_results", max_web_results),
+            default=max_web_results,
+            minimum=1,
+            maximum=20,
+        )
         self._emit_agent_tool_call(
             emit=emit,
             tool="web_search",
