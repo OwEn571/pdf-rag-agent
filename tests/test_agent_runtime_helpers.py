@@ -38,6 +38,7 @@ from app.services.agent_runtime_helpers import (
     record_tool_loop_ready,
     planner_next_action,
     prefer_selected_clarification_paper,
+    reflect_agent_state_decision,
     refresh_selected_ambiguity_materials,
     research_runtime_actions,
     research_runtime_state,
@@ -574,6 +575,80 @@ def test_runtime_helpers_promote_best_effort_state_after_clarification_limit() -
     ]
     unchanged = {"verification": VerificationReport(status="clarify")}
     assert promote_best_effort_state_after_clarification_limit(unchanged) is unchanged
+
+
+def test_runtime_helpers_reflect_agent_state_rejects_repeated_excluded_focus() -> None:
+    reflection = reflect_agent_state_decision(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"]),
+        claims=[Claim(claim_type="definition", text="PBA is a method.")],
+        focus_titles=["Old Focus"],
+        verification=VerificationReport(status="pass"),
+        excluded_titles={"old focus"},
+        target_binding_exists=False,
+        ambiguity_option_count=lambda: 0,
+    )
+
+    assert reflection["decision"] == "clarify"
+    assert reflection["recommended_action"] == "clarify_or_search_alternative"
+
+
+def test_runtime_helpers_reflect_agent_state_preserves_clarify_verification() -> None:
+    verification = VerificationReport(
+        status="clarify",
+        missing_fields=["target"],
+        recommended_action="clarify_target",
+    )
+
+    reflection = reflect_agent_state_decision(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"]),
+        claims=[],
+        focus_titles=[],
+        verification=verification,
+        excluded_titles=set(),
+        target_binding_exists=False,
+        ambiguity_option_count=lambda: 0,
+    )
+
+    assert reflection["decision"] == "clarify"
+    assert reflection["missing_fields"] == ["target"]
+    assert reflection["reason"] == "clarify_target"
+
+
+def test_runtime_helpers_reflect_agent_state_skips_ambiguity_count_for_bound_target() -> None:
+    def fail_count() -> int:
+        raise AssertionError("ambiguity count should not be loaded for bound target")
+
+    reflection = reflect_agent_state_decision(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"]),
+        claims=[],
+        focus_titles=["AlignX"],
+        verification=VerificationReport(status="pass"),
+        excluded_titles=set(),
+        target_binding_exists=True,
+        ambiguity_option_count=fail_count,
+    )
+
+    assert reflection == {
+        "decision": "pass",
+        "reason": "grounding verified",
+        "focus_titles": ["AlignX"],
+    }
+
+
+def test_runtime_helpers_reflect_agent_state_clarifies_unresolved_ambiguity() -> None:
+    reflection = reflect_agent_state_decision(
+        contract=QueryContract(clean_query="PBA是什么", targets=["PBA"], requested_fields=["definition"]),
+        claims=[],
+        focus_titles=[],
+        verification=VerificationReport(status="pass"),
+        excluded_titles=set(),
+        target_binding_exists=False,
+        ambiguity_option_count=lambda: 2,
+    )
+
+    assert reflection["decision"] == "clarify"
+    assert reflection["recommended_action"] == "clarify_ambiguous_entity"
+    assert reflection["missing_fields"] == ["disambiguation"]
 
 
 def test_runtime_helpers_build_action_sequences_and_dequeue_actions() -> None:

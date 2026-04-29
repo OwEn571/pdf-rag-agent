@@ -5,7 +5,13 @@ from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
-from app.services.clarification_intents import contract_from_selected_clarification_option, selected_clarification_paper_id
+from app.services.clarification_intents import (
+    ambiguity_options_from_notes,
+    contract_from_selected_clarification_option,
+    contract_needs_evidence_disambiguation,
+    disambiguation_missing_fields,
+    selected_clarification_paper_id,
+)
 from app.services.confidence import (
     confidence_from_contract,
     confidence_from_verification_report,
@@ -36,6 +42,7 @@ EntityEvidenceSearchFn = Callable[[str, QueryContract, int], list[EvidenceBlock]
 GroundEntityPapersFn = Callable[[list[CandidatePaper], list[EvidenceBlock], int], list[CandidatePaper]]
 ConceptEvidenceSearchFn = Callable[[str, QueryContract, list[str], int], list[EvidenceBlock]]
 ExpandEvidenceFn = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
+AmbiguityOptionCountFn = Callable[[], int]
 
 
 @dataclass(frozen=True)
@@ -622,6 +629,53 @@ def promote_best_effort_state_after_clarification_limit(state: dict[str, Any]) -
             }
         )
     return promoted
+
+
+def reflect_agent_state_decision(
+    *,
+    contract: QueryContract,
+    claims: list[Claim],
+    focus_titles: list[str],
+    verification: VerificationReport,
+    excluded_titles: set[str],
+    target_binding_exists: bool,
+    ambiguity_option_count: AmbiguityOptionCountFn,
+) -> dict[str, Any]:
+    repeated_excluded = bool(excluded_titles & {normalize_lookup_text(title) for title in focus_titles})
+    if repeated_excluded:
+        return {
+            "decision": "clarify",
+            "reason": "The candidate answer still points to a paper the user just rejected.",
+            "missing_fields": ["different_interpretation"],
+            "recommended_action": "clarify_or_search_alternative",
+            "focus_titles": focus_titles,
+        }
+    if verification.status == "clarify":
+        return {
+            "decision": "clarify",
+            "reason": verification.recommended_action or "human clarification required",
+            "missing_fields": verification.missing_fields,
+            "recommended_action": verification.recommended_action,
+            "focus_titles": focus_titles,
+        }
+    if contract_needs_evidence_disambiguation(contract):
+        if target_binding_exists and "exclude_previous_focus" not in contract.notes:
+            option_count = 1
+        else:
+            option_count = ambiguity_option_count()
+        if option_count > 1 and not claims and not ambiguity_options_from_notes(contract.notes):
+            return {
+                "decision": "clarify",
+                "reason": "Multiple acronym meanings remain unresolved.",
+                "missing_fields": disambiguation_missing_fields(contract),
+                "recommended_action": "clarify_ambiguous_entity",
+                "focus_titles": focus_titles,
+            }
+    return {
+        "decision": verification.status,
+        "reason": "grounding verified" if verification.status == "pass" else verification.recommended_action,
+        "focus_titles": focus_titles,
+    }
 
 
 def verification_execution_step(verification: VerificationReport) -> dict[str, str]:

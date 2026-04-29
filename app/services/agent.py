@@ -44,6 +44,7 @@ from app.services.agent_runtime_helpers import (
     clarification_limit_decision,
     prepare_retry_research_materials,
     promote_best_effort_state_after_clarification_limit,
+    reflect_agent_state_decision,
     retry_research_limits,
     refresh_selected_ambiguity_materials,
     screen_agent_papers,
@@ -54,12 +55,10 @@ from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     acronym_evidence_from_corpus as build_acronym_evidence_from_corpus,
     acronym_options_from_evidence as build_acronym_options_from_evidence,
-    ambiguity_options_from_notes,
     clarification_tracking_key,
     clarification_options_from_contract_notes,
     clear_pending_clarification,
     apply_disambiguation_judge_recommendation,
-    contract_needs_evidence_disambiguation,
     contract_with_auto_resolved_ambiguity,
     contract_from_pending_clarification,
     contract_from_selected_clarification_option,
@@ -103,7 +102,6 @@ from app.services.contract_context import (
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
-    normalize_lookup_text,
 )
 from app.services.contextual_contract_helpers import (
     contextual_active_paper_contract,
@@ -1810,42 +1808,18 @@ class ResearchAssistantAgentV4(
         excluded_titles: set[str],
     ) -> dict[str, Any]:
         focus_titles = self._claim_focus_titles(claims=claims, papers=papers)
-        repeated_excluded = bool(excluded_titles & {normalize_lookup_text(title) for title in focus_titles})
-        if repeated_excluded:
-            return {
-                "decision": "clarify",
-                "reason": "The candidate answer still points to a paper the user just rejected.",
-                "missing_fields": ["different_interpretation"],
-                "recommended_action": "clarify_or_search_alternative",
-                "focus_titles": focus_titles,
-            }
-        if verification.status == "clarify":
-            return {
-                "decision": "clarify",
-                "reason": verification.recommended_action or "human clarification required",
-                "missing_fields": verification.missing_fields,
-                "recommended_action": verification.recommended_action,
-                "focus_titles": focus_titles,
-            }
-        goals = research_plan_goals(contract)
-        if contract_needs_evidence_disambiguation(contract):
-            if target_binding_from_memory(session=session, target=contract.targets[0]) and "exclude_previous_focus" not in contract.notes:
-                option_count = 1
-            else:
-                option_count = len(self._acronym_options_from_evidence(target=contract.targets[0], papers=papers, evidence=evidence))
-            if option_count > 1 and not claims and not ambiguity_options_from_notes(contract.notes):
-                return {
-                    "decision": "clarify",
-                    "reason": "Multiple acronym meanings remain unresolved.",
-                    "missing_fields": disambiguation_missing_fields(contract),
-                    "recommended_action": "clarify_ambiguous_entity",
-                    "focus_titles": focus_titles,
-                }
-        return {
-            "decision": verification.status,
-            "reason": "grounding verified" if verification.status == "pass" else verification.recommended_action,
-            "focus_titles": focus_titles,
-        }
+        target = str(contract.targets[0] or "").strip() if contract.targets else ""
+        return reflect_agent_state_decision(
+            contract=contract,
+            claims=claims,
+            focus_titles=focus_titles,
+            verification=verification,
+            excluded_titles=excluded_titles,
+            target_binding_exists=bool(target and target_binding_from_memory(session=session, target=target)),
+            ambiguity_option_count=lambda: len(
+                self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
+            ),
+        )
 
     def _normalize_contract_targets(self, *, targets: list[str], requested_fields: list[str]) -> list[str]:
         return normalize_contract_targets(
