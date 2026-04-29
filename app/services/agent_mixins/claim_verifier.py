@@ -5,6 +5,7 @@ import re
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, VerificationReport
 from app.services import origin_selection_helpers as origin_helpers
+from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import extract_topology_terms
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.query_shaping import is_short_acronym
@@ -543,7 +544,7 @@ class ClaimVerifierMixin:
                 *[item.snippet for item in claim_evidence[:6]],
             ]
         )
-        normalized_context = self._normalize_lookup_text(context)
+        normalized_context = normalize_lookup_text(context)
         entity_targets = [
             part.strip()
             for part in re.split(r"[/,;、]", str(claim.entity or ""))
@@ -553,7 +554,7 @@ class ClaimVerifierMixin:
         if not candidate_targets:
             return True
         for target in candidate_targets:
-            target_key = self._normalize_lookup_text(target)
+            target_key = normalize_lookup_text(target)
             if not target_key:
                 continue
             formula_text = f"{claim.value}\n{claim.entity}"
@@ -616,13 +617,13 @@ class ClaimVerifierMixin:
         papers: list[CandidatePaper],
         evidence: list[EvidenceBlock],
     ) -> bool:
-        normalized_targets = [self._normalize_lookup_text(item) for item in targets if item]
+        normalized_targets = [normalize_lookup_text(item) for item in targets if item]
         if not normalized_targets:
             return True
-        haystacks = [self._normalize_lookup_text(item.snippet) for item in evidence[:8]]
+        haystacks = [normalize_lookup_text(item.snippet) for item in evidence[:8]]
         for paper in papers[:4]:
-            haystacks.append(self._normalize_lookup_text(paper.title))
-            haystacks.append(self._normalize_lookup_text(str(paper.metadata.get("paper_card_text", ""))))
+            haystacks.append(normalize_lookup_text(paper.title))
+            haystacks.append(normalize_lookup_text(str(paper.metadata.get("paper_card_text", ""))))
         return any(
             self._matches_target(haystack, target)
             for target in normalized_targets

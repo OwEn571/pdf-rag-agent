@@ -70,6 +70,7 @@ from app.services.contract_normalization import (
     clean_contract_target_text,
     is_structural_target_reference,
     normalize_contract_targets,
+    normalize_lookup_text,
     normalize_modalities,
 )
 from app.services.followup_intents import (
@@ -807,7 +808,7 @@ class ResearchAssistantAgentV4(
         bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
         selected: list[dict[str, Any]] = []
         for target in session.effective_active_research().targets:
-            binding = bindings.get(self._normalize_lookup_text(target))
+            binding = bindings.get(normalize_lookup_text(target))
             if isinstance(binding, dict):
                 selected.append(dict(binding))
         if len(selected) >= 2:
@@ -831,7 +832,7 @@ class ResearchAssistantAgentV4(
         return self._dedupe_citations(self._citations_from_doc_ids(list(dict.fromkeys(doc_ids)), []))
 
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
-        normalized = self._normalize_lookup_text(clean_query)
+        normalized = normalize_lookup_text(clean_query)
         memory = dict((session.working_memory if session is not None else {}) or {})
         bindings = dict(memory.get("target_bindings", {}) or {})
         has_memory_context = bool(bindings or (session is not None and session.effective_active_research().targets))
@@ -1054,7 +1055,7 @@ class ResearchAssistantAgentV4(
         by_key: dict[tuple[str, str, tuple[str, ...]], int] = {}
         precision_rank = {"normal": 0, "high": 1, "exact": 2}
         for contract in subcontracts:
-            normalized_targets = tuple(self._normalize_lookup_text(target) for target in contract.targets if target)
+            normalized_targets = tuple(normalize_lookup_text(target) for target in contract.targets if target)
             key = (contract.interaction_mode, contract.relation, normalized_targets)
             if contract.relation not in mergeable_relations or key not in by_key:
                 by_key[key] = len(merged)
@@ -1244,7 +1245,7 @@ class ResearchAssistantAgentV4(
     ) -> list[dict[str, Any]]:
         augmented = list(subtask_results)
         present_targets = {
-            self._normalize_lookup_text(target)
+            normalize_lookup_text(target)
             for result in augmented
             if isinstance(result.get("contract"), QueryContract)
             for target in result["contract"].targets
@@ -1260,7 +1261,7 @@ class ResearchAssistantAgentV4(
         bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
         for target in requested_targets:
             clean_target = str(target or "").strip()
-            key = self._normalize_lookup_text(clean_target)
+            key = normalize_lookup_text(clean_target)
             if not key or key in present_targets:
                 continue
             binding = bindings.get(key)
@@ -2542,7 +2543,7 @@ class ResearchAssistantAgentV4(
         if not relationship:
             return contract
         clean_query = str(contract.clean_query or "")
-        normalized_query = self._normalize_lookup_text(clean_query)
+        normalized_query = normalize_lookup_text(clean_query)
         if not followup_relationship_recheck_requested(clean_query, normalized_query):
             return contract
         if not contract_allows_active_context_override(contract) and contract.relation != "followup_research":
@@ -2697,14 +2698,14 @@ class ResearchAssistantAgentV4(
             target = str(target or "").strip()
             if not target:
                 continue
-            key = self._normalize_lookup_text(target)
+            key = normalize_lookup_text(target)
             if not key:
                 continue
             paper: CandidatePaper | None = None
             evidence_ids: list[str] = []
             for claim in claims:
                 claim_target = str(claim.entity or target).strip()
-                if claim_target and self._normalize_lookup_text(claim_target) not in {key, ""}:
+                if claim_target and normalize_lookup_text(claim_target) not in {key, ""}:
                     continue
                 if claim.paper_ids:
                     paper = paper_by_id.get(claim.paper_ids[0]) or self._candidate_from_paper_id(claim.paper_ids[0])
@@ -2764,15 +2765,15 @@ class ResearchAssistantAgentV4(
         rows = [dict(item or {}) for item in list(structured.get("followup_titles", []) or []) if isinstance(item, dict)]
         selected_row: dict[str, Any] = {}
         if candidate_title:
-            selected_key = self._normalize_lookup_text(candidate_title)
+            selected_key = normalize_lookup_text(candidate_title)
             selected_row = next(
                 (
                     row
                     for row in rows
                     if selected_key
                     and (
-                        selected_key in self._normalize_lookup_text(str(row.get("title", "")))
-                        or self._normalize_lookup_text(str(row.get("title", ""))) in selected_key
+                        selected_key in normalize_lookup_text(str(row.get("title", "")))
+                        or normalize_lookup_text(str(row.get("title", ""))) in selected_key
                     )
                 ),
                 rows[0] if rows else {},
@@ -2908,7 +2909,7 @@ class ResearchAssistantAgentV4(
         }
 
     def _target_binding_from_memory(self, *, session: SessionContext, target: str) -> dict[str, Any] | None:
-        key = self._normalize_lookup_text(target)
+        key = normalize_lookup_text(target)
         if not key:
             return None
         bindings = dict((session.working_memory or {}).get("target_bindings", {}) or {})
@@ -3224,14 +3225,14 @@ class ResearchAssistantAgentV4(
         paper_names = self._paper_hint_names(paper)
         paper_name_keys = {self._normalize_entity_key(name) for name in paper_names if name}
         active = session.effective_active_research()
-        active_keys = {self._normalize_lookup_text(item) for item in active.targets}
+        active_keys = {normalize_lookup_text(item) for item in active.targets}
         for target in contract.targets:
             candidate = str(target or "").strip()
             if not candidate:
                 continue
             if self._normalize_entity_key(candidate) in paper_name_keys:
                 continue
-            if is_short_acronym(candidate) or self._normalize_lookup_text(candidate) in active_keys:
+            if is_short_acronym(candidate) or normalize_lookup_text(candidate) in active_keys:
                 return candidate
         return str(active.targets[0] or "").strip()
 
@@ -3240,7 +3241,7 @@ class ResearchAssistantAgentV4(
         if not query_text:
             return None
         query_key = self._normalize_entity_key(query_text)
-        query_words = self._normalize_lookup_text(query_text)
+        query_words = normalize_lookup_text(query_text)
         query_hints = [
             token
             for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", query_text)
@@ -3433,7 +3434,7 @@ class ResearchAssistantAgentV4(
             str(option.get("option_id") or option.get("paper_id") or option.get("meaning") or option.get("title") or "")
             for option in options[:4]
         )
-        target_key = ",".join(self._normalize_lookup_text(item) for item in contract.targets if item)
+        target_key = ",".join(normalize_lookup_text(item) for item in contract.targets if item)
         missing_key = ",".join(str(item) for item in verification.missing_fields)
         return "|".join(
             [
@@ -3503,13 +3504,13 @@ class ResearchAssistantAgentV4(
         index = pending_clarification_selection_index(clean_query)
         if index is not None and 0 <= index < len(options):
             return options[index]
-        normalized_query = self._normalize_lookup_text(clean_query)
+        normalized_query = normalize_lookup_text(clean_query)
         if not normalized_query:
             return None
         for option in options:
-            meaning = self._normalize_lookup_text(str(option.get("meaning", "")))
-            label = self._normalize_lookup_text(str(option.get("label", "")))
-            title = self._normalize_lookup_text(str(option.get("title", "")))
+            meaning = normalize_lookup_text(str(option.get("meaning", "")))
+            label = normalize_lookup_text(str(option.get("label", "")))
+            title = normalize_lookup_text(str(option.get("title", "")))
             if meaning and normalized_query == meaning:
                 return option
             if label and normalized_query == label:
@@ -3739,13 +3740,13 @@ class ResearchAssistantAgentV4(
         meaning: str,
         title_alias_text: str,
     ) -> float:
-        title_key = cls._normalize_lookup_text(title_alias_text)
+        title_key = normalize_lookup_text(title_alias_text)
         if not title_key:
             return 0.0
         probes = [target, label, meaning]
         scores: list[float] = []
         for probe in probes:
-            probe_key = cls._normalize_lookup_text(probe)
+            probe_key = normalize_lookup_text(probe)
             if not probe_key:
                 continue
             if probe_key and probe_key in title_key:
@@ -4036,7 +4037,7 @@ class ResearchAssistantAgentV4(
                 continue
             text = " ".join([item.snippet, item.caption, item.title])
             expansion = self._extract_acronym_expansion_from_text(text=text, acronym=target)
-            option_key = self._normalize_acronym_meaning(expansion) if expansion else self._normalize_lookup_text(f"{target_key}:{paper.paper_id}")
+            option_key = self._normalize_acronym_meaning(expansion) if expansion else normalize_lookup_text(f"{target_key}:{paper.paper_id}")
             if not option_key:
                 option_key = f"{target_key}:{paper.paper_id}"
             bucket = buckets.setdefault(
@@ -4540,10 +4541,6 @@ class ResearchAssistantAgentV4(
         return build_web_research_claim(contract=contract, web_evidence=web_evidence)
 
     @staticmethod
-    def _normalize_lookup_text(text: str) -> str:
-        return " ".join(str(text or "").lower().split())
-
-    @staticmethod
     def _matches_target(text: str, target: str) -> bool:
         raw_text = str(text or "")
         raw_target = str(target or "").strip()
@@ -4741,11 +4738,11 @@ class ResearchAssistantAgentV4(
         return ""
 
     def _candidate_title_matches(self, paper: CandidatePaper, selected_title: str) -> bool:
-        selected_key = self._normalize_lookup_text(selected_title)
+        selected_key = normalize_lookup_text(selected_title)
         if not selected_key:
             return False
-        title_key = self._normalize_lookup_text(paper.title)
-        aliases = self._normalize_lookup_text(str(paper.metadata.get("aliases", "")))
+        title_key = normalize_lookup_text(paper.title)
+        aliases = normalize_lookup_text(str(paper.metadata.get("aliases", "")))
         return selected_key in title_key or title_key in selected_key or selected_key in aliases
 
     def _selected_followup_candidate_assessment(
@@ -5391,8 +5388,8 @@ class ResearchAssistantAgentV4(
             and (
                 not contract.targets
                 or not session.pending_clarification_target
-                or self._normalize_lookup_text(session.pending_clarification_target)
-                in {self._normalize_lookup_text(target) for target in contract.targets}
+                or normalize_lookup_text(session.pending_clarification_target)
+                in {normalize_lookup_text(target) for target in contract.targets}
             )
         ):
             ambiguity_options = list(session.pending_clarification_options)

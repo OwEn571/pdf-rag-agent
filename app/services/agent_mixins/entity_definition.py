@@ -7,6 +7,7 @@ from typing import Any
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services import origin_selection_helpers as origin_helpers
 from app.services.confidence import coerce_confidence_value
+from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import safe_year
 
 
@@ -639,7 +640,7 @@ class EntityDefinitionMixin:
         if not application_lines:
             application_lines = self._entity_supporting_lines(local_evidence, kind="application")
 
-        requested_fields = {self._normalize_lookup_text(item) for item in contract.requested_fields if item}
+        requested_fields = {normalize_lookup_text(item) for item in contract.requested_fields if item}
         detail_requested = contract.continuation_mode == "followup" or bool(
             requested_fields
             & {

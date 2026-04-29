@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.contract_normalization import normalize_lookup_text
 from app.services.research_planning import research_plan_goals
 
 
@@ -238,10 +239,10 @@ class FollowupRoutingMixin:
         current_fields: list[str],
         previous_fields: list[str],
     ) -> tuple[list[str], str]:
-        normalized_query = self._normalize_lookup_text(query)
+        normalized_query = normalize_lookup_text(query)
         generic_fields = {"definition", "applications", "key_features", "answer", "summary"}
-        current_keys = {self._normalize_lookup_text(item) for item in current_fields if item}
-        previous_keys = {self._normalize_lookup_text(item) for item in previous_fields if item}
+        current_keys = {normalize_lookup_text(item) for item in current_fields if item}
+        previous_keys = {normalize_lookup_text(item) for item in previous_fields if item}
         formula_cues = {"公式", "objective", "loss", "advantage", "变量", "推导"}
         detail_cues = {"具体", "细节", "详细", "原理", "机制", "怎么", "如何", "工作", "流程", "样子", "what is it like"}
         if any(cue in normalized_query for cue in formula_cues):
