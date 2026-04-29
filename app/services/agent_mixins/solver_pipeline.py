@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext
+from app.services.entity_definition_helpers import entity_definition_claim, entity_definition_evidence_ids
 from app.services.followup_claim_helpers import followup_research_claim
 from app.services import formula_text_helpers as formula_helpers
 from app.services import metric_text_helpers as metric_helpers
@@ -197,35 +198,20 @@ class SolverPipelineMixin:
             return []
         relevant_evidence = supporting_evidence or [item for item in evidence if item.paper_id == paper.paper_id][:4]
         label = self._infer_entity_type(contract=contract, papers=[paper], evidence=relevant_evidence)
-        evidence_ids = [item.doc_id for item in relevant_evidence[:3]]
-        if not evidence_ids:
-            paper_text = "\n".join(
-                [
-                    paper.title,
-                    str(paper.metadata.get("paper_card_text", "")),
-                    str(paper.metadata.get("generated_summary", "")),
-                    str(paper.metadata.get("abstract_note", "")),
-                ]
-            )
-            if paper.doc_ids and (
-                not contract.targets or any(self._matches_target(paper_text, target) for target in contract.targets if target)
-            ):
-                evidence_ids = list(paper.doc_ids[:1])
         return [
-            Claim(
-                claim_type="entity_definition",
-                entity=contract.targets[0] if contract.targets else "",
-                value=label,
-                structured_data={
-                    "paper_title": paper.title,
-                    "description": "",
-                    "definition_lines": self._entity_supporting_lines(relevant_evidence, kind="definition"),
-                    "mechanism_lines": self._entity_supporting_lines(relevant_evidence, kind="mechanism"),
-                    "application_lines": self._entity_supporting_lines(relevant_evidence, kind="application"),
-                },
-                evidence_ids=evidence_ids,
-                paper_ids=[paper.paper_id],
-                confidence=0.9,
+            entity_definition_claim(
+                contract=contract,
+                paper=paper,
+                label=label,
+                evidence_ids=entity_definition_evidence_ids(
+                    contract=contract,
+                    paper=paper,
+                    evidence=relevant_evidence,
+                    target_matcher=self._matches_target,
+                ),
+                definition_lines=self._entity_supporting_lines(relevant_evidence, kind="definition"),
+                mechanism_lines=self._entity_supporting_lines(relevant_evidence, kind="mechanism"),
+                application_lines=self._entity_supporting_lines(relevant_evidence, kind="application"),
             )
         ]
 
