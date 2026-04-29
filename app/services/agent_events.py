@@ -42,6 +42,12 @@ def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
     elif event == "confidence":
         payload.setdefault("value", _confidence_value(payload))
         payload.setdefault("basis", str(payload.get("basis", "") or "unknown"))
+    elif event == "final":
+        payload.setdefault("answer", str(payload.get("answer", "") or ""))
+        citations = payload.get("citations", [])
+        payload["citations"] = citations if isinstance(citations, list) else []
+        usage = payload.get("usage", {})
+        payload["usage"] = usage if isinstance(usage, dict) else {}
     elif event == "agent_step":
         payload.setdefault("status", "doing")
     elif event == "error":

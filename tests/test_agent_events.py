@@ -76,6 +76,15 @@ def test_normalize_todo_update_event_adds_protocol_items() -> None:
     ]
 
 
+def test_normalize_final_event_adds_protocol_defaults() -> None:
+    payload = normalize_agent_event("final", {"answer": "done", "citations": "bad", "usage": "bad"})
+
+    assert payload["type"] == "final"
+    assert payload["answer"] == "done"
+    assert payload["citations"] == []
+    assert payload["usage"] == {}
+
+
 def test_observation_events_record_tool_metrics(monkeypatch) -> None:
     calls = _CounterProbe()
     latency = _HistogramProbe()

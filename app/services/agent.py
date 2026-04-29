@@ -31,6 +31,7 @@ from app.services.agent_emit import (
     emit_agent_tool_call as emit_agent_tool_call_event,
     record_agent_observation as record_agent_observation_event,
 )
+from app.services.agent_events import normalize_agent_event
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
 from app.services.agent_runtime_summary import build_runtime_summary
@@ -321,7 +322,10 @@ class ResearchAssistantAgentV4(
         if not answer_was_streamed:
             for chunk in chunk_text(str(result.get("answer", "")), size=28):
                 yield {"event": "answer_delta", "data": {"text": chunk}}
-        yield {"event": "final", "data": final_payload | {"answer": result.get("answer", "")}}
+        yield {
+            "event": "final",
+            "data": normalize_agent_event("final", final_payload | {"answer": result.get("answer", "")}),
+        }
 
     def _run(
         self,
