@@ -1635,7 +1635,11 @@ class ResearchAssistantAgentV4(
         summary: str,
         payload: dict[str, Any],
     ) -> None:
-        canonical_tool = self._canonical_agent_tool(tool)
+        canonical_tool = canonical_agent_tool(
+            tool=tool,
+            aliases=LEGACY_TOOL_NAME_ALIASES,
+            canonical_names=all_agent_tool_names(),
+        )
         event_payload = dict(payload)
         if canonical_tool != tool:
             event_payload.setdefault("raw_tool", tool)
@@ -1649,19 +1653,15 @@ class ResearchAssistantAgentV4(
         tool: str,
         arguments: dict[str, Any],
     ) -> None:
-        canonical_tool = self._canonical_agent_tool(tool)
-        event_arguments = dict(arguments)
-        if canonical_tool != tool:
-            event_arguments.setdefault("raw_tool", tool)
-        emit("tool_call", {"tool": canonical_tool, "arguments": event_arguments})
-
-    @staticmethod
-    def _canonical_agent_tool(tool: str) -> str:
-        return canonical_agent_tool(
+        canonical_tool = canonical_agent_tool(
             tool=tool,
             aliases=LEGACY_TOOL_NAME_ALIASES,
             canonical_names=all_agent_tool_names(),
         )
+        event_arguments = dict(arguments)
+        if canonical_tool != tool:
+            event_arguments.setdefault("raw_tool", tool)
+        emit("tool_call", {"tool": canonical_tool, "arguments": event_arguments})
 
     def _emit_agent_step(
         self,
