@@ -47,6 +47,7 @@ from app.services.agent_runtime_helpers import (
     screen_agent_papers,
     search_agent_candidate_papers,
     search_agent_evidence,
+    solve_agent_state_claims,
     tool_loop_ready_tool,
     verification_execution_step,
 )
@@ -357,6 +358,43 @@ def test_runtime_helpers_run_agent_paper_search_builds_payloads_and_screens() ->
     }
     assert result.observation_summary == "candidates=2, selected=1"
     assert result.observation_payload["selected_titles"] == ["First"]
+
+
+def test_runtime_helpers_solve_agent_state_claims_appends_web_claim_when_needed() -> None:
+    contract = QueryContract(clean_query="最新 RAG 论文", allow_web_search=True, requested_fields=["answer"])
+    plan = ResearchPlan(solver_sequence=["general_answer"])
+    paper = CandidatePaper(paper_id="p1", title="Paper")
+    evidence = [
+        EvidenceBlock(doc_id="e1", paper_id="p1", title="Paper", file_path="", page=1, block_type="page_text", snippet="local")
+    ]
+    web_evidence = [
+        EvidenceBlock(doc_id="web", paper_id="web", title="Web", file_path="", page=0, block_type="web", snippet="web")
+    ]
+    calls: list[tuple[QueryContract, ResearchPlan, list[CandidatePaper], list[EvidenceBlock]]] = []
+
+    claims = solve_agent_state_claims(
+        state={
+            "contract": contract,
+            "plan": plan,
+            "screened_papers": [paper],
+            "evidence": evidence,
+            "web_evidence": web_evidence,
+        },
+        explicit_web=True,
+        solve_claims=lambda item_contract, item_plan, papers, found_evidence: calls.append(
+            (item_contract, item_plan, papers, found_evidence)
+        )
+        or [Claim(claim_type="answer", text="local")],
+        build_claim=lambda item_contract, item_evidence: Claim(
+            claim_type="web_research",
+            text=item_contract.clean_query,
+            evidence_ids=[item.doc_id for item in item_evidence],
+        ),
+    )
+
+    assert calls == [(contract, plan, [paper], evidence)]
+    assert [claim.claim_type for claim in claims] == ["answer", "web_research"]
+    assert claims[1].evidence_ids == ["web"]
 
 
 def test_runtime_helpers_prepare_retry_research_materials_expands_limits_and_filters_selection() -> None:

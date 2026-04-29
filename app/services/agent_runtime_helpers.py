@@ -28,6 +28,7 @@ from app.services.tool_registry_helpers import (
     tool_loop_ready_observation,
     coerce_int,
 )
+from app.services.web_evidence import solve_claims_with_web_research
 
 NegativeCorrectionFn = Callable[[str], bool]
 EmitFn = Callable[[str, dict[str, Any]], None]
@@ -43,6 +44,8 @@ GroundEntityPapersFn = Callable[[list[CandidatePaper], list[EvidenceBlock], int]
 ConceptEvidenceSearchFn = Callable[[str, QueryContract, list[str], int], list[EvidenceBlock]]
 ExpandEvidenceFn = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
 AmbiguityOptionCountFn = Callable[[], int]
+AgentClaimSolverFn = Callable[[QueryContract, ResearchPlan, list[CandidatePaper], list[EvidenceBlock]], list[Claim]]
+AgentWebClaimBuilderFn = Callable[[QueryContract, list[EvidenceBlock]], Claim]
 ScreenAgentPapersFn = Callable[
     [QueryContract, ResearchPlan, list[CandidatePaper], set[str]],
     tuple[list[CandidatePaper], list[EvidenceBlock] | None],
@@ -463,6 +466,26 @@ def run_agent_paper_search(
             "selected_count": len(screened_papers),
             "selected_titles": [item.title for item in screened_papers[:5]],
         },
+    )
+
+
+def solve_agent_state_claims(
+    *,
+    state: dict[str, Any],
+    explicit_web: bool,
+    solve_claims: AgentClaimSolverFn,
+    build_claim: AgentWebClaimBuilderFn,
+) -> list[Claim]:
+    contract: QueryContract = state["contract"]
+    plan: ResearchPlan = state["plan"]
+    papers: list[CandidatePaper] = state["screened_papers"]
+    evidence: list[EvidenceBlock] = state["evidence"]
+    return solve_claims_with_web_research(
+        contract=contract,
+        web_evidence=state["web_evidence"],
+        explicit_web=explicit_web,
+        solve_claims=lambda: solve_claims(contract, plan, papers, evidence),
+        build_claim=build_claim,
     )
 
 

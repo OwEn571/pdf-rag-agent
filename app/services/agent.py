@@ -47,6 +47,7 @@ from app.services.agent_runtime_helpers import (
     run_agent_paper_search,
     screen_agent_papers,
     search_agent_evidence,
+    solve_agent_state_claims,
 )
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
@@ -160,7 +161,6 @@ from app.services.web_evidence import (
     build_web_research_claim,
     collect_web_evidence,
     search_agent_web_evidence,
-    solve_claims_with_web_research,
 )
 from app.services.web_search import TavilyWebSearchClient
 from app.services.agent_mixins import (
@@ -980,18 +980,14 @@ class ResearchAssistantAgentV4(
                     emit=emit,
                     execution_steps=execution_steps,
                 )
-                contract = state["contract"]
-                screened_papers = state["screened_papers"]
-                evidence = state["evidence"]
-                claims = solve_claims_with_web_research(
-                    contract=contract,
-                    web_evidence=state["web_evidence"],
+                claims = solve_agent_state_claims(
+                    state=state,
                     explicit_web=explicit_web_search,
-                    solve_claims=lambda: self._run_solvers(
-                        contract=contract,
-                        plan=plan,
-                        papers=screened_papers,
-                        evidence=evidence,
+                    solve_claims=lambda item_contract, item_plan, item_papers, item_evidence: self._run_solvers(
+                        contract=item_contract,
+                        plan=item_plan,
+                        papers=item_papers,
+                        evidence=item_evidence,
                         session=session,
                         use_web_search=explicit_web_search,
                         max_web_results=max_web_results,
@@ -1007,15 +1003,14 @@ class ResearchAssistantAgentV4(
                 state["claims"] = []
                 state["verification"] = resolution.verification
         else:
-            claims = solve_claims_with_web_research(
-                contract=contract,
-                web_evidence=state["web_evidence"],
+            claims = solve_agent_state_claims(
+                state=state,
                 explicit_web=explicit_web_search,
-                solve_claims=lambda: self._run_solvers(
-                    contract=contract,
-                    plan=plan,
-                    papers=screened_papers,
-                    evidence=evidence,
+                solve_claims=lambda item_contract, item_plan, item_papers, item_evidence: self._run_solvers(
+                    contract=item_contract,
+                    plan=item_plan,
+                    papers=item_papers,
+                    evidence=item_evidence,
                     session=session,
                     use_web_search=explicit_web_search,
                     max_web_results=max_web_results,
