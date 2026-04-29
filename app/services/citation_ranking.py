@@ -22,6 +22,10 @@ CITATION_COUNT_PATTERNS = [
 
 RankLibraryPapersFn = Callable[..., list[dict[str, Any]]]
 HttpGetFn = Callable[..., Any]
+EmitFn = Callable[[str, dict[str, Any]], None]
+EmitToolCallFn = Callable[[str, dict[str, Any]], None]
+RecordObservationFn = Callable[[str, str, dict[str, Any]], None]
+SemanticScholarLookupFn = Callable[[str], EvidenceBlock | None]
 logger = logging.getLogger(__name__)
 
 
@@ -209,6 +213,82 @@ def semantic_scholar_citation_evidence(
             "title_overlap": best_overlap,
         },
     )
+
+
+def lookup_candidate_citation_counts(
+    *,
+    candidates: list[dict[str, str]],
+    max_web_results: int,
+    web_search: Any,
+    emit: EmitFn,
+    emit_tool_call: EmitToolCallFn,
+    record_observation: RecordObservationFn,
+    semantic_scholar_lookup: SemanticScholarLookupFn,
+) -> dict[str, Any]:
+    web_enabled = bool(getattr(web_search, "is_configured", False))
+    all_evidence: list[EvidenceBlock] = []
+    results: list[dict[str, Any]] = []
+    per_title_limit = max(2, min(int(max_web_results or 3), 4))
+    include_domains = [
+        "semanticscholar.org",
+        "openalex.org",
+        "paperswithcode.com",
+        "dblp.org",
+        "scholar.google.com",
+    ]
+    for candidate in candidates:
+        title = candidate["title"]
+        web_query = f"\"{title}\" citation count citations"
+        emit_tool_call(
+            "web_citation_lookup",
+            {
+                "title": title,
+                "query": web_query,
+                "max_results": per_title_limit,
+                "enabled": web_enabled,
+            },
+        )
+        evidence: list[EvidenceBlock] = []
+        if web_enabled:
+            direct_evidence = semantic_scholar_lookup(title)
+            if direct_evidence is not None:
+                evidence.append(direct_evidence)
+            if not evidence:
+                evidence = web_search.search(
+                    query=web_query,
+                    max_results=per_title_limit,
+                    topic="general",
+                    include_domains=include_domains,
+                )
+            if evidence:
+                emit("web_search", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
+                all_evidence.extend(evidence)
+        extracted = extract_citation_count_from_evidence(title=title, evidence=evidence)
+        result = {
+            **candidate,
+            "citation_count": extracted.get("citation_count"),
+            "source_title": extracted.get("source_title", ""),
+            "source_url": extracted.get("source_url", ""),
+            "doc_id": extracted.get("doc_id", ""),
+            "source_snippet": extracted.get("source_snippet", ""),
+        }
+        results.append(result)
+        summary = (
+            f"{title}: citations={result['citation_count']}"
+            if result["citation_count"] is not None
+            else f"{title}: citation count unavailable"
+        )
+        record_observation(
+            "web_citation_lookup",
+            summary,
+            {
+                "title": title,
+                "web_evidence_count": len(evidence),
+                "citation_count": result["citation_count"],
+                "source_url": result["source_url"],
+            },
+        )
+    return {"web_enabled": web_enabled, "results": results, "evidence": all_evidence}
 
 
 def format_citation_ranking_answer(

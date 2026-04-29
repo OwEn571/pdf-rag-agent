@@ -69,8 +69,8 @@ from app.services.clarification_intents import (
     store_pending_clarification,
 )
 from app.services.citation_ranking import (
-    extract_citation_count_from_evidence,
     format_citation_ranking_answer,
+    lookup_candidate_citation_counts,
     select_citation_ranking_candidates,
     semantic_scholar_citation_evidence,
 )
@@ -1104,73 +1104,25 @@ class ResearchAssistantAgentV4(
         emit: Callable[[str, dict[str, Any]], None],
         execution_steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        web_enabled = bool(self.web_search.is_configured)
-        all_evidence: list[EvidenceBlock] = []
-        results: list[dict[str, Any]] = []
-        per_title_limit = max(2, min(int(max_web_results or 3), 4))
-        include_domains = [
-            "semanticscholar.org",
-            "openalex.org",
-            "paperswithcode.com",
-            "dblp.org",
-            "scholar.google.com",
-        ]
-        for candidate in candidates:
-            title = candidate["title"]
-            web_query = f"\"{title}\" citation count citations"
-            self._emit_agent_tool_call(
+        return lookup_candidate_citation_counts(
+            candidates=candidates,
+            max_web_results=max_web_results,
+            web_search=self.web_search,
+            emit=emit,
+            emit_tool_call=lambda tool, arguments: self._emit_agent_tool_call(
                 emit=emit,
-                tool="web_citation_lookup",
-                arguments={
-                    "title": title,
-                    "query": web_query,
-                    "max_results": per_title_limit,
-                    "enabled": web_enabled,
-                },
-            )
-            evidence: list[EvidenceBlock] = []
-            if web_enabled:
-                direct_evidence = self._semantic_scholar_citation_evidence(title=title)
-                if direct_evidence is not None:
-                    evidence.append(direct_evidence)
-                if not evidence:
-                    evidence = self.web_search.search(
-                        query=web_query,
-                        max_results=per_title_limit,
-                        topic="general",
-                        include_domains=include_domains,
-                    )
-                if evidence:
-                    emit("web_search", {"count": len(evidence), "items": [item.model_dump() for item in evidence]})
-                    all_evidence.extend(evidence)
-            extracted = extract_citation_count_from_evidence(title=title, evidence=evidence)
-            result = {
-                **candidate,
-                "citation_count": extracted.get("citation_count"),
-                "source_title": extracted.get("source_title", ""),
-                "source_url": extracted.get("source_url", ""),
-                "doc_id": extracted.get("doc_id", ""),
-                "source_snippet": extracted.get("source_snippet", ""),
-            }
-            results.append(result)
-            summary = (
-                f"{title}: citations={result['citation_count']}"
-                if result["citation_count"] is not None
-                else f"{title}: citation count unavailable"
-            )
-            self._record_agent_observation(
+                tool=tool,
+                arguments=arguments,
+            ),
+            record_observation=lambda tool, summary, payload: self._record_agent_observation(
                 emit=emit,
                 execution_steps=execution_steps,
-                tool="web_citation_lookup",
+                tool=tool,
                 summary=summary,
-                payload={
-                    "title": title,
-                    "web_evidence_count": len(evidence),
-                    "citation_count": result["citation_count"],
-                    "source_url": result["source_url"],
-                },
-            )
-        return {"web_enabled": web_enabled, "results": results, "evidence": all_evidence}
+                payload=payload,
+            ),
+            semantic_scholar_lookup=lambda title: self._semantic_scholar_citation_evidence(title=title),
+        )
 
     def _semantic_scholar_citation_evidence(self, *, title: str) -> EvidenceBlock | None:
         return semantic_scholar_citation_evidence(

@@ -6,6 +6,7 @@ from app.domain.models import EvidenceBlock, SessionContext, SessionTurn
 from app.services.citation_ranking import (
     extract_citation_count_from_evidence,
     format_citation_ranking_answer,
+    lookup_candidate_citation_counts,
     parse_citation_count,
     select_citation_ranking_candidates,
     semantic_scholar_citation_evidence,
@@ -132,6 +133,66 @@ def test_semantic_scholar_citation_evidence_requires_tavily_client() -> None:
         timeout_seconds=3.0,
         http_get=lambda **_: None,
     ) is None
+
+
+def test_lookup_candidate_citation_counts_prefers_semantic_scholar_evidence() -> None:
+    class WebSearch:
+        is_configured = True
+
+        def search(self, **_: object) -> list[EvidenceBlock]:
+            raise AssertionError("fallback web search should not run")
+
+    events: list[tuple[str, dict[str, object]]] = []
+    tool_calls: list[tuple[str, dict[str, object]]] = []
+    observations: list[tuple[str, str, dict[str, object]]] = []
+    semantic_evidence = EvidenceBlock(
+        doc_id="web-ss",
+        paper_id="web-ss",
+        title="Example Paper | Semantic Scholar",
+        file_path="https://www.semanticscholar.org/paper/example",
+        page=0,
+        block_type="web",
+        snippet="Semantic Scholar citationCount: 99. Matched paper title: Example Paper.",
+        metadata={"source": "semantic_scholar"},
+    )
+
+    lookup = lookup_candidate_citation_counts(
+        candidates=[{"title": "Example Paper", "year": "2024", "paper_id": "p1", "reason": ""}],
+        max_web_results=9,
+        web_search=WebSearch(),
+        emit=lambda event, payload: events.append((event, payload)),
+        emit_tool_call=lambda tool, arguments: tool_calls.append((tool, arguments)),
+        record_observation=lambda tool, summary, payload: observations.append((tool, summary, payload)),
+        semantic_scholar_lookup=lambda title: semantic_evidence if title == "Example Paper" else None,
+    )
+
+    assert lookup["web_enabled"] is True
+    assert lookup["results"][0]["citation_count"] == 99
+    assert lookup["evidence"] == [semantic_evidence]
+    assert tool_calls[0][0] == "web_citation_lookup"
+    assert tool_calls[0][1]["max_results"] == 4
+    assert events[0][0] == "web_search"
+    assert observations[0][1] == "Example Paper: citations=99"
+
+
+def test_lookup_candidate_citation_counts_handles_disabled_web() -> None:
+    class WebSearch:
+        is_configured = False
+
+    observations: list[tuple[str, str, dict[str, object]]] = []
+    lookup = lookup_candidate_citation_counts(
+        candidates=[{"title": "Example Paper", "year": "2024", "paper_id": "p1", "reason": ""}],
+        max_web_results=1,
+        web_search=WebSearch(),
+        emit=lambda *_: None,
+        emit_tool_call=lambda *_: None,
+        record_observation=lambda tool, summary, payload: observations.append((tool, summary, payload)),
+        semantic_scholar_lookup=lambda _: None,
+    )
+
+    assert lookup["web_enabled"] is False
+    assert lookup["results"][0]["citation_count"] is None
+    assert observations[0][1] == "Example Paper: citation count unavailable"
 
 
 def test_citation_ranking_format_refuses_local_heuristic_without_web() -> None:
