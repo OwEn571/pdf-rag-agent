@@ -141,6 +141,8 @@ class FollowupRoutingMixin:
                 "如果用户沿用上一轮推荐/提到的论文并追问“具体说了啥”“讲了什么”“核心结论”“实验结果”“方法细节”，"
                 "必须把它改成 research + paper_summary_results，并把 targets 设为 conversation_context 中对应的论文标题；"
                 "记忆只用于解析指代，不能直接用 memory_followup 回答论文正文内容。"
+                "如果用户追问上一轮表格/实验里的“准确度/accuracy/metric 是怎么定义或计算的”，"
+                "必须把它改成 research + metric_value_lookup，并要求 table/caption/page_text 证据。"
                 "如果用户是在追问某技术/术语最早由哪篇论文提出，优先改成 origin_lookup。"
                 "如果用户是在纠正或核验上一轮 entity_definition 的来源，也优先考虑 origin_lookup 或带有 supporting_paper 的研究合同，"
                 "不要简单退回澄清。"

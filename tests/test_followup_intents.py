@@ -5,6 +5,7 @@ from app.services.followup_intents import (
     formula_query_allows_active_paper_context,
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
+    is_metric_definition_followup_query,
     is_memory_synthesis_query,
     is_negative_correction_query,
     looks_like_active_paper_reference,
@@ -53,6 +54,13 @@ def test_contextual_metric_query_requires_metric_signal_and_targets() -> None:
         targets=["PBA"],
         is_short_acronym=lambda target: len(target) <= 4 and target.isupper(),
     )
+
+
+def test_metric_definition_followup_requires_metric_context() -> None:
+    assert is_metric_definition_followup_query("这个准确度是怎么定义的？", has_metric_context=True)
+    assert is_metric_definition_followup_query("How is this accuracy defined?", has_metric_context=True)
+    assert not is_metric_definition_followup_query("这个准确度是多少？", has_metric_context=True)
+    assert not is_metric_definition_followup_query("这个准确度是怎么定义的？", has_metric_context=False)
 
 
 def test_formula_query_allows_active_paper_context_from_cues_and_names() -> None:

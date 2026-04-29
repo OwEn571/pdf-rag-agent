@@ -100,6 +100,36 @@ def test_normalize_conversation_contract_routes_language_preference_followup() -
     assert "answer_language_preference" in contract.notes
 
 
+def test_normalize_conversation_contract_routes_metric_definition_followup_to_research() -> None:
+    session = SessionContext(session_id="metric-definition")
+    session.set_active_research(
+        relation="metric_value_lookup",
+        targets=["ICA", "PBA"],
+        titles=["From 1,000,000 Users to Every User"],
+        requested_fields=["metric_value", "setting", "evidence"],
+        required_modalities=["table", "caption", "page_text"],
+        answer_shape="table",
+        precision_requirement="exact",
+        clean_query="ICA、PBA 在各数据集上的准确度是多少？",
+    )
+
+    contract = normalize_conversation_tool_contract(
+        contract=_base_contract("这个准确度是怎么定义的？"),
+        clean_query="这个准确度是怎么定义的？",
+        session=session,
+        paper_from_query_hint=lambda _: None,
+    )
+
+    assert contract.interaction_mode == "research"
+    assert contract.relation == "metric_value_lookup"
+    assert contract.continuation_mode == "followup"
+    assert contract.targets == ["ICA", "PBA"]
+    assert contract.requested_fields == ["metric_value", "metric_definition", "setting", "evidence"]
+    assert contract.required_modalities == ["table", "caption", "page_text"]
+    assert "metric_definition_followup" in contract.notes
+    assert "answer_slot=metric_definition" in contract.notes
+
+
 def test_normalize_conversation_contract_routes_memory_synthesis() -> None:
     session = SessionContext(
         session_id="memory-synthesis",

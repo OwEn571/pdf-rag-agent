@@ -83,6 +83,32 @@ FOLLOWUP_INTENT_MARKERS: dict[str, MarkerProfile] = {
         "score",
         "performance",
     ),
+    "metric_reference": (
+        "准确度",
+        "准确率",
+        "指标",
+        "分数",
+        "得分",
+        "结果",
+        "accuracy",
+        "metric",
+        "score",
+        "win rate",
+    ),
+    "metric_definition": (
+        "怎么定义",
+        "如何定义",
+        "怎么计算",
+        "如何计算",
+        "怎么算",
+        "计算方式",
+        "统计口径",
+        "评价口径",
+        "定义",
+        "defined",
+        "definition",
+        "calculated",
+    ),
     "formula_active_context": (
         "那",
         "这篇",
@@ -195,6 +221,25 @@ def looks_like_contextual_metric_query(
         return False
     acronym_targets = [target for target in targets if is_short_acronym(target)]
     return len(targets) >= 2 or bool(acronym_targets)
+
+
+def is_metric_definition_followup_query(query: str, *, has_metric_context: bool) -> bool:
+    if not has_metric_context:
+        return False
+    text, lowered, compact = _normalized_query_text(query)
+    has_metric_reference = _matches_query_text(
+        text,
+        lowered,
+        compact,
+        FOLLOWUP_INTENT_MARKERS["metric_reference"],
+    )
+    has_definition_request = _matches_query_text(
+        text,
+        lowered,
+        compact,
+        FOLLOWUP_INTENT_MARKERS["metric_definition"],
+    )
+    return has_metric_reference and has_definition_request
 
 
 def formula_query_allows_active_paper_context(

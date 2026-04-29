@@ -9,6 +9,7 @@ from app.services.conversation_memory_contract import active_memory_bindings
 from app.services.followup_intents import (
     is_formula_interpretation_followup_query,
     is_language_preference_followup,
+    is_metric_definition_followup_query,
     is_memory_synthesis_query,
     looks_like_formula_answer_correction,
 )
@@ -101,6 +102,37 @@ def normalize_conversation_tool_contract(
             precision_requirement="normal",
             continuation_mode="followup",
             notes=["agent_tool", "answer_language_preference"],
+        )
+    active_metric_context = active.relation == "metric_value_lookup" or bool(
+        {"metric_value", "setting", "results"} & {str(field) for field in active.requested_fields}
+    )
+    if is_metric_definition_followup_query(clean_query, has_metric_context=active_metric_context):
+        targets = list(active.targets) or list(contract.targets)
+        rewritten_query = clean_query
+        if targets:
+            rewritten_query = f"{', '.join(targets)} 的准确度/指标在论文中是怎么定义或计算的？"
+        requested_fields = ["metric_value", "metric_definition", "setting", "evidence"]
+        return QueryContract(
+            clean_query=rewritten_query,
+            interaction_mode="research",
+            relation="metric_value_lookup",
+            targets=targets,
+            requested_fields=requested_fields,
+            required_modalities=["table", "caption", "page_text"],
+            answer_shape="bullets",
+            precision_requirement="exact",
+            continuation_mode="followup",
+            allow_web_search=contract.allow_web_search,
+            notes=list(
+                dict.fromkeys(
+                    [
+                        *contract.notes,
+                        "metric_definition_followup",
+                        "resolved_from_active_metric_context",
+                        *[f"answer_slot={field}" for field in requested_fields],
+                    ]
+                )
+            ),
         )
     if is_memory_synthesis_query(clean_query) and (
         len(active_memory_bindings(session)) >= 2
