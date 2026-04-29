@@ -45,6 +45,18 @@ def test_normalize_plan_verification_and_confidence_events_add_protocol_fields()
     assert unknown_confidence["basis"] == "unknown"
 
 
+def test_normalize_thinking_and_ask_human_events_add_protocol_fields() -> None:
+    thinking = normalize_agent_event("thinking_delta", {"delta": "checking evidence"})
+    ask_human = normalize_agent_event("ask_human", {"question": "选哪篇？", "options": "bad"})
+
+    assert thinking["type"] == "thinking_delta"
+    assert thinking["text"] == "checking evidence"
+    assert ask_human["type"] == "ask_human"
+    assert ask_human["question"] == "选哪篇？"
+    assert ask_human["options"] == []
+    assert ask_human["reason"] == ""
+
+
 def test_observation_events_record_tool_metrics(monkeypatch) -> None:
     calls = _CounterProbe()
     latency = _HistogramProbe()

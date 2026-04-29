@@ -22,9 +22,14 @@ def normalize_agent_event(event: str, data: dict[str, Any]) -> dict[str, Any]:
         payload.setdefault("ok", True)
         payload.setdefault("output", output if isinstance(output, dict) else {"value": output})
         payload.setdefault("took_ms", None)
-    elif event == "answer_delta":
+    elif event in {"thinking_delta", "answer_delta"}:
         text = str(payload.get("text", payload.get("delta", payload.get("content", ""))) or "")
         payload.setdefault("text", text)
+    elif event == "ask_human":
+        payload.setdefault("question", str(payload.get("question", "") or ""))
+        options = payload.get("options", [])
+        payload["options"] = options if isinstance(options, list) else []
+        payload.setdefault("reason", str(payload.get("reason", "") or ""))
     elif event == "plan":
         payload.setdefault("payload", dict(data))
         payload.setdefault("items", _plan_items(payload))
@@ -46,7 +51,9 @@ def _event_type(event: str) -> str:
     return {
         "tool_call": "tool_use",
         "observation": "tool_result",
+        "thinking_delta": "thinking_delta",
         "answer_delta": "answer_delta",
+        "ask_human": "ask_human",
         "plan": "plan",
         "verification": "verification",
         "confidence": "confidence",
