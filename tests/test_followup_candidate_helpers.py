@@ -6,6 +6,7 @@ from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
+    followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_target_aliases,
@@ -15,6 +16,26 @@ from app.services.followup_candidate_helpers import (
     relationship_evidence_ids_from_payload,
     selected_followup_candidate_title,
 )
+
+
+def _evidence(
+    doc_id: str,
+    paper_id: str,
+    *,
+    score: float = 1.0,
+    page: int = 1,
+    snippet: str = "snippet",
+) -> EvidenceBlock:
+    return EvidenceBlock(
+        doc_id=doc_id,
+        paper_id=paper_id,
+        title=f"Paper {paper_id}",
+        file_path=f"{paper_id}.pdf",
+        page=page,
+        block_type="page_text",
+        snippet=snippet,
+        score=score,
+    )
 
 
 def test_selected_followup_candidate_title_reads_contract_note() -> None:
@@ -204,3 +225,54 @@ def test_followup_validator_assessment_from_payload_normalizes_defaults() -> Non
     assert assessment["reason"] == "uses the seed benchmark"
     assert assessment["confidence"] == 0.91
     assert assessment["evidence_ids"] == ["candidate-doc"]
+
+
+def test_followup_relationship_evidence_filters_and_sorts_pair_without_expansion() -> None:
+    contract = QueryContract(clean_query="后续关系", targets=["Seed"])
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper")
+    candidate = CandidatePaper(paper_id="candidate", title="Candidate Paper")
+    evidence = [
+        *[_evidence(f"seed-{index}", "seed", score=0.5 + index, page=index) for index in range(1, 4)],
+        *[_evidence(f"candidate-{index}", "candidate", score=0.7 + index, page=index) for index in range(1, 4)],
+        _evidence("other-1", "other"),
+    ]
+
+    selected = followup_relationship_evidence(
+        contract=contract,
+        seed_papers=[seed],
+        paper=candidate,
+        evidence=evidence,
+        expand_evidence=lambda *_: (_ for _ in ()).throw(AssertionError("unexpected expansion")),
+    )
+
+    assert [item.paper_id for item in selected] == ["candidate", "candidate", "candidate", "seed", "seed", "seed"]
+    assert selected[0].doc_id == "candidate-3"
+
+
+def test_followup_relationship_evidence_expands_when_pair_evidence_is_sparse() -> None:
+    contract = QueryContract(clean_query="后续关系", targets=["Seed"])
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper")
+    candidate = CandidatePaper(paper_id="candidate", title="Candidate Paper")
+    calls: list[tuple[list[str], str, QueryContract, int]] = []
+
+    def _expand(paper_ids: list[str], query: str, evidence_contract: QueryContract, limit: int) -> list[EvidenceBlock]:
+        calls.append((paper_ids, query, evidence_contract, limit))
+        return [
+            _evidence("candidate-1", "candidate", score=3.0),
+            _evidence("expanded-seed", "seed", score=2.0),
+        ]
+
+    selected = followup_relationship_evidence(
+        contract=contract,
+        seed_papers=[seed],
+        paper=candidate,
+        evidence=[_evidence("candidate-1", "candidate", score=1.0)],
+        expand_evidence=_expand,
+    )
+
+    assert calls
+    assert calls[0][0] == ["seed", "candidate"]
+    assert "uses evaluates benchmark" in calls[0][1]
+    assert calls[0][2].required_modalities == ["page_text", "paper_card"]
+    assert calls[0][3] == 12
+    assert [item.doc_id for item in selected] == ["candidate-1", "expanded-seed"]

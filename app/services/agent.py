@@ -118,6 +118,7 @@ from app.services.evidence_presentation import (
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
+    followup_relationship_evidence,
     followup_relationship_validator_human_prompt,
     followup_relationship_validator_system_prompt,
     followup_target_aliases,
@@ -3679,11 +3680,17 @@ class ResearchAssistantAgentV4(
         paper: CandidatePaper,
         evidence: list[EvidenceBlock],
     ) -> dict[str, Any]:
-        relationship_evidence = self._followup_relationship_evidence(
+        relationship_evidence = followup_relationship_evidence(
             contract=contract,
             seed_papers=seed_papers,
             paper=paper,
             evidence=evidence,
+            expand_evidence=lambda paper_ids, query, evidence_contract, limit: self.retriever.expand_evidence(
+                paper_ids=paper_ids,
+                query=query,
+                contract=evidence_contract,
+                limit=limit,
+            ),
         )
         llm_assessment = self._llm_validate_followup_candidate(
             contract=contract,
@@ -3711,37 +3718,6 @@ class ResearchAssistantAgentV4(
             "strict_followup": str(fallback["strength"]) == "direct",
             "evidence_ids": [item.doc_id for item in relationship_evidence[:4]],
         }
-
-    def _followup_relationship_evidence(
-        self,
-        *,
-        contract: QueryContract,
-        seed_papers: list[CandidatePaper],
-        paper: CandidatePaper,
-        evidence: list[EvidenceBlock],
-    ) -> list[EvidenceBlock]:
-        seed_ids = [item.paper_id for item in seed_papers[:2]]
-        pair_ids = list(dict.fromkeys([*seed_ids, paper.paper_id]))
-        selected = [item for item in evidence if item.paper_id in set(pair_ids)]
-        if len(selected) < 6:
-            query_parts = [
-                contract.clean_query,
-                " ".join(contract.targets),
-                paper.title,
-                "uses evaluates benchmark extends cites dataset method follow-up",
-            ]
-            expanded = self.retriever.expand_evidence(
-                paper_ids=pair_ids,
-                query=" ".join(part for part in query_parts if part),
-                contract=contract.model_copy(update={"required_modalities": ["page_text", "paper_card"]}),
-                limit=12,
-            )
-            by_id = {item.doc_id: item for item in selected}
-            for item in expanded:
-                by_id.setdefault(item.doc_id, item)
-            selected = list(by_id.values())
-        selected.sort(key=lambda item: (0 if item.paper_id == paper.paper_id else 1, -item.score, item.page, item.doc_id))
-        return selected[:12]
 
     def _llm_validate_followup_candidate(
         self,

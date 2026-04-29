@@ -12,6 +12,7 @@ from app.services.followup_relationship_intents import has_followup_domain_signa
 PaperText = Callable[[str], str]
 PaperAnchor = Callable[[CandidatePaper], str]
 ConfidenceCoercer = Callable[[Any], float]
+EvidenceExpander = Callable[[list[str], str, QueryContract, int], list[EvidenceBlock]]
 
 
 def selected_followup_candidate_title(contract: QueryContract) -> str:
@@ -224,3 +225,35 @@ def followup_validator_assessment_from_payload(
             relationship_evidence=relationship_evidence,
         ),
     }
+
+
+def followup_relationship_evidence(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    evidence: list[EvidenceBlock],
+    expand_evidence: EvidenceExpander,
+) -> list[EvidenceBlock]:
+    seed_ids = [item.paper_id for item in seed_papers[:2]]
+    pair_ids = list(dict.fromkeys([*seed_ids, paper.paper_id]))
+    selected = [item for item in evidence if item.paper_id in set(pair_ids)]
+    if len(selected) < 6:
+        query_parts = [
+            contract.clean_query,
+            " ".join(contract.targets),
+            paper.title,
+            "uses evaluates benchmark extends cites dataset method follow-up",
+        ]
+        expanded = expand_evidence(
+            pair_ids,
+            " ".join(part for part in query_parts if part),
+            contract.model_copy(update={"required_modalities": ["page_text", "paper_card"]}),
+            12,
+        )
+        by_id = {item.doc_id: item for item in selected}
+        for item in expanded:
+            by_id.setdefault(item.doc_id, item)
+        selected = list(by_id.values())
+    selected.sort(key=lambda item: (0 if item.paper_id == paper.paper_id else 1, -item.score, item.page, item.doc_id))
+    return selected[:12]
