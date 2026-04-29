@@ -18,14 +18,12 @@ from app.services.agent_runtime_helpers import (
     agent_loop_summary,
     configured_max_steps,
     conversation_runtime_state,
+    finalize_research_verification,
     next_conversation_action,
     next_research_action,
     research_runtime_state,
     tool_loop_ready_tool,
-)
-from app.services.confidence import (
-    confidence_from_verification_report,
-    confidence_payload,
+    verification_execution_step,
 )
 from app.services.tool_registry_helpers import (
     tool_input_from_state,
@@ -168,19 +166,10 @@ class AgentRuntime:
             emit=emit,
             execution_steps=execution_steps,
         )
-        verification = state.get("verification")
-        if not isinstance(verification, VerificationReport):
-            verification = VerificationReport(
-                status="clarify",
-                missing_fields=["verified_claims"],
-                recommended_action="clarify_after_reflection",
-            )
-            state["verification"] = verification
+        verification, confidence = finalize_research_verification(state)
         emit("verification", verification.model_dump())
-        runtime_confidence = confidence_from_verification_report(verification)
-        state["confidence"] = confidence_payload(runtime_confidence)
-        emit("confidence", state["confidence"])
-        execution_steps.append({"node": "agent_tool:verify_claim", "summary": verification.status})
+        emit("confidence", confidence)
+        execution_steps.append(verification_execution_step(verification))
         return state
 
     def _execute_tool_loop(

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.models import QueryContract
-from app.services.confidence import confidence_from_contract, should_ask_human
+from app.domain.models import QueryContract, VerificationReport
+from app.services.confidence import (
+    confidence_from_contract,
+    confidence_from_verification_report,
+    confidence_payload,
+    should_ask_human,
+)
 from app.services.tool_registry_helpers import tool_inputs_by_name
 
 
@@ -50,6 +55,24 @@ def agent_loop_summary(actions: list[str]) -> str:
 
 def tool_loop_ready_tool(actions: list[str]) -> str:
     return "search_corpus" if "search_corpus" in actions else "compose"
+
+
+def finalize_research_verification(state: dict[str, Any]) -> tuple[VerificationReport, dict[str, Any]]:
+    verification = state.get("verification")
+    if not isinstance(verification, VerificationReport):
+        verification = VerificationReport(
+            status="clarify",
+            missing_fields=["verified_claims"],
+            recommended_action="clarify_after_reflection",
+        )
+        state["verification"] = verification
+    confidence = confidence_payload(confidence_from_verification_report(verification))
+    state["confidence"] = confidence
+    return verification, confidence
+
+
+def verification_execution_step(verification: VerificationReport) -> dict[str, str]:
+    return {"node": "agent_tool:verify_claim", "summary": verification.status}
 
 
 def configured_max_steps(agent_settings: Any, *, fallback: int) -> int:

@@ -8,10 +8,12 @@ from app.services.agent_runtime_helpers import (
     configured_max_steps,
     contract_needs_human_clarification,
     conversation_runtime_state,
+    finalize_research_verification,
     next_conversation_action,
     next_research_action,
     research_runtime_state,
     tool_loop_ready_tool,
+    verification_execution_step,
 )
 
 
@@ -59,6 +61,29 @@ def test_runtime_helpers_detect_clarification_need_from_contract_confidence() ->
         QueryContract(clean_query="x", notes=["ambiguous_slot=paper_title"]),
         settings,
     ) is True
+
+
+def test_runtime_helpers_finalize_research_verification_and_confidence() -> None:
+    missing_state: dict[str, object] = {}
+    verification, confidence = finalize_research_verification(missing_state)
+
+    assert verification.status == "clarify"
+    assert verification.missing_fields == ["verified_claims"]
+    assert missing_state["verification"] == verification
+    assert missing_state["confidence"] == confidence
+    assert confidence["basis"] == "verifier"
+    assert confidence["score"] == 0.0
+    assert verification_execution_step(verification) == {
+        "node": "agent_tool:verify_claim",
+        "summary": "clarify",
+    }
+
+    pass_state = {"verification": verification.model_copy(update={"status": "pass", "missing_fields": []})}
+    passed, passed_confidence = finalize_research_verification(pass_state)
+
+    assert passed.status == "pass"
+    assert passed_confidence["score"] > 0.8
+    assert pass_state["verification"] == passed
 
 
 def test_runtime_helpers_choose_next_conversation_action() -> None:
