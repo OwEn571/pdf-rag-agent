@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from app.domain.models import ActiveResearch, SessionContext, SessionTurn
 from app.services.session_context_helpers import (
+    apply_session_history_compression,
     make_active_research,
     session_conversation_context,
+    session_history_compression_payload,
+    session_history_compression_system_prompt,
+    session_history_compression_window,
     session_llm_history_messages,
     truncate_context_text,
 )
@@ -80,6 +84,23 @@ def test_session_llm_history_messages_include_summary_and_metadata() -> None:
     assert messages[2]["role"] == "assistant"
     assert "an..." in messages[2]["content"]
     assert '"relation": "formula_lookup"' in messages[2]["content"]
+
+
+def test_session_history_compression_helpers_build_payload_and_apply() -> None:
+    session = SessionContext(session_id="history", summary="old summary", turns=[_turn(index, answer="x" * 500) for index in range(8)])
+
+    retained_turns, older_turns = session_history_compression_window(session, max_turns=8)
+    payload = session_history_compression_payload(session, older_turns=older_turns)
+
+    assert retained_turns == 4
+    assert len(older_turns) == 4
+    assert "会话记忆压缩器" in session_history_compression_system_prompt()
+    assert payload["existing_summary"] == "old summary"
+    assert payload["older_turns"][0]["answer"] == "x" * 320
+
+    apply_session_history_compression(session, compressed="new summary", retained_turns=retained_turns)
+    assert session.summary == "new summary"
+    assert [turn.query for turn in session.turns] == ["q4", "q5", "q6", "q7"]
 
 
 def test_truncate_context_text_strips_and_limits() -> None:

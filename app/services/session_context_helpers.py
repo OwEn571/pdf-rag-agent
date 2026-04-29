@@ -64,6 +64,60 @@ def make_active_research(
     return active
 
 
+def session_history_compression_window(
+    session: SessionContext,
+    *,
+    max_turns: int,
+) -> tuple[int, list[SessionTurn]]:
+    if len(session.turns) < max(6, max_turns - 1):
+        return 0, []
+    retained_turns = max(4, max_turns // 2)
+    older_turns = session.turns[:-retained_turns]
+    if not older_turns:
+        return retained_turns, []
+    return retained_turns, older_turns
+
+
+def session_history_compression_system_prompt() -> str:
+    return (
+        "你是研究助手的会话记忆压缩器。"
+        "请把较早的对话压缩成简洁中文摘要，保留："
+        "1. 主要研究主题和实体；"
+        "2. 已经回答过的问题类型（如公式、定义、实验结果、图表）；"
+        "3. 仍然可能被继续追问的开放上下文。"
+        "不要编造。输出 3-6 句纯文本摘要。"
+    )
+
+
+def session_history_compression_payload(session: SessionContext, *, older_turns: list[SessionTurn]) -> dict[str, Any]:
+    return {
+        "existing_summary": session.summary,
+        "older_turns": [
+            {
+                "query": turn.query,
+                "relation": turn.relation,
+                "interaction_mode": turn.interaction_mode,
+                "targets": turn.targets,
+                "requested_fields": turn.requested_fields,
+                "answer_shape": turn.answer_shape,
+                "answer": turn.answer[:320],
+            }
+            for turn in older_turns
+        ],
+    }
+
+
+def apply_session_history_compression(
+    session: SessionContext,
+    *,
+    compressed: str,
+    retained_turns: int,
+) -> None:
+    if compressed:
+        session.summary = compressed
+    session.turns = session.turns[-retained_turns:]
+
+
 def turn_context_payload(turn: SessionTurn, *, answer_limit: int) -> dict[str, Any]:
     return {
         "user_query": turn.query,
