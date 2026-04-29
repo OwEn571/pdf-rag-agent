@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from app.domain.models import Claim, EvidenceBlock, QueryContract
+from app.services.intent_marker_matching import query_matches_any
 from app.services.web_evidence import (
+    WEB_EVIDENCE_MARKERS,
     build_web_research_claim,
     claims_with_web_research_claim,
     collect_web_evidence,
@@ -25,6 +27,7 @@ def test_web_evidence_builds_query_and_research_domains() -> None:
 
     assert web_query_text(contract) == "最新的多模态 RAG 论文有哪些？ paper arXiv publication"
     assert web_search_topic("today news about RAG") == "news"
+    assert query_matches_any("paper", "", WEB_EVIDENCE_MARKERS["research_domain"])
     assert "arxiv.org" in web_include_domains(contract)
 
 

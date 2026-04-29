@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.domain.models import Claim, EvidenceBlock, QueryContract
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.research_planning import research_plan_goals
 
 
@@ -17,6 +18,11 @@ WEB_RESEARCH_DOMAINS = [
     "papers.nips.cc",
     "thecvf.com",
 ]
+
+WEB_EVIDENCE_MARKERS: dict[str, MarkerProfile] = {
+    "news_topic": ("新闻", "news", "today", "昨天", "今天"),
+    "research_domain": ("论文", "paper", "arxiv", "研究", "publication"),
+}
 
 WebEvidenceCollector = Callable[[QueryContract, bool, int, str], list[EvidenceBlock]]
 WebClaimBuilder = Callable[[QueryContract, list[EvidenceBlock]], Claim]
@@ -56,7 +62,7 @@ def web_query_text(contract: QueryContract) -> str:
 
 def web_search_topic(query: str) -> str:
     lowered = str(query or "").lower()
-    if any(token in lowered for token in ["新闻", "news", "today", "昨天", "今天"]):
+    if query_matches_any(lowered, "", WEB_EVIDENCE_MARKERS["news_topic"]):
         return "news"
     return "general"
 
@@ -65,7 +71,7 @@ def web_include_domains(contract: QueryContract) -> list[str]:
     query = contract.clean_query.lower()
     goals = research_plan_goals(contract)
     if goals & {"recommended_papers", "followup_papers", "summary", "results", "answer", "general_answer"}:
-        if any(token in query for token in ["论文", "paper", "arxiv", "研究", "publication"]):
+        if query_matches_any(query, "", WEB_EVIDENCE_MARKERS["research_domain"]):
             return list(WEB_RESEARCH_DOMAINS)
     return []
 
