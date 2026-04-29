@@ -7,11 +7,48 @@ from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract
 from app.services.confidence import coerce_confidence_value
+from app.services.intent_marker_matching import (
+    MarkerProfile,
+    normalized_query_text,
+    query_matches_any,
+)
 
 
 FormulaTermExtractor = Callable[[str], list[str]]
 FormulaBlockScorer = Callable[[str], float]
 TargetMatcher = Callable[[str, str], bool]
+
+FORMULA_TEXT_MARKERS: dict[str, MarkerProfile] = {
+    "formula_window": (
+        "=",
+        "∇",
+        "sigma",
+        "σ",
+        "mathcal",
+        "frac",
+        "π",
+        " pi",
+        "loss",
+        "objective",
+        "l_",
+    ),
+    "formula_noise": ("what does", "mechanistic understanding", "theoretical properties", "in section"),
+    "latex": ("\\mathcal", "\\frac", "\\pi_", "\\sigma", "\\nabla"),
+    "objective": ("objective", "loss", "目标函数", "损失"),
+    "gradient": ("\\nabla", "∇", "gradient", "梯度"),
+    "appendix_noise": ("a.4", "appendix", "plackett-luce", "rankings"),
+    "gradient_query": (
+        "gradient",
+        "grad",
+        "derivative",
+        "update",
+        "梯度",
+        "导数",
+        "求导",
+        "更新",
+        "推导",
+    ),
+}
 
 
 def formula_extractor_system_prompt() -> str:
@@ -394,13 +431,11 @@ def best_formula_window(text: str) -> str:
     if not lines:
         return ""
     scored: list[tuple[float, int]] = []
-    formula_tokens = ["=", "∇", "sigma", "σ", "mathcal", "frac", "π", " pi", "loss", "objective", "l_"]
-    noise_tokens = ["what does", "mechanistic understanding", "theoretical properties", "in section"]
     for index, line in enumerate(lines):
         lowered = line.lower()
-        score = sum(1.0 for token in formula_tokens if token in lowered)
+        score = sum(1.0 for token in FORMULA_TEXT_MARKERS["formula_window"] if token in lowered)
         score += min(2.0, lowered.count("="))
-        score -= sum(1.2 for token in noise_tokens if token in lowered)
+        score -= sum(1.2 for token in FORMULA_TEXT_MARKERS["formula_noise"] if token in lowered)
         scored.append((score, index))
     _, best_index = max(scored, key=lambda item: (item[0], -item[1]))
     start = max(0, best_index - 1)
@@ -411,7 +446,7 @@ def best_formula_window(text: str) -> str:
 
 
 def looks_like_latex_formula(text: str) -> bool:
-    return any(token in str(text or "") for token in ["\\mathcal", "\\frac", "\\pi_", "\\sigma", "\\nabla"])
+    return query_matches_any(str(text or ""), "", FORMULA_TEXT_MARKERS["latex"])
 
 
 def formula_block_score(
@@ -426,21 +461,17 @@ def formula_block_score(
         if str(token).lower() in haystack:
             score += float(weight)
     if query is not None and not formula_query_wants_gradient(query):
-        if any(token in haystack for token in ["objective", "loss", "目标函数", "损失"]):
+        if query_matches_any(haystack, "", FORMULA_TEXT_MARKERS["objective"]):
             score += 2.5
-        if any(token in haystack for token in ["\\nabla", "∇", "gradient", "梯度"]):
+        if query_matches_any(haystack, "", FORMULA_TEXT_MARKERS["gradient"]):
             score -= 2.5
     if "figure " in haystack or haystack.startswith("figure"):
         score -= 2.0
-    if any(token in haystack for token in ["a.4", "appendix", "plackett-luce", "rankings"]):
+    if query_matches_any(haystack, "", FORMULA_TEXT_MARKERS["appendix_noise"]):
         score -= 4.0
     return max(0.0, score)
 
 
 def formula_query_wants_gradient(query: str) -> bool:
-    normalized = " ".join(str(query or "").lower().split())
-    compact = normalized.replace(" ", "")
-    return any(
-        marker in normalized or marker in compact
-        for marker in ["gradient", "grad", "derivative", "update", "梯度", "导数", "求导", "更新", "推导"]
-    )
+    normalized, compact = normalized_query_text(query)
+    return query_matches_any(normalized, compact, FORMULA_TEXT_MARKERS["gradient_query"])

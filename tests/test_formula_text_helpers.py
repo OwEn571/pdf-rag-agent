@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
+from app.services.intent_marker_matching import query_matches_any
 from app.services.formula_text_helpers import (
+    FORMULA_TEXT_MARKERS,
     best_formula_window,
     fallback_formula_payload,
     formula_block_score,
@@ -15,7 +18,6 @@ from app.services.formula_text_helpers import (
     normalize_formula_variables,
     select_formula_blocks,
 )
-from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 
 
 def _evidence(doc_id: str, *, snippet: str, page: int = 1) -> EvidenceBlock:
@@ -69,8 +71,17 @@ def test_best_formula_window_prefers_formula_line_over_explanatory_noise() -> No
 def test_formula_block_score_penalizes_gradient_when_query_wants_objective() -> None:
     weights = {"formula": 1.0, "gradient": 1.0}
 
-    objective_score = formula_block_score("formula objective loss", query="PBA 公式是什么？", token_weights=weights)
-    gradient_score = formula_block_score("formula gradient ∇θ", query="PBA 公式是什么？", token_weights=weights)
+    assert query_matches_any("gradient", "gradient", FORMULA_TEXT_MARKERS["gradient_query"])
+    objective_score = formula_block_score(
+        "formula objective loss",
+        query="PBA 公式是什么？",
+        token_weights=weights,
+    )
+    gradient_score = formula_block_score(
+        "formula gradient ∇θ",
+        query="PBA 公式是什么？",
+        token_weights=weights,
+    )
 
     assert objective_score > gradient_score
     assert formula_query_wants_gradient("PBA 梯度怎么更新？")
