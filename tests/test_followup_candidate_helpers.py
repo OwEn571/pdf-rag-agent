@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+
 from app.domain.models import CandidatePaper, EvidenceBlock, QueryContract
 from app.services.followup_candidate_helpers import (
     candidate_title_matches,
     filter_followup_candidates,
+    followup_relationship_validator_human_prompt,
+    followup_relationship_validator_system_prompt,
     followup_target_aliases,
+    followup_validator_assessment_from_payload,
     merge_followup_rankings,
     paper_relationship_brief,
     relationship_evidence_ids_from_payload,
@@ -124,3 +129,78 @@ def test_paper_relationship_brief_truncates_card_and_injects_summary() -> None:
     assert brief["paper_id"] == "p1"
     assert brief["summary"] == "summary:p1"
     assert len(brief["paper_card_text"]) == 1800
+
+
+def test_followup_relationship_validator_prompts_build_role_payload() -> None:
+    contract = QueryContract(clean_query="Candidate 是否是 Seed 的严格后续工作？", targets=["Seed"])
+    seed = CandidatePaper(paper_id="seed", title="Seed Paper", metadata={"paper_card_text": "seed card"})
+    candidate = CandidatePaper(paper_id="candidate", title="Candidate Paper", metadata={"paper_card_text": "candidate card"})
+    evidence = [
+        EvidenceBlock(
+            doc_id="seed-doc",
+            paper_id="seed",
+            title="Seed Paper",
+            file_path="seed.pdf",
+            page=1,
+            block_type="page_text",
+            snippet="seed evidence",
+        ),
+        EvidenceBlock(
+            doc_id="candidate-doc",
+            paper_id="candidate",
+            title="Candidate Paper",
+            file_path="candidate.pdf",
+            page=2,
+            block_type="page_text",
+            snippet="x" * 950,
+        ),
+    ]
+
+    assert "strict_followup" in followup_relationship_validator_system_prompt()
+    payload = json.loads(
+        followup_relationship_validator_human_prompt(
+            contract=contract,
+            seed_papers=[seed],
+            paper=candidate,
+            relationship_evidence=evidence,
+            paper_summary_text=lambda paper_id: f"summary:{paper_id}",
+        )
+    )
+
+    assert payload["seed_papers"][0]["summary"] == "summary:seed"
+    assert payload["candidate_paper"]["paper_id"] == "candidate"
+    assert [item["role"] for item in payload["relationship_evidence"]] == ["seed", "candidate"]
+    assert len(payload["relationship_evidence"][1]["snippet"]) == 900
+
+
+def test_followup_validator_assessment_from_payload_normalizes_defaults() -> None:
+    evidence = [
+        EvidenceBlock(
+            doc_id="candidate-doc",
+            paper_id="candidate",
+            title="Candidate Paper",
+            file_path="candidate.pdf",
+            page=2,
+            block_type="page_text",
+            snippet="candidate evidence",
+        )
+    ]
+
+    assessment = followup_validator_assessment_from_payload(
+        payload={
+            "classification": "strict_followup",
+            "strict_followup": True,
+            "relationship_strength": "unexpected",
+            "reason": "  uses the seed benchmark  ",
+            "confidence": "0.91",
+            "evidence_ids": ["candidate-doc", "missing"],
+        },
+        relationship_evidence=evidence,
+        coerce_confidence=lambda value: float(value),
+    )
+
+    assert assessment["relationship_strength"] == "direct"
+    assert assessment["relation_type"] == "严格后续/直接使用证据"
+    assert assessment["reason"] == "uses the seed benchmark"
+    assert assessment["confidence"] == 0.91
+    assert assessment["evidence_ids"] == ["candidate-doc"]

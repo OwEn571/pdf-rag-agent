@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from typing import Any
@@ -10,6 +11,7 @@ from app.services.followup_relationship_intents import has_followup_domain_signa
 
 PaperText = Callable[[str], str]
 PaperAnchor = Callable[[CandidatePaper], str]
+ConfidenceCoercer = Callable[[Any], float]
 
 
 def selected_followup_candidate_title(contract: QueryContract) -> str:
@@ -133,4 +135,92 @@ def paper_relationship_brief(
         "summary": paper_summary_text(paper.paper_id),
         "paper_card_text": str(paper.metadata.get("paper_card_text", ""))[:1800],
         "tags": str(paper.metadata.get("tags", "")),
+    }
+
+
+def followup_relationship_validator_system_prompt() -> str:
+    return (
+        "你是论文关系验证器。"
+        "任务是判断候选论文是否是种子论文/数据集/方法的严格后续工作。"
+        "严格后续只在证据明确显示候选论文使用、继承、引用、复现、评测或直接扩展种子论文/数据集/方法时成立。"
+        "仅主题相似、作者重合、关键词相同，不能判为严格后续，只能判为 related_continuation 或 not_enough_evidence。"
+        "只能基于输入的 seed_papers、candidate_paper 和 relationship_evidence 判断，不要使用外部记忆补事实。"
+        "relationship_evidence 中 role=candidate 的片段必须出现明确引用/使用/评测/继承/扩展 seed 或其数据集/方法，才可以判 strict_followup 或 direct_use_or_evaluation。"
+        "只输出 JSON：classification, strict_followup, relation_type, relationship_strength, reason, confidence, evidence_ids。"
+        "classification 只能是 strict_followup, direct_use_or_evaluation, related_continuation, not_enough_evidence, unrelated。"
+        "relationship_strength 只能是 direct, strong_related, not_enough_evidence, unrelated。"
+    )
+
+
+def followup_relationship_validator_human_prompt(
+    *,
+    contract: QueryContract,
+    seed_papers: list[CandidatePaper],
+    paper: CandidatePaper,
+    relationship_evidence: list[EvidenceBlock],
+    paper_summary_text: PaperText,
+) -> str:
+    return json.dumps(
+        {
+            "query": contract.clean_query,
+            "targets": contract.targets,
+            "seed_papers": [
+                paper_relationship_brief(paper=item, paper_summary_text=paper_summary_text)
+                for item in seed_papers[:2]
+            ],
+            "candidate_paper": paper_relationship_brief(paper=paper, paper_summary_text=paper_summary_text),
+            "relationship_evidence": [
+                {
+                    "doc_id": item.doc_id,
+                    "paper_id": item.paper_id,
+                    "role": "candidate" if item.paper_id == paper.paper_id else "seed",
+                    "title": item.title,
+                    "page": item.page,
+                    "block_type": item.block_type,
+                    "snippet": item.snippet[:900],
+                }
+                for item in relationship_evidence
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def followup_validator_assessment_from_payload(
+    *,
+    payload: object,
+    relationship_evidence: list[EvidenceBlock],
+    coerce_confidence: ConfidenceCoercer,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {}
+    classification = str(payload.get("classification", "") or "").strip()
+    strength = str(payload.get("relationship_strength", "") or "").strip()
+    if strength not in {"direct", "strong_related", "not_enough_evidence", "unrelated"}:
+        if classification in {"strict_followup", "direct_use_or_evaluation"}:
+            strength = "direct"
+        elif classification == "related_continuation":
+            strength = "strong_related"
+        elif classification == "unrelated":
+            strength = "unrelated"
+        else:
+            strength = "not_enough_evidence"
+    strict = bool(payload.get("strict_followup", False)) and strength == "direct"
+    relation_type = str(payload.get("relation_type", "") or "").strip()
+    if not relation_type:
+        relation_type = "严格后续/直接使用证据" if strict else ("强相关延续候选" if strength == "strong_related" else "证据不足")
+    reason = " ".join(str(payload.get("reason", "") or "").split())
+    if not reason:
+        reason = "关系验证器没有找到足够明确的严格后续证据。"
+    return {
+        "relation_type": relation_type,
+        "reason": reason,
+        "confidence": coerce_confidence(payload.get("confidence", 0.68)),
+        "relationship_strength": strength,
+        "strict_followup": strict,
+        "classification": classification,
+        "evidence_ids": relationship_evidence_ids_from_payload(
+            payload=payload,
+            relationship_evidence=relationship_evidence,
+        ),
     }
