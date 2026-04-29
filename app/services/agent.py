@@ -73,6 +73,9 @@ from app.services.contract_normalization import (
 )
 from app.services.contextual_contract_helpers import (
     active_paper_reference_notes,
+    formula_answer_correction_contract,
+    formula_contextual_paper_contract,
+    formula_location_followup_contract,
     promote_contextual_metric_contract,
 )
 from app.services.conversation_memory_contract import (
@@ -2059,7 +2062,9 @@ class ResearchAssistantAgentV4(
         active = session.effective_active_research()
         active_formula = active.relation == "formula_lookup" or "formula" in {str(field) for field in active.requested_fields}
         if active_formula and active.targets and looks_like_formula_answer_correction(clean_query):
-            return self._formula_answer_correction_contract(contract=contract, session=session)
+            title = active.titles[0] if active.titles else ""
+            paper = self._paper_from_query_hint(title) if title else None
+            return formula_answer_correction_contract(contract=contract, active=active, paper=paper)
         if self._is_formula_interpretation_followup(clean_query=clean_query, session=session):
             return QueryContract(
                 clean_query=clean_query,
@@ -2277,38 +2282,6 @@ class ResearchAssistantAgentV4(
             candidate_lookup=self._candidate_from_paper_id,
         )
 
-    def _formula_answer_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
-        active = session.effective_active_research()
-        title = active.titles[0] if active.titles else ""
-        paper = self._paper_from_query_hint(title) if title else None
-        notes = list(
-            dict.fromkeys(
-                [
-                    *contract.notes,
-                    "formula_answer_correction",
-                    "prefer_scalar_objective",
-                    "answer_slot=formula",
-                ]
-            )
-        )
-        if paper is not None:
-            notes = list(dict.fromkeys([*notes, f"selected_paper_id={paper.paper_id}", "memory_title=" + paper.title]))
-        target = active.targets[0] if active.targets else (contract.targets[0] if contract.targets else "当前目标")
-        scope = f"限定在论文《{paper.title}》中" if paper is not None else "沿用上一轮论文上下文"
-        return QueryContract(
-            clean_query=f"{target} 的公式是什么？{scope}重新查找目标函数或损失函数；上一条候选公式可能是梯度/推导式，不要优先返回梯度公式。",
-            interaction_mode="research",
-            relation="formula_lookup",
-            targets=list(active.targets or contract.targets or [target]),
-            requested_fields=["formula", "variable_explanation", "source"],
-            required_modalities=["page_text", "table"],
-            answer_shape="bullets",
-            precision_requirement="exact",
-            continuation_mode="followup",
-            allow_web_search=contract.allow_web_search,
-            notes=notes,
-        )
-
     def _resolve_formula_answer_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         active = session.effective_active_research()
         active_formula = active.relation == "formula_lookup" or "formula" in {str(field) for field in active.requested_fields}
@@ -2316,7 +2289,9 @@ class ResearchAssistantAgentV4(
             return contract
         if not looks_like_formula_answer_correction(contract.clean_query):
             return contract
-        return self._formula_answer_correction_contract(contract=contract, session=session)
+        title = active.titles[0] if active.titles else ""
+        paper = self._paper_from_query_hint(title) if title else None
+        return formula_answer_correction_contract(contract=contract, active=active, paper=paper)
 
     def _resolve_formula_location_followup_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         active = session.effective_active_research()
@@ -2336,32 +2311,7 @@ class ResearchAssistantAgentV4(
         target = self._formula_followup_target(contract=contract, session=session, paper=paper)
         if not target:
             return contract
-        notes = list(contract.notes)
-        notes = list(
-            dict.fromkeys(
-                [
-                    *notes,
-                    "formula_location_followup",
-                    "resolved_from_user_paper_hint",
-                    f"selected_paper_id={paper.paper_id}",
-                    "memory_title=" + paper.title,
-                    "answer_slot=formula",
-                ]
-            )
-        )
-        return QueryContract(
-            clean_query=f"{target} 的公式是什么？限定在论文《{paper.title}》中查找。",
-            interaction_mode="research",
-            relation="formula_lookup",
-            targets=[target],
-            requested_fields=["formula", "variable_explanation", "source"],
-            required_modalities=["page_text", "table"],
-            answer_shape="bullets",
-            precision_requirement="exact",
-            continuation_mode="followup",
-            allow_web_search=contract.allow_web_search,
-            notes=notes,
-        )
+        return formula_location_followup_contract(contract=contract, paper=paper, target=target)
 
     def _resolve_formula_contextual_paper_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         goals = research_plan_goals(contract)
@@ -2381,28 +2331,7 @@ class ResearchAssistantAgentV4(
         target = str(contract.targets[0] or "").strip()
         if not target or not self._paper_context_supports_formula_target(paper=paper, target=target):
             return contract
-        notes = list(
-            dict.fromkeys(
-                [
-                    *contract.notes,
-                    "formula_contextual_paper_binding",
-                    f"selected_paper_id={paper.paper_id}",
-                    "memory_title=" + paper.title,
-                ]
-            )
-        )
-        return contract.model_copy(
-            update={
-                "clean_query": f"{target} 的公式是什么？限定在论文《{paper.title}》中查找。",
-                "relation": "formula_lookup",
-                "requested_fields": ["formula", "variable_explanation", "source"],
-                "required_modalities": ["page_text", "table"],
-                "answer_shape": "bullets",
-                "precision_requirement": "exact",
-                "continuation_mode": "followup",
-                "notes": notes,
-            }
-        )
+        return formula_contextual_paper_contract(contract=contract, paper=paper, target=target)
 
     def _resolve_paper_scope_correction_contract(self, *, contract: QueryContract, session: SessionContext) -> QueryContract:
         if contract.interaction_mode != "research" or self._selected_clarification_paper_id(contract):
