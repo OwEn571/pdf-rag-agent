@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.domain.models import ActiveResearch, CandidatePaper, QueryContract
 from app.services.contextual_contract_helpers import (
     active_paper_reference_notes,
@@ -9,6 +11,7 @@ from app.services.contextual_contract_helpers import (
     formula_location_followup_contract,
     formula_query_allows_paper_context,
     normalize_entity_key,
+    paper_from_query_hint,
     paper_hint_names,
     promote_contextual_metric_contract,
 )
@@ -62,6 +65,43 @@ def test_formula_query_allows_paper_context_uses_active_target_and_paper_alias()
     contract = QueryContract(clean_query="这篇论文里 PBA 的公式是什么？")
 
     assert formula_query_allows_paper_context(contract=contract, active=active, paper=paper)
+
+
+def test_paper_from_query_hint_prefers_exact_title_hint() -> None:
+    papers = {
+        "short": CandidatePaper(paper_id="short", title="AlignX"),
+        "long": CandidatePaper(paper_id="long", title="AlignX: Scaling Personalized Preference"),
+    }
+    docs = [
+        SimpleNamespace(metadata={"paper_id": "short"}, page_content="title: AlignX"),
+        SimpleNamespace(metadata={"paper_id": "long"}, page_content="title: AlignX: Scaling Personalized Preference"),
+    ]
+
+    paper = paper_from_query_hint(
+        "请限定在 AlignX: Scaling Personalized Preference 这篇论文里回答",
+        paper_documents=docs,
+        candidate_lookup=papers.get,
+    )
+
+    assert paper is not None
+    assert paper.paper_id == "long"
+
+
+def test_paper_from_query_hint_uses_metadata_context_for_acronym_hint() -> None:
+    papers = {
+        "dpo": CandidatePaper(paper_id="dpo", title="Direct Preference Optimization"),
+    }
+    docs = [
+        SimpleNamespace(
+            metadata={"paper_id": "dpo"},
+            page_content="aliases: DPO\nabstract_or_summary: Direct Preference Optimization trains policies.",
+        )
+    ]
+
+    paper = paper_from_query_hint("DPO 这篇论文里的公式是什么？", paper_documents=docs, candidate_lookup=papers.get)
+
+    assert paper is not None
+    assert paper.paper_id == "dpo"
 
 
 def test_promote_contextual_metric_contract_adds_metric_requirements() -> None:

@@ -79,7 +79,7 @@ from app.services.contextual_contract_helpers import (
     formula_location_followup_contract,
     formula_query_allows_paper_context,
     normalize_entity_key,
-    paper_hint_names,
+    paper_from_query_hint,
     promote_contextual_metric_contract,
 )
 from app.services.conversation_memory_contract import (
@@ -2425,57 +2425,11 @@ class ResearchAssistantAgentV4(
         return False
 
     def _paper_from_query_hint(self, query: str) -> CandidatePaper | None:
-        query_text = str(query or "").strip()
-        if not query_text:
-            return None
-        query_key = normalize_entity_key(query_text)
-        query_words = normalize_lookup_text(query_text)
-        query_hints = [
-            token
-            for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{2,}", query_text)
-            if any(ch.isupper() for ch in token[1:]) or any(ch.isdigit() for ch in token)
-        ]
-        scored: list[tuple[int, CandidatePaper]] = []
-        for doc in self.retriever.paper_documents():
-            meta = dict(doc.metadata or {})
-            paper_id = str(meta.get("paper_id", "") or "").strip()
-            if not paper_id:
-                continue
-            paper = self._candidate_from_paper_id(paper_id)
-            if paper is None:
-                continue
-            best = 0
-            for name in paper_hint_names(paper):
-                name = str(name or "").strip()
-                if not name:
-                    continue
-                name_key = normalize_entity_key(name)
-                if len(name_key) < 4:
-                    continue
-                if name_key in query_key:
-                    best = max(best, min(200, len(name_key)))
-                    continue
-                if matches_target(query_words, name.lower()):
-                    best = max(best, min(160, len(name_key)))
-            paper_context = "\n".join(
-                [
-                    paper.title,
-                    str(paper.metadata.get("aliases", "")),
-                    str(paper.metadata.get("abstract_note", "")),
-                    str(paper.metadata.get("generated_summary", "")),
-                    str(paper.metadata.get("paper_card_text", "")),
-                    str(doc.page_content or ""),
-                ]
-            )
-            for hint in query_hints:
-                if matches_target(paper_context, hint):
-                    best = max(best, 80 + min(40, len(hint)))
-            if best:
-                scored.append((best, paper))
-        if not scored:
-            return None
-        scored.sort(key=lambda item: (-item[0], -len(item[1].title), item[1].title))
-        return scored[0][1]
+        return paper_from_query_hint(
+            query,
+            paper_documents=self.retriever.paper_documents(),
+            candidate_lookup=self._candidate_from_paper_id,
+        )
 
     def _contract_from_pending_clarification(
         self,
