@@ -50,6 +50,7 @@ from app.services.agent_runtime_helpers import (
 from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
 from app.services.clarification_intents import (
     ambiguity_option_matches_context,
+    acronym_evidence_from_corpus as build_acronym_evidence_from_corpus,
     acronym_options_from_evidence as build_acronym_options_from_evidence,
     ambiguity_options_from_notes,
     clarification_tracking_key,
@@ -65,7 +66,6 @@ from app.services.clarification_intents import (
     disambiguation_judge_option_payload,
     disambiguation_judge_summary,
     disambiguation_missing_fields,
-    extract_acronym_expansion_from_text,
     judge_allows_auto_resolve,
     normalize_clarification_options,
     next_clarification_attempt,
@@ -157,7 +157,6 @@ from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
     is_short_acronym,
-    matches_target,
     paper_query_text,
     should_use_concept_evidence,
     should_use_web_search,
@@ -1835,41 +1834,15 @@ class ResearchAssistantAgentV4(
         )
 
     def _acronym_evidence_from_corpus(self, *, target: str, limit: int) -> list[EvidenceBlock]:
-        evidence: list[EvidenceBlock] = []
-        for paper_doc in self.retriever.paper_documents():
-            paper_id = str((paper_doc.metadata or {}).get("paper_id", "") or "").strip()
-            if not paper_id:
-                continue
-            for doc in self.retriever.block_documents_for_paper(paper_id, limit=320):
-                meta = dict(doc.metadata or {})
-                text = str(doc.page_content or "")
-                if not matches_target(text, target):
-                    continue
-                score = 1.0
-                expansion = extract_acronym_expansion_from_text(text=text, acronym=target)
-                if expansion:
-                    score += 6.0
-                if int(meta.get("formula_hint", 0) or 0):
-                    score += 2.0
-                evidence.append(
-                    EvidenceBlock(
-                        doc_id=str(meta.get("doc_id", "")),
-                        paper_id=paper_id,
-                        title=str(meta.get("title", "")),
-                        file_path=str(meta.get("file_path", "")),
-                        page=int(meta.get("page", 0) or 0),
-                        block_type=str(meta.get("block_type", "")),
-                        caption=str(meta.get("caption", "")),
-                        bbox=str(meta.get("bbox", "")),
-                        snippet=text[:900],
-                        score=score,
-                        metadata=meta,
-                    )
-                )
-                if len(evidence) >= limit:
-                    return evidence
-        evidence.sort(key=lambda item: (-item.score, item.title, item.page))
-        return evidence[:limit]
+        return build_acronym_evidence_from_corpus(
+            target=target,
+            limit=limit,
+            paper_documents=lambda: self.retriever.paper_documents(),
+            block_documents_for_paper=lambda paper_id, block_limit: self.retriever.block_documents_for_paper(
+                paper_id,
+                limit=block_limit,
+            ),
+        )
 
     @staticmethod
     def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:

@@ -582,6 +582,50 @@ def acronym_options_from_evidence(
     return options
 
 
+def acronym_evidence_from_corpus(
+    *,
+    target: str,
+    limit: int,
+    paper_documents: Callable[[], list[Any]],
+    block_documents_for_paper: Callable[[str, int], list[Any]],
+) -> list[EvidenceBlock]:
+    evidence: list[EvidenceBlock] = []
+    for paper_doc in paper_documents():
+        paper_id = str((paper_doc.metadata or {}).get("paper_id", "") or "").strip()
+        if not paper_id:
+            continue
+        for doc in block_documents_for_paper(paper_id, 320):
+            meta = dict(doc.metadata or {})
+            text = str(doc.page_content or "")
+            if not matches_target(text, target):
+                continue
+            score = 1.0
+            expansion = extract_acronym_expansion_from_text(text=text, acronym=target)
+            if expansion:
+                score += 6.0
+            if int(meta.get("formula_hint", 0) or 0):
+                score += 2.0
+            evidence.append(
+                EvidenceBlock(
+                    doc_id=str(meta.get("doc_id", "")),
+                    paper_id=paper_id,
+                    title=str(meta.get("title", "")),
+                    file_path=str(meta.get("file_path", "")),
+                    page=int(meta.get("page", 0) or 0),
+                    block_type=str(meta.get("block_type", "")),
+                    caption=str(meta.get("caption", "")),
+                    bbox=str(meta.get("bbox", "")),
+                    snippet=text[:900],
+                    score=score,
+                    metadata=meta,
+                )
+            )
+            if len(evidence) >= limit:
+                return evidence
+    evidence.sort(key=lambda item: (-item.score, item.title, item.page))
+    return evidence[:limit]
+
+
 def normalize_clarification_option(
     option: dict[str, Any],
     *,

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
+    acronym_evidence_from_corpus,
     acronym_options_from_evidence,
     ambiguity_clarification_question,
     ambiguity_options_from_notes,
@@ -386,6 +388,37 @@ def test_acronym_options_from_evidence_groups_expansions_and_drops_plain_duplica
     assert [item["paper_id"] for item in options] == ["p2"]
     assert options[0]["meaning"] == "Preference-Bridged Alignment"
     assert "Preference-Bridged Alignment" in options[0]["context_text"]
+
+
+def test_acronym_evidence_from_corpus_scores_expansions_and_formula_hints() -> None:
+    paper_docs = [SimpleNamespace(metadata={"paper_id": "p1"})]
+    block_docs = [
+        SimpleNamespace(
+            metadata={
+                "doc_id": "b1",
+                "title": "AlignX",
+                "page": 3,
+                "block_type": "page_text",
+                "formula_hint": 1,
+            },
+            page_content="Preference-Bridged Alignment (PBA) defines the objective.",
+        ),
+        SimpleNamespace(
+            metadata={"doc_id": "b2", "title": "AlignX", "page": 4, "block_type": "page_text"},
+            page_content="No target here.",
+        ),
+    ]
+
+    evidence = acronym_evidence_from_corpus(
+        target="PBA",
+        limit=5,
+        paper_documents=lambda: paper_docs,
+        block_documents_for_paper=lambda paper_id, limit: block_docs if paper_id == "p1" and limit == 320 else [],
+    )
+
+    assert [item.doc_id for item in evidence] == ["b1"]
+    assert evidence[0].score == 9.0
+    assert evidence[0].snippet.startswith("Preference-Bridged Alignment")
 
 
 def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
