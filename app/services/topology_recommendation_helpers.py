@@ -5,9 +5,23 @@ from collections.abc import Callable
 from typing import Any
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock
+from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 
 
 EvidenceIdsForPaper = Callable[[str], list[str]]
+
+UNUSABLE_TOPOLOGY_RECOMMENDATION_MARKERS: MarkerProfile = (
+    "does not address",
+    "does not contain",
+    "impossible to determine",
+    "no direct analysis",
+    "not provide specific",
+    "cannot determine",
+    "无法确定",
+    "不能确定",
+    "没有覆盖",
+    "不包含",
+)
 
 
 def fallback_topology_recommendation(topology_terms: list[str]) -> dict[str, str]:
@@ -24,19 +38,7 @@ def is_unusable_topology_recommendation_text(text: str) -> bool:
     lowered = " ".join(str(text or "").lower().split())
     if not lowered:
         return True
-    negative_markers = [
-        "does not address",
-        "does not contain",
-        "impossible to determine",
-        "no direct analysis",
-        "not provide specific",
-        "cannot determine",
-        "无法确定",
-        "不能确定",
-        "没有覆盖",
-        "不包含",
-    ]
-    return any(marker in lowered for marker in negative_markers)
+    return query_matches_any(lowered, "", UNUSABLE_TOPOLOGY_RECOMMENDATION_MARKERS)
 
 
 def topology_recommendation_system_prompt() -> str:

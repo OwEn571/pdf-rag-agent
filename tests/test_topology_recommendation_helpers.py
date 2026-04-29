@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.topology_recommendation_helpers import (
+    UNUSABLE_TOPOLOGY_RECOMMENDATION_MARKERS,
     fallback_topology_recommendation,
     is_unusable_topology_recommendation_text,
     topology_discovery_claim,
@@ -10,6 +11,7 @@ from app.services.topology_recommendation_helpers import (
     topology_recommendation_system_prompt,
 )
 from app.domain.models import CandidatePaper, EvidenceBlock
+from app.services.intent_marker_matching import query_matches_any
 
 
 def test_unusable_topology_recommendation_text_detects_empty_and_negative_answers() -> None:
@@ -17,6 +19,7 @@ def test_unusable_topology_recommendation_text_detects_empty_and_negative_answer
     assert is_unusable_topology_recommendation_text("The evidence does not contain a specific comparison.")
     assert is_unusable_topology_recommendation_text("无法确定哪一种 topology 最好")
     assert not is_unusable_topology_recommendation_text("DAG is better when dependencies must be explicit.")
+    assert query_matches_any("cannot determine", "", UNUSABLE_TOPOLOGY_RECOMMENDATION_MARKERS)
 
 
 def test_fallback_topology_recommendation_uses_terms_or_default() -> None:
