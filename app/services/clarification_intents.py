@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
-from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.contract_normalization import normalize_lookup_text
 from app.services.query_shaping import extract_targets, is_short_acronym, matches_target
 from app.services.research_planning import research_plan_goals
@@ -513,6 +513,73 @@ def ambiguity_option_context_text(option: dict[str, Any], *, paper: CandidatePap
 def ambiguity_option_matches_context(*, option: dict[str, Any], context_targets: list[str]) -> bool:
     text = str(option.get("context_text", ""))
     return any(matches_target(text, str(target)) for target in context_targets if str(target).strip())
+
+
+def acronym_options_from_evidence(
+    *,
+    target: str,
+    papers: list[CandidatePaper],
+    evidence: list[EvidenceBlock],
+    paper_lookup: Callable[[str], CandidatePaper | None],
+) -> list[dict[str, Any]]:
+    paper_by_id = {item.paper_id: item for item in papers}
+    buckets: dict[str, dict[str, Any]] = {}
+    target_key = target.lower()
+    for item in evidence:
+        if not any(matches_target(haystack, target) for haystack in [item.snippet, item.caption, item.title] if haystack):
+            continue
+        paper = paper_by_id.get(item.paper_id) or paper_lookup(item.paper_id)
+        if paper is None:
+            continue
+        text = " ".join([item.snippet, item.caption, item.title])
+        expansion = extract_acronym_expansion_from_text(text=text, acronym=target)
+        option_key = normalize_acronym_meaning(expansion) if expansion else normalize_lookup_text(f"{target_key}:{paper.paper_id}")
+        if not option_key:
+            option_key = f"{target_key}:{paper.paper_id}"
+        bucket = buckets.setdefault(
+            option_key,
+            {
+                "paper_id": paper.paper_id,
+                "title": paper.title,
+                "year": paper.year,
+                "meaning": expansion or target,
+                "snippet": "",
+                "score": 0.0,
+                "paper_ids": [],
+                "titles": [],
+            },
+        )
+        bucket["score"] = float(bucket.get("score", 0.0)) + float(item.score) + (5.0 if expansion else 0.0)
+        if not bucket.get("snippet"):
+            bucket["snippet"] = " ".join(item.snippet.split())[:220]
+        if paper.paper_id not in bucket["paper_ids"]:
+            bucket["paper_ids"].append(paper.paper_id)
+        if paper.title not in bucket["titles"]:
+            bucket["titles"].append(paper.title)
+        if expansion and len(expansion) > len(str(bucket.get("meaning", ""))):
+            bucket["meaning"] = expansion
+    options = list(buckets.values())
+    expanded_papers = {
+        str(option.get("paper_id", ""))
+        for option in options
+        if str(option.get("meaning", "")).strip().lower() != target.lower()
+    }
+    options = [
+        option
+        for option in options
+        if not (
+            str(option.get("paper_id", "")) in expanded_papers
+            and str(option.get("meaning", "")).strip().lower() == target.lower()
+        )
+    ]
+    if any(str(option.get("meaning", "")).strip().lower() != target.lower() for option in options):
+        options = [option for option in options if str(option.get("meaning", "")).strip().lower() != target.lower()]
+    for option in options:
+        paper_id = str(option.get("paper_id", "") or "")
+        paper = paper_by_id.get(paper_id) or paper_lookup(paper_id)
+        option["context_text"] = ambiguity_option_context_text(option, paper=paper)
+    options.sort(key=lambda item: (-float(item.get("score", 0.0)), str(item.get("title", ""))))
+    return options
 
 
 def normalize_clarification_option(

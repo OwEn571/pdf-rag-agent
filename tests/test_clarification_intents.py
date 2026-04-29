@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 
-from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, QueryContract, SessionContext, VerificationReport
+from app.domain.models import CandidatePaper, DisambiguationJudgeDecision, EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.clarification_intents import (
     CLARIFICATION_OPTION_SCHEMA_VERSION,
     ambiguity_option_context_text,
     ambiguity_option_matches_context,
+    acronym_options_from_evidence,
     ambiguity_clarification_question,
     ambiguity_options_from_notes,
     apply_disambiguation_judge_recommendation,
@@ -345,6 +346,46 @@ def test_acronym_helpers_extract_normalize_and_match_context() -> None:
     assert expansion == "Preference-Bridged Alignment"
     assert normalize_acronym_meaning("Behaviour-based Alignment") == "behavior based alignment"
     assert ambiguity_option_matches_context(option=option, context_targets=["PPAIR"])
+
+
+def test_acronym_options_from_evidence_groups_expansions_and_drops_plain_duplicates() -> None:
+    papers = [
+        CandidatePaper(paper_id="p1", title="Plain PBA"),
+        CandidatePaper(paper_id="p2", title="AlignX"),
+    ]
+    evidence = [
+        EvidenceBlock(
+            doc_id="plain",
+            paper_id="p1",
+            title="Plain PBA",
+            file_path="",
+            page=1,
+            block_type="page_text",
+            snippet="PBA appears without expansion.",
+            score=1.0,
+        ),
+        EvidenceBlock(
+            doc_id="expanded",
+            paper_id="p2",
+            title="AlignX",
+            file_path="",
+            page=2,
+            block_type="page_text",
+            snippet="Preference-Bridged Alignment (PBA) improves personalization.",
+            score=2.0,
+        ),
+    ]
+
+    options = acronym_options_from_evidence(
+        target="PBA",
+        papers=papers,
+        evidence=evidence,
+        paper_lookup=lambda _: None,
+    )
+
+    assert [item["paper_id"] for item in options] == ["p2"]
+    assert options[0]["meaning"] == "Preference-Bridged Alignment"
+    assert "Preference-Bridged Alignment" in options[0]["context_text"]
 
 
 def test_disambiguation_missing_fields_uses_ambiguous_slots() -> None:
