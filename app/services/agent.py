@@ -37,10 +37,7 @@ from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_runtime_helpers import (
     claim_focus_titles,
     clarify_retry_verification_if_needed,
-    entity_evidence_limit,
     excluded_focus_titles,
-    filter_candidate_papers_by_excluded_titles,
-    filter_evidence_by_excluded_titles,
     clarification_limit_decision,
     prepare_retry_research_materials,
     promote_best_effort_state_after_clarification_limit,
@@ -60,7 +57,6 @@ from app.services.clarification_intents import (
     clear_pending_clarification,
     contract_from_pending_clarification,
     contract_from_selected_clarification_option,
-    contract_with_ambiguity_options,
     disambiguation_goal_markers,
     evidence_disambiguation_options,
     disambiguation_judge_human_prompt,
@@ -1699,10 +1695,6 @@ class ResearchAssistantAgentV4(
             ),
         )
 
-    @staticmethod
-    def _contract_with_ambiguity_options(*, contract: QueryContract, options: list[dict[str, Any]]) -> QueryContract:
-        return contract_with_ambiguity_options(contract=contract, options=options)
-
     def _clarification_options(self, contract: QueryContract) -> list[dict[str, Any]]:
         return clarification_options_from_contract_notes(contract)
 
@@ -1743,25 +1735,6 @@ class ResearchAssistantAgentV4(
             contract=contract,
             is_negative_correction_query=is_negative_correction_query,
         )
-
-    @staticmethod
-    def _filter_candidate_papers_by_excluded_titles(
-        candidates: list[CandidatePaper],
-        *,
-        excluded_titles: set[str],
-    ) -> list[CandidatePaper]:
-        return filter_candidate_papers_by_excluded_titles(candidates, excluded_titles=excluded_titles)
-
-    @staticmethod
-    def _filter_evidence_by_excluded_titles(
-        evidence: list[EvidenceBlock],
-        *,
-        excluded_titles: set[str],
-    ) -> list[EvidenceBlock]:
-        return filter_evidence_by_excluded_titles(evidence, excluded_titles=excluded_titles)
-
-    def _entity_evidence_limit(self, *, contract: QueryContract, plan: ResearchPlan, excluded_titles: set[str]) -> int:
-        return entity_evidence_limit(contract=contract, plan=plan, excluded_titles=excluded_titles)
 
     def _plan_agent_actions(self, *, contract: QueryContract, session: SessionContext, use_web_search: bool) -> dict[str, Any]:
         return self.planner.plan_actions(

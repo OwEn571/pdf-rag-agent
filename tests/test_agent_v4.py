@@ -9,6 +9,7 @@ from langchain_core.documents import Document
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn, VerificationReport
 from app.services.agent import ResearchAssistantAgentV4
+from app.services.clarification_intents import contract_with_ambiguity_options
 from app.services.library import LibraryBrowserService
 from app.services.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
@@ -3343,7 +3344,7 @@ def test_compound_query_stops_for_subtask_clarification(tmp_path: Path) -> None:
 
     def fake_execute(self, *, contract: QueryContract, session: SessionContext, emit, execution_steps):
         calls.append(contract.relation)
-        blocked = self._contract_with_ambiguity_options(
+        blocked = contract_with_ambiguity_options(
             contract=contract,
             options=[
                 {
