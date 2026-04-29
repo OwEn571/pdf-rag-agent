@@ -26,7 +26,11 @@ from app.services.topology_recommendation_helpers import (
 )
 from app.services.visual_claim_helpers import (
     figure_conclusion_claim_from_vlm_payload,
+    figure_vlm_human_content,
+    figure_vlm_system_prompt,
     table_metric_claim_from_vlm_payload,
+    table_vlm_human_content,
+    table_vlm_system_prompt,
 )
 
 
@@ -697,41 +701,15 @@ class SolverPipelineMixin:
     ) -> Claim | None:
         if not getattr(self.settings, "enable_table_vlm", False):
             return None
-        content: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": (
-                    "你是论文表格视觉理解求解器。请结合表格抽取文本和页面图片回答用户查询。"
-                    "只输出 JSON，字段为 claims 和 draft_answer。"
-                    "claims 中每项包含 claim, metric_lines, confidence；不要编造看不见的数值。"
-                    f"\nquery={contract.clean_query}"
-                ),
-            }
-        ]
-        rendered_pages: set[tuple[str, int]] = set()
-        for idx, item in enumerate(ranked_blocks[:3], start=1):
-            content.append(
-                {
-                    "type": "text",
-                    "text": (
-                        f"[table_context_{idx}] title={item.title} page={item.page} block_type={item.block_type}\n"
-                        f"caption={item.caption}\ntable_text={item.snippet[:1200]}"
-                    ),
-                }
-            )
-            if item.block_type not in {"table", "caption"}:
-                continue
-            page_key = (item.file_path, item.page)
-            if page_key in rendered_pages:
-                continue
-            rendered_pages.add(page_key)
-            image_url = self._render_page_image_data_url(file_path=item.file_path, page=item.page)
-            if image_url:
-                content.append({"type": "image_url", "image_url": {"url": image_url}})
+        content = table_vlm_human_content(
+            contract=contract,
+            ranked_blocks=ranked_blocks,
+            render_page_image=lambda file_path, page: self._render_page_image_data_url(file_path=file_path, page=page),
+        )
         if not any(block.get("type") == "image_url" for block in content):
             return None
         payload = self.clients.invoke_multimodal_json(
-            system_prompt="你是论文表格视觉理解求解器。只输出 JSON。",
+            system_prompt=table_vlm_system_prompt(),
             human_content=content,
             fallback={"claims": [], "draft_answer": ""},
         )
@@ -755,32 +733,14 @@ class SolverPipelineMixin:
                 fallback_text = fallback_text[:remaining].rstrip() + benchmark_suffix
         payload = {"claims": [], "draft_answer": ""}
         if self.settings.enable_figure_vlm:
-            content: list[dict[str, Any]] = [
-                {
-                    "type": "text",
-                    "text": (
-                        "你是论文图像理解求解器。只输出 JSON，字段为 claims 和 draft_answer。"
-                        "claims 中每项包含 claim, confidence。不要编造看不见的数值。"
-                        f"\nquery={contract.clean_query}"
-                    ),
-                }
-            ]
-            for idx, context in enumerate(figure_contexts, start=1):
-                content.append(
-                    {
-                        "type": "text",
-                        "text": (
-                            f"[figure_context_{idx}] title={context['title']} page={context['page']}\n"
-                            f"caption={context['caption']}\nfigure_text={context['figure_text']}\npage_text={context['page_text']}"
-                        ),
-                    }
-                )
-                image_url = self._render_page_image_data_url(file_path=context["file_path"], page=context["page"])
-                if image_url:
-                    content.append({"type": "image_url", "image_url": {"url": image_url}})
+            content = figure_vlm_human_content(
+                contract=contract,
+                figure_contexts=figure_contexts,
+                render_page_image=lambda file_path, page: self._render_page_image_data_url(file_path=file_path, page=page),
+            )
             if any(block.get("type") == "image_url" for block in content):
                 payload = self.clients.invoke_multimodal_json(
-                    system_prompt="你是论文图像理解求解器。只输出 JSON。",
+                    system_prompt=figure_vlm_system_prompt(),
                     human_content=content,
                     fallback={"claims": [], "draft_answer": ""},
                 )
