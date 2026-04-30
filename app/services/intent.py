@@ -14,6 +14,7 @@ from app.services.intent_contract_adapter import (
     research_requirements_from_slots,
 )
 from app.services.intent_fallback_helpers import non_research_fallback_intent, research_fallback_intent
+from app.services.intent_llm_prompt import intent_router_system_prompt
 from app.services.memory_intents import (
     is_pdf_agent_topology_design_query,
     is_short_followup,
@@ -325,39 +326,7 @@ class IntentRecognizer:
             "schema": Intent.model_json_schema(),
         }
         context_json = json.dumps(payload, ensure_ascii=False)
-        system_prompt = (
-            "你是论文研究助手的结构化意图路由器。"
-            "不要做 22 个 relation 单选；只输出一个 JSON Intent。"
-            "Intent 由正交维度组成：intent_kind、needs_local_corpus、needs_web、"
-            "topic_state、active_topic、refers_previous_turn、target_entities、target_aliases、"
-            "user_goal、answer_slots、confidence、ambiguous_slots、notes。"
-            "intent_kind 只能是 smalltalk/meta_library/research/memory_op。"
-            "topic_state 只能是 continue/switch/new：continue 表示明确延续上一轮；"
-            "switch 表示用户从活跃话题切到另一个话题；new 表示没有依赖上一轮的全新问题。"
-            "topic_state 默认应为 new；不要因为存在 active_research_context 就默认 continue。"
-            "只有当当前消息明确包含指代词（如 那、这、它、上一轮、刚才、上面那篇、this paper）"
-            "或是对前一工具结果的序数追问（如 第三篇是啥、第二个、the third one），"
-            "或是对前一论文/方法名的省略性追问（如 实验结果呢、公式呢、变量解释呢）时，才设为 continue。"
-            "如果用户提到了与活跃 targets 完全不同的新实体名，必须设为 switch。"
-            "只有 continue 才应继承 active_research_context 的 targets 或论文。"
-            "active_topic 用一句话概括当前用户真正要问的话题。"
-            "target_aliases 放目标的别名、缩写展开、公式下标写法，例如 PBA / Preference-Bridged Alignment / L_PBA。"
-            "answer_slots 是槽位列表，不是执行计划；可以为空或多个。"
-            "smalltalk 用于你好、你是谁、你能做什么、用户表达不清需要澄清。"
-            "meta_library 用于本地论文库元信息问题，包括论文库数量、是否存在某类/某年/某作者/某标签/某分类论文、"
-            "列出或统计库内论文、库内推荐、库内引用数排序。"
-            "这类问题必须基于本地索引查询，不要用现实日期常识替代库内数据。"
-            "research 用于论文正文、公式、图表、实验、概念、方法、推荐阅读等需要本地语料的问题。"
-            "memory_op 用于追问上一轮结果、比较已有结果；如果追问论文正文细节，"
-            "仍然设置 needs_local_corpus=true，让后续工具读取语料。"
-            "如果用户问“第一个/第一篇/最初/首次提出 X 的论文”，这是 origin 槽位；"
-            "不要因为上一轮正在讨论某篇后续论文就把目标改成那篇论文。"
-            "confidence 低于 0.6 或 ambiguous_slots 非空表示应优先澄清。"
-            "你会收到真实的最近多轮 user/assistant messages；请优先用这些自然对话解析指代。"
-            "以下非语言上下文只用于补充 session 状态，不是用户新问题：\n"
-            f"{context_json}\n"
-            "只输出 JSON，不要回答用户。"
-        )
+        system_prompt = intent_router_system_prompt(context_json)
         invoke_json_messages = getattr(self.clients, "invoke_json_messages", None)
         try:
             if callable(invoke_json_messages):
