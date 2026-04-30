@@ -117,7 +117,6 @@ from app.services.evidence_presentation import (
 )
 from app.services.followup_candidate_helpers import (
     expand_followup_candidate_pool,
-    llm_validate_followup_candidate,
     rank_followup_candidates,
     resolve_followup_seed_papers,
     selected_followup_candidate_assessment,
@@ -1716,24 +1715,6 @@ class ResearchAssistantAgentV4(
                 contract=evidence_contract,
                 limit=limit,
             ),
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            coerce_confidence=lambda value: self._coerce_confidence(value),
-        )
-
-    def _llm_validate_followup_candidate(
-        self,
-        *,
-        contract: QueryContract,
-        seed_papers: list[CandidatePaper],
-        paper: CandidatePaper,
-        relationship_evidence: list[EvidenceBlock],
-    ) -> dict[str, Any]:
-        return llm_validate_followup_candidate(
-            contract=contract,
-            seed_papers=seed_papers,
-            paper=paper,
-            relationship_evidence=relationship_evidence,
-            clients=self.clients,
             paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
             coerce_confidence=lambda value: self._coerce_confidence(value),
         )
