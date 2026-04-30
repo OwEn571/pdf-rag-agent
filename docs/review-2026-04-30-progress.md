@@ -6,13 +6,13 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `b46601d`.
+- Latest pushed local baseline before this snapshot: `b8363e1`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1758 lines.
+  to about 1787 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
-  585 tests in the `zotero-paper-rag` conda environment.
+  596 tests in the `zotero-paper-rag` conda environment.
 - Published branch target remains `publish/main`
   (`git@github.com:OwEn571/pdf-rag-agent.git`).
 - Rollback marker for the high-risk migration path:
@@ -67,6 +67,18 @@ not be changed without a rollback point and test-backed slices.
   been removed, compound planning now calls helper modules directly from
   `agent_compound.py`, and citation ranking tools now call citation helper
   functions directly from the registry instead of through Agent wrapper methods.
+- Answer confidence wiring: provider streaming can optionally request token
+  logprobs; when enabled for streamed research answers, answer-level
+  `Confidence(basis="logprobs")` is emitted and retained in runtime summary
+  without changing default latency/cost behavior.
+- Router fallback hardening: invalid LLM router tool-plan payloads are tagged as
+  `router_invalid_payload`, and the legacy `IntentRecognizer` fallback is now
+  behind a default-on compatibility switch so it can be disabled in eval/gray
+  runs without deleting the code path yet.
+- Trace diff coverage: stable signatures now include contract routing signals
+  (`interaction_mode`, `relation`, `intent_kind`, router action/tags) and
+  confidence score buckets, so router/composer/solver drift is visible in trace
+  comparisons before risky deletions.
 
 ## Remaining High-Risk Work
 
@@ -87,8 +99,9 @@ changes and should continue as small rollback-safe slices:
   safety-review pipeline exists, but running user/agent-written code requires
   an explicit sandbox, resource limits, and approval UI.
 - Enabling provider-level logprobs or multi-sample self-consistency by default.
-  The confidence interfaces exist, but production defaults need provider support
-  and latency/cost decisions.
+  Provider logprob collection is now wired behind a default-off switch, but
+  production defaults still need latency/cost decisions and provider capability
+  checks.
 - Removing remaining legacy alias and compatibility shells that are still used
   by older frontend/eval traces or by tool registry/subtask monkeypatch tests.
 
@@ -96,9 +109,9 @@ changes and should continue as small rollback-safe slices:
 
 Continue with small, test-backed slices only where behavior can stay compatible:
 
-- Add regression coverage for LLM router misses before fully deleting
-  deterministic fallback paths.
-- Continue moving compatibility mappings out of the Agent/Recognizer into
-  typed adapters, then delete wrapper code once callers are migrated.
-- Improve trace/eval tooling around router decisions and solver/composer output
-  so generic replacements can be measured before deleting specialized paths.
+- Run eval traces with `agent_legacy_intent_fallback_enabled=false` to identify
+  the remaining routes that still depend on deterministic fallback.
+- Continue moving compatibility mappings out of the Agent/Recognizer into typed
+  adapters, then delete wrapper code once callers are migrated.
+- Add solver/composer parity traces before replacing specialized solver outputs
+  with generic compose-loop behavior.
