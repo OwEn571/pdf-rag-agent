@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from app.domain.models import QueryContract, SessionContext
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.intent_contract_adapter import (
+    answer_slots_from_relation,
     research_profile_slots,
     research_relation_from_slots,
     research_requirements_from_slots,
@@ -447,29 +448,7 @@ class IntentRecognizer:
         if not isinstance(requested_fields, list):
             requested_fields = []
         query_for_goal = clean_query or str(payload.get("clean_query", "") or "")
-        slots = {
-            "greeting": ["greeting"],
-            "self_identity": ["self_identity"],
-            "capability": ["capability"],
-            "clarify_user_intent": ["clarify"],
-            "library_status": ["library_status"],
-            "library_recommendation": ["library_recommendation"],
-            "library_citation_ranking": ["citation_ranking"],
-            "memory_followup": ["previous_rationale"],
-            "memory_synthesis": ["comparison"],
-            "origin_lookup": ["origin"],
-            "formula_lookup": ["formula"],
-            "followup_research": ["followup_research"],
-            "entity_definition": ["entity_definition"],
-            "topology_discovery": ["topology_discovery"],
-            "topology_recommendation": ["topology_recommendation"],
-            "figure_question": ["figure"],
-            "paper_summary_results": ["paper_summary"],
-            "metric_value_lookup": ["metric_value"],
-            "concept_definition": ["concept_definition"],
-            "paper_recommendation": ["paper_recommendation"],
-            "general_question": ["general_answer"],
-        }.get(relation, ["general_answer"])
+        slots = answer_slots_from_relation(relation)
         needs_local_corpus = interaction_mode == "research"
         continuation_mode = str(payload.get("continuation_mode", "") or "").strip()
         topic_state: TopicState = "continue" if continuation_mode == "followup" else "switch" if continuation_mode == "context_switch" else "new"

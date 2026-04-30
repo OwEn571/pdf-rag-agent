@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.services.intent_contract_adapter import (
+    answer_slots_from_relation,
     research_profile_slots,
     research_relation_from_slots,
     research_requirements_from_slots,
@@ -21,6 +22,12 @@ def test_intent_contract_adapter_maps_research_slots_to_contract_requirements() 
     assert modalities == ["table", "caption", "page_text"]
     assert shape == "narrative"
     assert precision == "exact"
+
+
+def test_intent_contract_adapter_maps_legacy_relations_to_answer_slots() -> None:
+    assert answer_slots_from_relation("library_citation_ranking") == ["citation_ranking"]
+    assert answer_slots_from_relation("metric_value_lookup") == ["metric_value"]
+    assert answer_slots_from_relation("unknown_relation") == ["general_answer"]
 
 
 def test_intent_contract_adapter_resolves_definition_slot_by_target_context() -> None:
