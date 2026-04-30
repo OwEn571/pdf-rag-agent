@@ -110,7 +110,6 @@ from app.services.followup_relationship_contracts import (
 from app.services.evidence_presentation import (
     chunk_text,
     citations_from_doc_ids,
-    paper_recommendation_reason,
 )
 from app.services.followup_candidate_helpers import (
     expand_followup_candidate_pool,
@@ -1622,10 +1621,6 @@ class ResearchAssistantAgentV4(
             return ""
         meta = dict(doc.metadata or {})
         return str(meta.get("generated_summary") or meta.get("abstract_note") or doc.page_content[:400]).strip()
-
-    def _paper_recommendation_reason(self, paper: CandidatePaper) -> str:
-        summary = self._paper_summary_text(paper.paper_id)
-        return paper_recommendation_reason(summary)
 
     def _citations_from_doc_ids(self, doc_ids: list[str], evidence: list[EvidenceBlock]) -> list[AssistantCitation]:
         return citations_from_doc_ids(

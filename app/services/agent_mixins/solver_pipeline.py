@@ -17,6 +17,7 @@ from app.services.evidence_presentation import (
     extract_topology_terms,
     figure_fallback_summary,
     formula_terms,
+    paper_recommendation_reason,
     safe_year,
 )
 from app.services.figure_intents import extract_figure_benchmarks, figure_signal_score
@@ -299,7 +300,7 @@ class SolverPipelineMixin:
         claim = paper_recommendation_claim(
             entity=contract.targets[0] if contract.targets else contract.clean_query,
             papers=papers,
-            reason_for_paper=self._paper_recommendation_reason,
+            reason_for_paper=lambda paper: paper_recommendation_reason(self._paper_summary_text(paper.paper_id)),
         )
         return [claim] if claim is not None else []
 
