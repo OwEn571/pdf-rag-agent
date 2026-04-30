@@ -648,7 +648,8 @@ class ResearchAssistantAgentV4(
             tool_input=tool_input,
             web_enabled=web_enabled,
             max_web_results=max_web_results,
-            collect=lambda search_contract, enabled, limit, query: self._collect_web_evidence(
+            collect=lambda search_contract, enabled, limit, query: collect_web_evidence(
+                web_search=self.web_search,
                 contract=search_contract,
                 use_web_search=enabled,
                 max_web_results=limit,
@@ -732,7 +733,7 @@ class ResearchAssistantAgentV4(
                         use_web_search=explicit_web_search,
                         max_web_results=max_web_results,
                     ),
-                    build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
+                    build_claim=lambda item_contract, item_evidence: build_web_research_claim(
                         contract=item_contract,
                         web_evidence=item_evidence,
                     ),
@@ -755,7 +756,7 @@ class ResearchAssistantAgentV4(
                     use_web_search=explicit_web_search,
                     max_web_results=max_web_results,
                 ),
-                build_claim=lambda item_contract, item_evidence: self._build_web_research_claim(
+                build_claim=lambda item_contract, item_evidence: build_web_research_claim(
                     contract=item_contract,
                     web_evidence=item_evidence,
                 ),
@@ -1489,26 +1490,6 @@ class ResearchAssistantAgentV4(
 
     def _should_use_web_search(self, *, use_web_search: bool, contract: QueryContract) -> bool:
         return should_use_web_search(use_web_search=use_web_search, contract=contract)
-
-    def _collect_web_evidence(
-        self,
-        *,
-        contract: QueryContract,
-        use_web_search: bool,
-        max_web_results: int,
-        query_override: str = "",
-    ) -> list[EvidenceBlock]:
-        return collect_web_evidence(
-            web_search=self.web_search,
-            contract=contract,
-            use_web_search=use_web_search,
-            max_web_results=max_web_results,
-            query_override=query_override,
-        )
-
-    @staticmethod
-    def _build_web_research_claim(*, contract: QueryContract, web_evidence: list[EvidenceBlock]) -> Claim:
-        return build_web_research_claim(contract=contract, web_evidence=web_evidence)
 
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
         def paper_title_lookup(paper_id: str) -> str | None:

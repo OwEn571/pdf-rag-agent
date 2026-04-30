@@ -21,6 +21,7 @@ from app.services.memory_followup_answers import compose_memory_followup_answer
 from app.services.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import InMemorySessionStore
+from app.services.web_evidence import build_web_research_claim, collect_web_evidence
 
 
 class StubModelClients:
@@ -3123,8 +3124,13 @@ def test_web_search_fallback_uses_web_evidence_when_enabled(tmp_path: Path) -> N
         relation="general_question",
         allow_web_search=True,
     )
-    evidence = agent._collect_web_evidence(contract=contract, use_web_search=True, max_web_results=3)
-    claim = agent._build_web_research_claim(contract=contract, web_evidence=evidence)
+    evidence = collect_web_evidence(
+        web_search=agent.web_search,
+        contract=contract,
+        use_web_search=True,
+        max_web_results=3,
+    )
+    claim = build_web_research_claim(contract=contract, web_evidence=evidence)
     report = agent._verify_claims(
         contract=contract,
         plan=ResearchPlan(required_claims=["answer"]),
