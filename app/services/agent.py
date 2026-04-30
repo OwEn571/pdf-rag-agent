@@ -1083,18 +1083,16 @@ class ResearchAssistantAgentV4(
     def _session_conversation_context(self, session: SessionContext, *, max_chars: int = 24000) -> dict[str, Any]:
         """Return the retained conversation as the LLM-facing working memory."""
 
-        return session_conversation_context(
-            session,
-            persistent_learnings=self._persistent_learnings_context(),
-            max_chars=max_chars,
-        )
-
-    def _persistent_learnings_context(self) -> str:
         try:
-            return load_learnings(data_dir=self.settings.data_dir, max_chars=4000)
+            persistent_learnings = load_learnings(data_dir=self.settings.data_dir, max_chars=4000)
         except Exception as exc:  # noqa: BLE001
             logger.warning("failed to load persistent learnings: %s", exc)
-            return ""
+            persistent_learnings = ""
+        return session_conversation_context(
+            session,
+            persistent_learnings=persistent_learnings,
+            max_chars=max_chars,
+        )
 
     def _session_llm_history_messages(
         self,

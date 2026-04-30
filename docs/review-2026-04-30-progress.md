@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `e12b68a`.
+- Latest pushed local baseline before this snapshot: `5425676`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1638 lines.
+  to about 1636 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -84,6 +84,9 @@ not be changed without a rollback point and test-backed slices.
   figure helpers, compound subtask execution, agent-step emit, and paper
   recommendation reason generation are now called directly from their owning
   modules or registries instead of through Agent wrapper methods.
+- Persistent learning context now loads through the session context boundary
+  directly; the Agent no longer keeps a separate learnings-only forwarding
+  method while preserving the same failure logging and empty-context fallback.
 
 ## Remaining High-Risk Work
 
