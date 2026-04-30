@@ -446,7 +446,12 @@ class ResearchAssistantAgentV4(
     ) -> dict[str, Any] | None:
         contract: QueryContract = state["contract"]
         verification = state.get("verification")
-        next_attempt = self._next_clarification_attempt(session=session, contract=contract, verification=verification)
+        clarification_key = clarification_tracking_key(
+            contract=contract,
+            verification=verification,
+            options=self._clarification_options(contract),
+        )
+        next_attempt = next_clarification_attempt(session=session, key=clarification_key)
         decision = clarification_limit_decision(
             contract=contract,
             verification=verification,
@@ -1236,16 +1241,6 @@ class ResearchAssistantAgentV4(
             candidate_lookup=self._candidate_from_paper_id,
         )
 
-    def _next_clarification_attempt(
-        self,
-        *,
-        session: SessionContext,
-        contract: QueryContract,
-        verification: VerificationReport,
-    ) -> int:
-        key = self._clarification_key(contract=contract, verification=verification)
-        return next_clarification_attempt(session=session, key=key)
-
     def _remember_clarification_attempt(
         self,
         *,
@@ -1253,19 +1248,16 @@ class ResearchAssistantAgentV4(
         contract: QueryContract,
         verification: VerificationReport,
     ) -> None:
-        key = self._clarification_key(contract=contract, verification=verification)
+        key = clarification_tracking_key(
+            contract=contract,
+            verification=verification,
+            options=self._clarification_options(contract),
+        )
         remember_clarification_attempt(session=session, key=key)
 
     @staticmethod
     def _reset_clarification_tracking(session: SessionContext) -> None:
         reset_clarification_tracking(session)
-
-    def _clarification_key(self, *, contract: QueryContract, verification: VerificationReport) -> str:
-        return clarification_tracking_key(
-            contract=contract,
-            verification=verification,
-            options=self._clarification_options(contract),
-        )
 
     def _disambiguation_options_from_evidence(
         self,
