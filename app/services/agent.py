@@ -53,7 +53,7 @@ from app.services.agent_runtime_helpers import (
     verification_observation_payload,
     verify_grounding_tool_call_arguments,
 )
-from app.services.agent_tools import agent_tool_manifest, all_agent_tool_names
+from app.services.agent_tools import agent_tool_manifest
 from app.services.clarification_intents import (
     acronym_evidence_from_corpus as build_acronym_evidence_from_corpus,
     acronym_options_from_evidence as build_acronym_options_from_evidence,
@@ -91,10 +91,6 @@ from app.services.compound_task_helpers import (
     compound_task_result_from_task_payload,
     llm_decompose_compound_query,
     merge_redundant_field_subtasks,
-)
-from app.services.contract_context import (
-    LEGACY_TOOL_NAME_ALIASES,
-    canonical_tools,
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
@@ -422,14 +418,6 @@ class ResearchAssistantAgentV4(
             verification_report=verification_report,
             claims=claims,
             citations=citations,
-        )
-
-    @staticmethod
-    def _canonical_tools(raw_tools: list[Any]) -> list[str]:
-        return canonical_tools(
-            raw_tools=raw_tools,
-            aliases=LEGACY_TOOL_NAME_ALIASES,
-            canonical_names=all_agent_tool_names(),
         )
 
     def _compose_memory_synthesis_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
