@@ -16,6 +16,7 @@ from app.services.clarification_intents import (
     clear_pending_clarification,
     reset_clarification_tracking,
 )
+from app.services.contract_normalization import normalize_contract_targets
 from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
     compose_compound_comparison_answer,
@@ -54,9 +55,10 @@ def run_compound_query_if_needed(
         available_tools=list(agent_tool_manifest()),
         conversation_context=agent._session_conversation_context,
         history_messages=session_llm_history_messages,
-        target_normalizer=lambda targets, fields: agent._normalize_contract_targets(
+        target_normalizer=lambda targets, fields: normalize_contract_targets(
             targets=targets,
             requested_fields=fields,
+            canonicalize_targets=agent.retriever.canonicalize_targets,
         ),
     )
     subcontracts = merge_redundant_field_subtasks(subcontracts)

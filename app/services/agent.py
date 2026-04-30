@@ -197,9 +197,10 @@ class ResearchAssistantAgentV4(
                 max_turns=6,
                 answer_limit=900,
             ),
-            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+            normalize_targets=lambda targets, requested_fields: normalize_contract_targets(
                 targets=targets,
                 requested_fields=requested_fields,
+                canonicalize_targets=self.retriever.canonicalize_targets,
             ),
         )
         self.llm_intent_router = LLMIntentRouter(
@@ -1001,16 +1002,18 @@ class ResearchAssistantAgentV4(
         refined_contract = inherit_followup_relationship_contract(
             contract=refined_contract,
             session=session,
-            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+            normalize_targets=lambda targets, requested_fields: normalize_contract_targets(
                 targets=targets,
                 requested_fields=requested_fields,
+                canonicalize_targets=self.retriever.canonicalize_targets,
             ),
         )
         refined_contract = normalize_followup_direction_contract(
             contract=refined_contract,
-            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+            normalize_targets=lambda targets, requested_fields: normalize_contract_targets(
                 targets=targets,
                 requested_fields=requested_fields,
+                canonicalize_targets=self.retriever.canonicalize_targets,
             ),
         )
         return apply_conversation_memory_to_contract(
@@ -1056,9 +1059,10 @@ class ResearchAssistantAgentV4(
             clean_query=clean_query,
             session=session,
             extracted_targets=extracted_targets,
-            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+            normalize_targets=lambda targets, requested_fields: normalize_contract_targets(
                 targets=targets,
                 requested_fields=requested_fields,
+                canonicalize_targets=self.retriever.canonicalize_targets,
             ),
         )
 
@@ -1414,13 +1418,6 @@ class ResearchAssistantAgentV4(
             ambiguity_option_count=lambda: len(
                 self._acronym_options_from_evidence(target=target, papers=papers, evidence=evidence)
             ),
-        )
-
-    def _normalize_contract_targets(self, *, targets: list[str], requested_fields: list[str]) -> list[str]:
-        return normalize_contract_targets(
-            targets=targets,
-            requested_fields=requested_fields,
-            canonicalize_targets=self.retriever.canonicalize_targets,
         )
 
     def _compress_session_history_if_needed(self, session: SessionContext) -> None:

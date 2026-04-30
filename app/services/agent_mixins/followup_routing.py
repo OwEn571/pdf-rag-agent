@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from app.domain.models import QueryContract, SessionContext
-from app.services.contract_normalization import normalize_lookup_text, normalize_modalities
+from app.services.contract_normalization import normalize_contract_targets, normalize_lookup_text, normalize_modalities
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.research_planning import research_plan_goals
 from app.services.session_context_helpers import session_llm_history_messages
@@ -241,7 +241,11 @@ class FollowupRoutingMixin:
         )
         if relation not in conversation_relations and not requested_fields:
             requested_fields = list(contract.requested_fields) or list(active.requested_fields) or ["answer"]
-        targets = self._normalize_contract_targets(targets=targets, requested_fields=requested_fields)
+        targets = normalize_contract_targets(
+            targets=targets,
+            requested_fields=requested_fields,
+            canonicalize_targets=self.retriever.canonicalize_targets,
+        )
         raw_required_modalities = payload.get("required_modalities", contract.required_modalities)
         required_modalities = normalize_modalities(
             [str(item).strip() for item in raw_required_modalities if str(item).strip()]

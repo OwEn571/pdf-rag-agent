@@ -14,6 +14,7 @@ from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
 )
+from app.services.contract_normalization import normalize_contract_targets
 from app.services.evidence_presentation import build_figure_contexts
 from app.services.figure_intents import figure_signal_score
 from app.services.library import LibraryBrowserService
@@ -1841,9 +1842,10 @@ def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tm
 def test_normalize_contract_targets_drops_structural_figure_reference(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 
-    targets = agent._normalize_contract_targets(
+    targets = normalize_contract_targets(
         targets=["Deepseek R1", "figure1"],
         requested_fields=["problem_addressed"],
+        canonicalize_targets=agent.retriever.canonicalize_targets,
     )
 
     assert targets == ["Deepseek R1"]

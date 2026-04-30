@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `4c638d0`.
+- Latest pushed local baseline before this snapshot: `d3a8375`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1558 lines.
+  to about 1555 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -107,6 +107,9 @@ not be changed without a rollback point and test-backed slices.
 - Excluded-focus title filtering now calls `agent_runtime_helpers` directly
   from runtime and disambiguation paths; the Agent no longer exposes a separate
   forwarding method for that helper.
+- Contract target normalization now calls `contract_normalization` directly
+  from router, follow-up, compound, and test call sites; the Agent no longer
+  exposes a target-normalization forwarding method.
 
 ## Remaining High-Risk Work
 
