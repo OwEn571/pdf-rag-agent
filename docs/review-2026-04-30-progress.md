@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `9c08c81`.
+- Latest pushed local baseline before this snapshot: `b46601d`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1964 lines.
+  to about 1758 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -63,6 +63,10 @@ not be changed without a rollback point and test-backed slices.
   compatibility, target shaping, protected conversation intents, fallback
   payload assembly, and legacy relation-style payload conversion have been
   extracted into focused helper/adapter modules.
+- Agent compatibility shell cleanup: test-only and dead wrapper methods have
+  been removed, compound planning now calls helper modules directly from
+  `agent_compound.py`, and citation ranking tools now call citation helper
+  functions directly from the registry instead of through Agent wrapper methods.
 
 ## Remaining High-Risk Work
 
@@ -85,8 +89,8 @@ changes and should continue as small rollback-safe slices:
 - Enabling provider-level logprobs or multi-sample self-consistency by default.
   The confidence interfaces exist, but production defaults need provider support
   and latency/cost decisions.
-- Removing legacy alias and compatibility shells that are still used by older
-  frontend/eval traces.
+- Removing remaining legacy alias and compatibility shells that are still used
+  by older frontend/eval traces or by tool registry/subtask monkeypatch tests.
 
 ## Next Safe Direction
 
