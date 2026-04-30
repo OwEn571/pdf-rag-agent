@@ -14,8 +14,11 @@ from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_tools import agent_tool_manifest
 from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
+    clarification_tracking_key,
     clear_pending_clarification,
+    remember_clarification_attempt,
     reset_clarification_tracking,
+    store_pending_clarification,
 )
 from app.services.contract_normalization import normalize_contract_targets
 from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
@@ -253,8 +256,15 @@ def compound_clarification_response(
 ) -> dict[str, Any]:
     clarification_options = clarification_options_from_contract_notes(blocked_contract)
     if clarification_options:
-        agent._store_pending_clarification(session=session, contract=blocked_contract)
-    agent._remember_clarification_attempt(session=session, contract=blocked_contract, verification=verification)
+        store_pending_clarification(session=session, contract=blocked_contract, options=clarification_options)
+    remember_clarification_attempt(
+        session=session,
+        key=clarification_tracking_key(
+            contract=blocked_contract,
+            verification=verification,
+            options=clarification_options,
+        ),
+    )
     target_text = " / ".join(blocked_contract.targets) if blocked_contract.targets else "其中一个子任务"
     prefix = (
         f"在继续复合问题的后续检索和比较前，我需要先确认 `{target_text}` 的具体含义；"

@@ -160,9 +160,8 @@ def test_run_conversation_turn_keeps_clarification_payload() -> None:
     assert payload["needs_human"] is True
     assert payload["clarification_question"] == "Which target?"
     assert payload["clarification_options"] == []
-    assert agent.stored_pending is True
-    assert agent.remembered_verification.missing_fields == ["target"]
-    assert agent.remembered_verification.unsupported_claims == ["claim"]
+    assert context.session.clarification_attempts == 1
+    assert context.session.last_clarification_key
 
 
 def test_run_research_turn_composes_commits_and_streams_answer_delta() -> None:
@@ -312,8 +311,6 @@ class _FakeAgent:
         self.sessions = _FakeSessions()
         self.standard_contract = standard_contract
         self.retriever = SimpleNamespace(paper_doc_by_id=lambda _: None)
-        self.stored_pending = False
-        self.remembered_verification = None
         self.remembered_research = False
         self.extract_call: dict[str, Any] = {}
         self.plan_contract: QueryContract | None = None
@@ -332,12 +329,6 @@ class _FakeAgent:
     @staticmethod
     def _conversation_relation_updates_research_context(relation: str) -> bool:
         return relation == "library_status"
-
-    def _store_pending_clarification(self, **_: Any) -> None:
-        self.stored_pending = True
-
-    def _remember_clarification_attempt(self, **kwargs: Any) -> None:
-        self.remembered_verification = kwargs["verification"]
 
     @staticmethod
     def _force_best_effort_after_clarification_limit(**_: Any) -> None:

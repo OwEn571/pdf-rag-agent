@@ -62,10 +62,8 @@ from app.services.clarification_intents import (
     disambiguation_judge_option_payload,
     disambiguation_judge_system_prompt,
     next_clarification_attempt,
-    remember_clarification_attempt,
     resolve_disambiguation_judge_decision,
     selected_clarification_paper_id,
-    store_pending_clarification,
 )
 from app.services.clarification_question_helpers import build_clarification_question
 from app.services.compound_task_helpers import (
@@ -1200,20 +1198,6 @@ class ResearchAssistantAgentV4(
             candidate_lookup=self._candidate_from_paper_id,
         )
 
-    def _remember_clarification_attempt(
-        self,
-        *,
-        session: SessionContext,
-        contract: QueryContract,
-        verification: VerificationReport,
-    ) -> None:
-        key = clarification_tracking_key(
-            contract=contract,
-            verification=verification,
-            options=clarification_options_from_contract_notes(contract),
-        )
-        remember_clarification_attempt(session=session, key=key)
-
     def _disambiguation_options_from_evidence(
         self,
         *,
@@ -1356,10 +1340,6 @@ class ResearchAssistantAgentV4(
                 limit=block_limit,
             ),
         )
-
-    def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
-        options = clarification_options_from_contract_notes(contract)
-        store_pending_clarification(session=session, contract=contract, options=options)
 
     def _plan_agent_actions(self, *, contract: QueryContract, session: SessionContext, use_web_search: bool) -> dict[str, Any]:
         return self.planner.plan_actions(

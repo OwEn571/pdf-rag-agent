@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `1bf1a9a`.
+- Latest pushed local baseline before this snapshot: `1bd49da`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1517 lines.
+  to about 1497 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -119,6 +119,9 @@ not be changed without a rollback point and test-backed slices.
 - Claim focus title selection now calls `agent_runtime_helpers.claim_focus_titles`
   directly from research turn and reflection paths; the Agent no longer exposes
   a focus-title forwarding method.
+- Pending clarification storage and clarification-attempt tracking now call
+  `clarification_intents` helpers directly from standard and compound turn
+  loops; the Agent no longer exposes those clarification forwarding methods.
 
 ## Remaining High-Risk Work
 

@@ -17,8 +17,11 @@ from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_runtime_helpers import claim_focus_titles
 from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
+    clarification_tracking_key,
     clear_pending_clarification,
+    remember_clarification_attempt,
     reset_clarification_tracking,
+    store_pending_clarification,
 )
 from app.services.confidence import confidence_from_logprobs, confidence_payload
 from app.services.contract_context import conversation_relation_updates_research_context
@@ -161,8 +164,16 @@ def run_conversation_turn(
             contradictory_claims=_string_list(verification_payload.get("contradictory_claims")),
             recommended_action=str(verification_payload.get("recommended_action", "") or "ask_human"),
         )
-        agent._store_pending_clarification(session=session, contract=contract)
-        agent._remember_clarification_attempt(session=session, contract=contract, verification=verification)
+        clarification_options = clarification_options_from_contract_notes(contract)
+        store_pending_clarification(session=session, contract=contract, options=clarification_options)
+        remember_clarification_attempt(
+            session=session,
+            key=clarification_tracking_key(
+                contract=contract,
+                verification=verification,
+                options=clarification_options,
+            ),
+        )
     else:
         clear_pending_clarification(session)
         reset_clarification_tracking(session)
@@ -307,8 +318,16 @@ def run_research_turn(
     )
     session.answered_titles = list(dict.fromkeys([*session.answered_titles, *active_research.titles]))
     if verification.status == "clarify":
-        agent._store_pending_clarification(session=session, contract=contract)
-        agent._remember_clarification_attempt(session=session, contract=contract, verification=verification)
+        clarification_options = clarification_options_from_contract_notes(contract)
+        store_pending_clarification(session=session, contract=contract, options=clarification_options)
+        remember_clarification_attempt(
+            session=session,
+            key=clarification_tracking_key(
+                contract=contract,
+                verification=verification,
+                options=clarification_options,
+            ),
+        )
     else:
         clear_pending_clarification(session)
         reset_clarification_tracking(session)
