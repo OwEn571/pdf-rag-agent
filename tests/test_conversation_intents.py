@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.conversation_intents import protected_conversation_intent
+from app.services.conversation_intents import protected_conversation_intent, smalltalk_relation_from_slots
 
 
 def test_protected_conversation_intent_handles_empty_and_greeting() -> None:
@@ -27,3 +27,10 @@ def test_protected_conversation_intent_handles_identity_capability_and_short_cla
     assert short is not None
     assert short.answer_slots == ["clarify"]
     assert short.ambiguous_slots == ["missing_target"]
+
+
+def test_smalltalk_relation_from_slots_preserves_compatibility_relations() -> None:
+    assert smalltalk_relation_from_slots(["self_identity"]) == "self_identity"
+    assert smalltalk_relation_from_slots(["capability"]) == "capability"
+    assert smalltalk_relation_from_slots(["clarify"]) == "clarify_user_intent"
+    assert smalltalk_relation_from_slots(["greeting"]) == "greeting"

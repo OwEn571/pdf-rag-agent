@@ -86,3 +86,13 @@ def protected_conversation_intent(query: str) -> ProtectedConversationIntent | N
             notes=["local_protected_short_clarification"],
         )
     return None
+
+
+def smalltalk_relation_from_slots(slots: list[str]) -> str:
+    if "self_identity" in slots:
+        return "self_identity"
+    if "capability" in slots:
+        return "capability"
+    if "clarify" in slots:
+        return "clarify_user_intent"
+    return "greeting"

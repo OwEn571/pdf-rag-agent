@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any, Callable, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.domain.models import QueryContract, SessionContext
-from app.services.conversation_intents import protected_conversation_intent
+from app.services.conversation_intents import compact_conversation_query, protected_conversation_intent, smalltalk_relation_from_slots
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.intent_contract_adapter import (
     answer_slots_from_relation,
-    research_profile_slots,
     research_relation_from_slots,
     research_requirements_from_slots,
 )
@@ -21,7 +19,6 @@ from app.services.library_intents import (
     is_scoped_library_recommendation_query,
 )
 from app.services.memory_intents import (
-    contains_ordinal_reference,
     is_memory_comparison_query,
     is_pdf_agent_topology_design_query,
     is_short_followup,
@@ -236,7 +233,7 @@ class IntentRecognizer:
 
         if intent.intent_kind == "smalltalk":
             interaction_mode = "conversation"
-            relation = self._smalltalk_relation(slots)
+            relation = smalltalk_relation_from_slots(slots)
             requested_fields = []
             required_modalities = []
             answer_shape = "bullets" if relation == "capability" else "narrative"
@@ -273,8 +270,8 @@ class IntentRecognizer:
                 answer_shape = "narrative"
             continuation_mode = "followup"
         else:
-            relation = self._research_relation(slots=slots, clean_query=clean_query, targets=targets)
-            requested_fields, required_modalities, answer_shape, precision_requirement = self._research_requirements(
+            relation = research_relation_from_slots(slots=slots, clean_query=clean_query, targets=targets)
+            requested_fields, required_modalities, answer_shape, precision_requirement = research_requirements_from_slots(
                 slots=slots,
                 targets=targets,
                 clean_query=clean_query,
@@ -513,33 +510,6 @@ class IntentRecognizer:
             notes=["legacy_router_payload", *[str(item) for item in notes]],
         )
 
-    @staticmethod
-    def _smalltalk_relation(slots: list[str]) -> str:
-        if "self_identity" in slots:
-            return "self_identity"
-        if "capability" in slots:
-            return "capability"
-        if "clarify" in slots:
-            return "clarify_user_intent"
-        return "greeting"
-
-    @staticmethod
-    def _research_relation(*, slots: list[str], clean_query: str, targets: list[str]) -> str:
-        return research_relation_from_slots(slots=slots, clean_query=clean_query, targets=targets)
-
-    @staticmethod
-    def _research_requirements(
-        *,
-        slots: list[str],
-        targets: list[str],
-        clean_query: str,
-    ) -> tuple[list[str], list[str], str, Literal["exact", "high", "normal"]]:
-        return research_requirements_from_slots(slots=slots, targets=targets, clean_query=clean_query)
-
-    @staticmethod
-    def _research_profile_slots(*, slots: list[str], clean_query: str, targets: list[str]) -> list[str]:
-        return research_profile_slots(slots=slots, clean_query=clean_query, targets=targets)
-
     def _protected_local_intent(self, query: str, *, session: SessionContext | None = None) -> Intent | None:
         protected_conversation = protected_conversation_intent(query)
         if protected_conversation is not None:
@@ -554,7 +524,7 @@ class IntentRecognizer:
                 ambiguous_slots=protected_conversation.ambiguous_slots,
                 notes=protected_conversation.notes,
             )
-        normalized = self._compact_text(query)
+        normalized = compact_conversation_query(query)
         lowered = " ".join(str(query or "").strip().lower().split())
         if looks_like_origin_lookup_query(query):
             targets = fallback_query_targets(query)
@@ -571,7 +541,7 @@ class IntentRecognizer:
                     confidence=0.92,
                     notes=["local_protected_origin_lookup"],
                 )
-        if self._looks_like_recent_tool_result_reference(query, session=session):
+        if looks_like_recent_tool_result_reference(query, session=session):
             return Intent(
                 intent_kind="memory_op",
                 topic_state="continue",
@@ -611,7 +581,7 @@ class IntentRecognizer:
                     confidence=0.86,
                     notes=["local_protected_explicit_target_summary"],
                 )
-        if self._is_pdf_agent_topology_design_query(lowered=lowered, compact=normalized):
+        if is_pdf_agent_topology_design_query(lowered=lowered, compact=normalized):
             return Intent(
                 intent_kind="research",
                 topic_state="continue" if session is not None and session.turns else "new",
@@ -634,11 +604,11 @@ class IntentRecognizer:
         extracted_targets: list[str],
     ) -> Intent:
         lowered = " ".join(clean_query.lower().split())
-        compact = self._compact_text(clean_query)
+        compact = compact_conversation_query(clean_query)
         targets = list(extracted_targets)
         active = session.effective_active_research()
-        refers_previous = self._looks_like_memory_reference(clean_query) or (
-            bool(active.targets) and self._is_short_followup(clean_query)
+        refers_previous = looks_like_memory_reference(clean_query) or (
+            bool(active.targets) and is_short_followup(clean_query)
         )
         if is_library_status_query(clean_query):
             return Intent(
@@ -675,7 +645,7 @@ class IntentRecognizer:
                 confidence=0.82,
                 notes=["local_intent_citation_ranking"],
             )
-        if self._is_memory_comparison_query(lowered) and session.turns:
+        if is_memory_comparison_query(lowered) and session.turns:
             return Intent(
                 intent_kind="memory_op",
                 topic_state="continue",
@@ -700,59 +670,7 @@ class IntentRecognizer:
                 notes=["local_intent_memory_followup"],
             )
 
-        slots = self._research_slots(clean_query=clean_query, lowered=lowered, compact=compact, session=session)
-        if not targets and refers_previous:
-            targets = list(active.targets)
-        return Intent(
-            intent_kind="memory_op" if refers_previous else "research",
-            topic_state="continue" if refers_previous else "new",
-            active_topic=clean_query,
-            needs_local_corpus=True,
-            needs_web=self._needs_web(lowered, compact),
-            refers_previous_turn=refers_previous,
-            target_entities=targets,
-            target_aliases=fallback_target_aliases(targets),
-            user_goal=clean_query,
-            answer_slots=slots,
-            confidence=0.74,
-            notes=["local_intent_fallback"],
-        )
-
-    @staticmethod
-    def _compact_text(query: str) -> str:
-        return re.sub(r"[\s,.!?。！？~～，、；;：:]+", "", str(query or "").strip().lower())
-
-    @staticmethod
-    def _is_pdf_agent_topology_design_query(*, lowered: str, compact: str) -> bool:
-        return is_pdf_agent_topology_design_query(lowered=lowered, compact=compact)
-
-    @staticmethod
-    def _is_memory_comparison_query(lowered: str) -> bool:
-        return is_memory_comparison_query(lowered)
-
-    @staticmethod
-    def _looks_like_memory_reference(query: str) -> bool:
-        return looks_like_memory_reference(query)
-
-    @staticmethod
-    def _is_short_followup(query: str) -> bool:
-        return is_short_followup(query)
-
-    @staticmethod
-    def _looks_like_recent_tool_result_reference(query: str, *, session: SessionContext | None) -> bool:
-        return looks_like_recent_tool_result_reference(query, session=session)
-
-    @staticmethod
-    def _contains_ordinal_reference(query: str) -> bool:
-        return contains_ordinal_reference(query)
-
-    @staticmethod
-    def _needs_web(lowered: str, compact: str) -> bool:
-        return normalized_query_needs_external_search(lowered, compact, include_router_extras=True)
-
-    @staticmethod
-    def _research_slots(*, clean_query: str, lowered: str, compact: str, session: SessionContext) -> list[AnswerSlot]:
-        return cast(
+        slots = cast(
             list[AnswerSlot],
             research_answer_slots(
                 clean_query=clean_query,
@@ -760,4 +678,20 @@ class IntentRecognizer:
                 compact=compact,
                 active_relation=session.effective_active_research().relation,
             ),
+        )
+        if not targets and refers_previous:
+            targets = list(active.targets)
+        return Intent(
+            intent_kind="memory_op" if refers_previous else "research",
+            topic_state="continue" if refers_previous else "new",
+            active_topic=clean_query,
+            needs_local_corpus=True,
+            needs_web=normalized_query_needs_external_search(lowered, compact, include_router_extras=True),
+            refers_previous_turn=refers_previous,
+            target_entities=targets,
+            target_aliases=fallback_target_aliases(targets),
+            user_goal=clean_query,
+            answer_slots=slots,
+            confidence=0.74,
+            notes=["local_intent_fallback"],
         )
