@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Literal, cast
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -13,7 +13,7 @@ from app.services.intent_contract_adapter import (
     research_relation_from_slots,
     research_requirements_from_slots,
 )
-from app.services.intent_fallback_helpers import non_research_fallback_intent
+from app.services.intent_fallback_helpers import non_research_fallback_intent, research_fallback_intent
 from app.services.memory_intents import (
     is_pdf_agent_topology_design_query,
     is_short_followup,
@@ -24,8 +24,6 @@ from app.services.research_intents import (
     looks_like_metric_value_query,
     looks_like_origin_lookup_query,
     looks_like_summary_results_query,
-    normalized_query_needs_external_search,
-    research_answer_slots,
 )
 from app.services.query_shaping import fallback_query_targets, fallback_target_aliases
 
@@ -614,28 +612,13 @@ class IntentRecognizer:
         if non_research is not None:
             return Intent(**non_research.as_intent_kwargs())  # type: ignore[arg-type]
 
-        slots = cast(
-            list[AnswerSlot],
-            research_answer_slots(
-                clean_query=clean_query,
-                lowered=lowered,
-                compact=compact,
-                active_relation=session.effective_active_research().relation,
-            ),
+        research_fallback = research_fallback_intent(
+            clean_query=clean_query,
+            lowered=lowered,
+            compact=compact,
+            active_relation=active.relation,
+            active_targets=list(active.targets),
+            extracted_targets=targets,
+            refers_previous=refers_previous,
         )
-        if not targets and refers_previous:
-            targets = list(active.targets)
-        return Intent(
-            intent_kind="memory_op" if refers_previous else "research",
-            topic_state="continue" if refers_previous else "new",
-            active_topic=clean_query,
-            needs_local_corpus=True,
-            needs_web=normalized_query_needs_external_search(lowered, compact, include_router_extras=True),
-            refers_previous_turn=refers_previous,
-            target_entities=targets,
-            target_aliases=fallback_target_aliases(targets),
-            user_goal=clean_query,
-            answer_slots=slots,
-            confidence=0.74,
-            notes=["local_intent_fallback"],
-        )
+        return Intent(**research_fallback.as_intent_kwargs())  # type: ignore[arg-type]

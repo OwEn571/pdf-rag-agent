@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.intent_fallback_helpers import non_research_fallback_intent
+from app.services.intent_fallback_helpers import non_research_fallback_intent, research_fallback_intent
 
 
 def test_non_research_fallback_detects_library_status_and_citation_ranking() -> None:
@@ -50,3 +50,32 @@ def test_non_research_fallback_detects_memory_comparison_and_previous_rationale(
     assert rationale is not None
     assert rationale.answer_slots == ["previous_rationale"]
     assert rationale.target_entities == ["PBA"]
+
+
+def test_research_fallback_builds_research_and_memory_payloads() -> None:
+    fresh = research_fallback_intent(
+        clean_query="PBA 准确率多少",
+        lowered="pba 准确率多少",
+        compact="pba准确率多少",
+        active_relation="",
+        active_targets=[],
+        extracted_targets=["PBA"],
+        refers_previous=False,
+    )
+    followup = research_fallback_intent(
+        clean_query="变量呢",
+        lowered="变量呢",
+        compact="变量呢",
+        active_relation="formula_lookup",
+        active_targets=["DPO"],
+        extracted_targets=[],
+        refers_previous=True,
+    )
+
+    assert fresh.intent_kind == "research"
+    assert fresh.answer_slots == ["metric_value"]
+    assert fresh.target_aliases == ["L_PBA", "LPBA", "L_{PBA}", "L_{\\mathrm{PBA}}"]
+    assert followup.intent_kind == "memory_op"
+    assert followup.topic_state == "continue"
+    assert followup.answer_slots == ["formula"]
+    assert followup.target_entities == ["DPO"]

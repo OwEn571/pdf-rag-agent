@@ -10,6 +10,8 @@ from app.services.library_intents import (
     is_scoped_library_recommendation_query,
 )
 from app.services.memory_intents import is_memory_comparison_query
+from app.services.query_shaping import fallback_target_aliases
+from app.services.research_intents import normalized_query_needs_external_search, research_answer_slots
 
 
 IntentKindValue = Literal["smalltalk", "meta_library", "research", "memory_op"]
@@ -120,3 +122,38 @@ def non_research_fallback_intent(
             notes=["local_intent_memory_followup"],
         )
     return None
+
+
+def research_fallback_intent(
+    *,
+    clean_query: str,
+    lowered: str,
+    compact: str,
+    active_relation: str,
+    active_targets: list[str],
+    extracted_targets: list[str],
+    refers_previous: bool,
+) -> FallbackIntentPayload:
+    targets = list(extracted_targets)
+    if not targets and refers_previous:
+        targets = list(active_targets)
+    slots = research_answer_slots(
+        clean_query=clean_query,
+        lowered=lowered,
+        compact=compact,
+        active_relation=active_relation,
+    )
+    return FallbackIntentPayload(
+        intent_kind="memory_op" if refers_previous else "research",
+        topic_state="continue" if refers_previous else "new",
+        active_topic=clean_query,
+        needs_local_corpus=True,
+        needs_web=normalized_query_needs_external_search(lowered, compact, include_router_extras=True),
+        refers_previous_turn=refers_previous,
+        target_entities=targets,
+        target_aliases=fallback_target_aliases(targets),
+        user_goal=clean_query,
+        answer_slots=list(slots),
+        confidence=0.74,
+        notes=["local_intent_fallback"],
+    )
