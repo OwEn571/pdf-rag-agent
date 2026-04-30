@@ -311,6 +311,7 @@ class _FakeAgent:
         self.runtime = _FakeRuntime(conversation_state, research_state)
         self.sessions = _FakeSessions()
         self.standard_contract = standard_contract
+        self.retriever = SimpleNamespace(paper_doc_by_id=lambda _: None)
         self.stored_pending = False
         self.remembered_verification = None
         self.remembered_research = False
@@ -364,10 +365,6 @@ class _FakeAgent:
                 )
             ],
         )
-
-    @staticmethod
-    def _claim_focus_titles(**_: Any) -> list[str]:
-        return ["DPO Paper"]
 
     def _remember_research_outcome(self, **_: Any) -> None:
         self.remembered_research = True

@@ -10,6 +10,7 @@ from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn, VerificationReport
 from app.services.agent import ResearchAssistantAgentV4
+from app.services.agent_runtime_helpers import claim_focus_titles
 from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
@@ -2309,7 +2310,15 @@ def test_claim_focus_titles_follow_claim_papers_not_candidate_rank(tmp_path: Pat
         )
     ]
 
-    titles = agent._claim_focus_titles(claims=claims, papers=papers)
+    titles = claim_focus_titles(
+        claims=claims,
+        papers=papers,
+        paper_title_lookup=lambda paper_id: (
+            str((doc.metadata or {}).get("title", ""))
+            if (doc := agent.retriever.paper_doc_by_id(paper_id)) is not None
+            else None
+        ),
+    )
 
     assert titles == ["UserLM-R1"]
 

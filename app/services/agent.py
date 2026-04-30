@@ -1379,7 +1379,13 @@ class ResearchAssistantAgentV4(
         verification: VerificationReport,
         excluded_titles: set[str],
     ) -> dict[str, Any]:
-        focus_titles = self._claim_focus_titles(claims=claims, papers=papers)
+        def paper_title_lookup(paper_id: str) -> str | None:
+            doc = self.retriever.paper_doc_by_id(paper_id)
+            if doc is None:
+                return None
+            return str((doc.metadata or {}).get("title", ""))
+
+        focus_titles = claim_focus_titles(claims=claims, papers=papers, paper_title_lookup=paper_title_lookup)
         target = str(contract.targets[0] or "").strip() if contract.targets else ""
         return reflect_agent_state_decision(
             contract=contract,
@@ -1412,15 +1418,6 @@ class ResearchAssistantAgentV4(
         ).strip()
         apply_session_history_compression(session, compressed=compressed, retained_turns=retained_turns)
         self.sessions.upsert(session)
-
-    def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
-        def paper_title_lookup(paper_id: str) -> str | None:
-            doc = self.retriever.paper_doc_by_id(paper_id)
-            if doc is None:
-                return None
-            return str((doc.metadata or {}).get("title", ""))
-
-        return claim_focus_titles(claims=claims, papers=papers, paper_title_lookup=paper_title_lookup)
 
     def _resolve_followup_seed_papers(
         self,

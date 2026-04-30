@@ -14,6 +14,7 @@ from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
 from app.services.agent_runtime_summary import build_runtime_summary
+from app.services.agent_runtime_helpers import claim_focus_titles
 from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clear_pending_clarification,
@@ -275,7 +276,13 @@ def run_research_turn(
         )
         agent_state["answer_logprob_confidence"] = answer_confidence
         run_context.emit("confidence", answer_confidence)
-    focus_titles = agent._claim_focus_titles(claims=claims, papers=screened_papers)
+    def paper_title_lookup(paper_id: str) -> str | None:
+        doc = agent.retriever.paper_doc_by_id(paper_id)
+        if doc is None:
+            return None
+        return str((doc.metadata or {}).get("title", ""))
+
+    focus_titles = claim_focus_titles(claims=claims, papers=screened_papers, paper_title_lookup=paper_title_lookup)
     active_titles = focus_titles if verification.status == "pass" else []
     if verification.status == "pass":
         agent._remember_research_outcome(
