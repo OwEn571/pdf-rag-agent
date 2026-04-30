@@ -83,8 +83,6 @@ from app.services.citation_ranking import (
 )
 from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
-    compound_subtask_contract_from_payload,
-    compound_subtask_relation_from_slots,
     compound_task_label,
     compound_task_result_from_task_payload,
     llm_decompose_compound_query,
@@ -449,36 +447,6 @@ class ResearchAssistantAgentV4(
                 targets=targets,
                 requested_fields=fields,
             ),
-        )
-
-    def _subtask_contract_from_payload(
-        self,
-        payload: object,
-        *,
-        fallback_query: str,
-        index: int,
-    ) -> QueryContract | None:
-        return compound_subtask_contract_from_payload(
-            payload,
-            fallback_query=fallback_query,
-            index=index,
-            target_normalizer=lambda targets, fields: self._normalize_contract_targets(
-                targets=targets,
-                requested_fields=fields,
-            ),
-        )
-
-    @staticmethod
-    def _subtask_relation_from_slots(
-        *,
-        answer_slots: list[str],
-        requested_fields: list[str],
-        targets: list[str],
-    ) -> str:
-        return compound_subtask_relation_from_slots(
-            answer_slots=answer_slots,
-            requested_fields=requested_fields,
-            targets=targets,
         )
 
     def _execute_compound_conversation_subtask(
