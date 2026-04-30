@@ -83,14 +83,11 @@ from app.services.citation_ranking import (
 )
 from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
-    compose_compound_comparison_answer,
-    comparison_results_with_memory,
     compound_subtask_contract_from_payload,
     compound_subtask_relation_from_slots,
     compound_task_label,
     compound_task_result_from_task_payload,
     llm_decompose_compound_query,
-    merge_redundant_field_subtasks,
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
@@ -484,9 +481,6 @@ class ResearchAssistantAgentV4(
             targets=targets,
         )
 
-    def _merge_redundant_field_subtasks(self, subcontracts: list[QueryContract]) -> list[QueryContract]:
-        return merge_redundant_field_subtasks(subcontracts)
-
     def _execute_compound_conversation_subtask(
         self,
         *,
@@ -553,36 +547,6 @@ class ResearchAssistantAgentV4(
             },
         )
         return result
-
-    def _compose_compound_comparison_answer(
-        self,
-        *,
-        query: str,
-        subtask_results: list[dict[str, Any]],
-        session: SessionContext,
-        comparison_contract: QueryContract | None = None,
-    ) -> str:
-        return compose_compound_comparison_answer(
-            query=query,
-            subtask_results=subtask_results,
-            session=session,
-            comparison_contract=comparison_contract,
-            clients=self.clients,
-            clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _comparison_results_with_memory(
-        self,
-        *,
-        subtask_results: list[dict[str, Any]],
-        session: SessionContext,
-        comparison_contract: QueryContract | None,
-    ) -> list[dict[str, Any]]:
-        return comparison_results_with_memory(
-            subtask_results=subtask_results,
-            session=session,
-            comparison_contract=comparison_contract,
-        )
 
     def _select_citation_ranking_candidates(
         self,

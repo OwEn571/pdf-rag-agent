@@ -11,10 +11,12 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.compound_task_helpers import (
+    compose_compound_comparison_answer,
     compound_research_progress_markdown,
     compound_section_heading,
     demote_markdown_headings,
     format_compound_section,
+    merge_redundant_field_subtasks,
 )
 from app.services.evidence_presentation import chunk_text, dedupe_citations
 
@@ -37,7 +39,7 @@ def run_compound_query_if_needed(
     if not agent._should_try_compound_decomposition(clean_query, session=session):
         return None
     subcontracts = agent._llm_decompose_compound_query(clean_query=clean_query, session=session)
-    subcontracts = agent._merge_redundant_field_subtasks(subcontracts)
+    subcontracts = merge_redundant_field_subtasks(subcontracts)
     if len(subcontracts) < 2:
         return None
     compound_targets = list(dict.fromkeys(target for item in subcontracts for target in item.targets))
@@ -96,11 +98,13 @@ def run_compound_query_if_needed(
         )
         execution_steps.append({"node": f"compound_task:{sub_contract.relation}", "summary": sub_contract.clean_query})
         if sub_contract.relation == "comparison_synthesis":
-            comparison = agent._compose_compound_comparison_answer(
+            comparison = compose_compound_comparison_answer(
                 query=clean_query,
                 subtask_results=subtask_results,
                 session=session,
                 comparison_contract=sub_contract,
+                clients=agent.clients,
+                clean_text=agent._clean_common_ocr_artifacts,
             )
             section = format_compound_section(contract=sub_contract, answer=comparison, index=index)
             publish("\n\n" + section)
