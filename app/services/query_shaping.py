@@ -27,6 +27,59 @@ def extract_targets(query: str) -> list[str]:
     return targets
 
 
+def fallback_query_targets(query: str) -> list[str]:
+    """Conservative target extraction for legacy/offline intent fallback."""
+    targets: list[str] = []
+    for pattern in [r"[\"“](.+?)[\"”]", r"[‘'](.+?)[’']"]:
+        for match in re.finditer(pattern, query):
+            candidate = str(match.group(1) or "").strip()
+            if candidate and candidate not in targets:
+                targets.append(candidate)
+    stopwords = {
+        "the",
+        "this",
+        "that",
+        "paper",
+        "first",
+        "which",
+        "what",
+        "who",
+        "origin",
+        "proposed",
+        "introduced",
+    }
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", query):
+        key = token.lower()
+        if key in stopwords:
+            continue
+        looks_like_target = bool(
+            re.fullmatch(r"[A-Z][A-Z0-9\-]{1,8}", token)
+            or any(ch.isupper() for ch in token[1:])
+            or any(ch.isdigit() for ch in token)
+            or re.fullmatch(r"[A-Z][a-z][A-Za-z0-9\-]{2,}", token)
+        )
+        if looks_like_target and token not in targets:
+            targets.append(token)
+    return targets
+
+
+def fallback_target_aliases(targets: list[str]) -> list[str]:
+    aliases: list[str] = []
+    for target in targets:
+        raw = str(target or "").strip()
+        if not re.fullmatch(r"[A-Z][A-Z0-9\-]{1,8}", raw):
+            continue
+        aliases.extend([f"L_{raw}", f"L{raw}", f"L_{{{raw}}}", f"L_{{\\mathrm{{{raw}}}}}"])
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        key = alias.lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(alias)
+    return deduped
+
+
 def paper_query_text(contract: QueryContract) -> str:
     target_text = " ".join(contract.targets).strip()
     goals = research_plan_goals(contract)

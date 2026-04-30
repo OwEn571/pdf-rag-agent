@@ -4,6 +4,8 @@ from app.domain.models import QueryContract
 from app.services.query_shaping import (
     evidence_query_text,
     extract_targets,
+    fallback_query_targets,
+    fallback_target_aliases,
     is_short_acronym,
     matches_target,
     paper_query_text,
@@ -17,6 +19,21 @@ def test_query_shaping_extracts_quoted_and_identifier_targets() -> None:
         "Direct Preference Optimization",
         "DPO",
         "DPO-v2",
+    ]
+
+
+def test_query_shaping_fallback_targets_filter_stopwords_and_titlecase_entities() -> None:
+    assert fallback_query_targets("Which paper first introduced AlignX and PBA?") == ["AlignX", "PBA"]
+    assert fallback_query_targets("what is DPO") == ["DPO"]
+    assert fallback_query_targets("first proposed this paper") == []
+
+
+def test_query_shaping_fallback_target_aliases_cover_loss_notation() -> None:
+    assert fallback_target_aliases(["PBA", "AlignX"]) == [
+        "L_PBA",
+        "LPBA",
+        "L_{PBA}",
+        "L_{\\mathrm{PBA}}",
     ]
 
 

@@ -33,6 +33,7 @@ from app.services.research_intents import (
     normalized_query_needs_external_search,
     research_answer_slots,
 )
+from app.services.query_shaping import fallback_query_targets, fallback_target_aliases
 
 ConversationContextFn = Callable[[SessionContext], dict[str, Any]]
 ConversationMessagesFn = Callable[[SessionContext], list[dict[str, str]]]
@@ -474,7 +475,7 @@ class IntentRecognizer:
         topic_state: TopicState = "continue" if continuation_mode == "followup" else "switch" if continuation_mode == "context_switch" else "new"
         refers_previous_turn = topic_state == "continue"
         origin_like_goal = looks_like_origin_lookup_query(query_for_goal)
-        has_explicit_origin_target = bool(targets) or bool(IntentRecognizer._local_query_targets(query_for_goal))
+        has_explicit_origin_target = bool(targets) or bool(fallback_query_targets(query_for_goal))
         if origin_like_goal and relation in {
             "memory_followup",
             "clarify_user_intent",
@@ -627,7 +628,7 @@ class IntentRecognizer:
                 notes=["local_protected_capability"],
             )
         if looks_like_origin_lookup_query(query):
-            targets = self._local_query_targets(query)
+            targets = fallback_query_targets(query)
             if targets:
                 return Intent(
                     intent_kind="research",
@@ -635,7 +636,7 @@ class IntentRecognizer:
                     active_topic=f"查找 {targets[0]} 最早提出论文",
                     needs_local_corpus=True,
                     target_entities=targets,
-                    target_aliases=self._local_target_aliases(targets),
+                    target_aliases=fallback_target_aliases(targets),
                     user_goal=query,
                     answer_slots=["origin"],
                     confidence=0.92,
@@ -653,7 +654,7 @@ class IntentRecognizer:
                 confidence=0.9,
                 notes=["local_protected_tool_result_reference"],
             )
-        explicit_targets = self._local_query_targets(query)
+        explicit_targets = fallback_query_targets(query)
         if explicit_targets:
             if looks_like_metric_value_query(query):
                 return Intent(
@@ -662,7 +663,7 @@ class IntentRecognizer:
                     active_topic=query,
                     needs_local_corpus=True,
                     target_entities=explicit_targets,
-                    target_aliases=self._local_target_aliases(explicit_targets),
+                    target_aliases=fallback_target_aliases(explicit_targets),
                     user_goal=query,
                     answer_slots=["metric_value"],
                     confidence=0.86,
@@ -675,7 +676,7 @@ class IntentRecognizer:
                     active_topic=query,
                     needs_local_corpus=True,
                     target_entities=explicit_targets,
-                    target_aliases=self._local_target_aliases(explicit_targets),
+                    target_aliases=fallback_target_aliases(explicit_targets),
                     user_goal=query,
                     answer_slots=["paper_summary"],
                     confidence=0.86,
@@ -793,64 +794,12 @@ class IntentRecognizer:
             needs_web=self._needs_web(lowered, compact),
             refers_previous_turn=refers_previous,
             target_entities=targets,
-            target_aliases=self._local_target_aliases(targets),
+            target_aliases=fallback_target_aliases(targets),
             user_goal=clean_query,
             answer_slots=slots,
             confidence=0.74,
             notes=["local_intent_fallback"],
         )
-
-    @staticmethod
-    def _local_target_aliases(targets: list[str]) -> list[str]:
-        aliases: list[str] = []
-        for target in targets:
-            raw = str(target or "").strip()
-            if not re.fullmatch(r"[A-Z][A-Z0-9\-]{1,8}", raw):
-                continue
-            aliases.extend([f"L_{raw}", f"L{raw}", f"L_{{{raw}}}", f"L_{{\\mathrm{{{raw}}}}}"])
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for alias in aliases:
-            key = alias.lower()
-            if key not in seen:
-                seen.add(key)
-                deduped.append(alias)
-        return deduped
-
-    @staticmethod
-    def _local_query_targets(query: str) -> list[str]:
-        targets: list[str] = []
-        for pattern in [r"[\"“](.+?)[\"”]", r"[‘'](.+?)[’']"]:
-            for match in re.finditer(pattern, query):
-                candidate = str(match.group(1) or "").strip()
-                if candidate and candidate not in targets:
-                    targets.append(candidate)
-        stopwords = {
-            "the",
-            "this",
-            "that",
-            "paper",
-            "first",
-            "which",
-            "what",
-            "who",
-            "origin",
-            "proposed",
-            "introduced",
-        }
-        for token in re.findall(r"[A-Za-z][A-Za-z0-9\-]{1,}", query):
-            key = token.lower()
-            if key in stopwords:
-                continue
-            looks_like_target = bool(
-                re.fullmatch(r"[A-Z][A-Z0-9\-]{1,8}", token)
-                or any(ch.isupper() for ch in token[1:])
-                or any(ch.isdigit() for ch in token)
-                or re.fullmatch(r"[A-Z][a-z][A-Za-z0-9\-]{2,}", token)
-            )
-            if looks_like_target and token not in targets:
-                targets.append(token)
-        return targets
 
     @staticmethod
     def _compact_text(query: str) -> str:
