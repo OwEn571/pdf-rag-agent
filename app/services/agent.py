@@ -60,7 +60,6 @@ from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clear_pending_clarification,
     contract_from_pending_clarification,
-    contract_from_selected_clarification_option,
     disambiguation_goal_markers,
     evidence_disambiguation_options,
     disambiguation_judge_human_prompt,
@@ -1310,25 +1309,6 @@ class ResearchAssistantAgentV4(
             query,
             paper_documents=self.retriever.paper_documents(),
             candidate_lookup=self._candidate_from_paper_id,
-        )
-
-    @staticmethod
-    def _contract_from_selected_clarification_option(
-        *,
-        clean_query: str,
-        target: str,
-        selected: dict[str, Any],
-        notes_extra: list[str] | None = None,
-        resolution_note: str = "resolved_human_choice",
-        resolution_subject: str = "用户选择的含义是",
-    ) -> QueryContract:
-        return contract_from_selected_clarification_option(
-            clean_query=clean_query,
-            target=target,
-            selected=selected,
-            notes_extra=notes_extra,
-            resolution_note=resolution_note,
-            resolution_subject=resolution_subject,
         )
 
     def _next_clarification_attempt(

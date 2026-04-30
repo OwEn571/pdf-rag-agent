@@ -10,7 +10,10 @@ from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn, VerificationReport
 from app.services.agent import ResearchAssistantAgentV4
-from app.services.clarification_intents import contract_with_ambiguity_options
+from app.services.clarification_intents import (
+    contract_from_selected_clarification_option,
+    contract_with_ambiguity_options,
+)
 from app.services.library import LibraryBrowserService
 from app.services.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
@@ -4474,7 +4477,7 @@ def test_llm_disambiguation_judge_recommends_but_keeps_human_gate(tmp_path: Path
 
 
 def test_formula_clarification_choice_preserves_answer_slots() -> None:
-    contract = ResearchAssistantAgentV4._contract_from_selected_clarification_option(
+    contract = contract_from_selected_clarification_option(
         clean_query="选择第二个",
         target="XYZ",
         selected={
