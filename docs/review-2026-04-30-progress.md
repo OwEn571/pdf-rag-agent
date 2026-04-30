@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `b8363e1`.
+- Latest pushed local baseline before this snapshot: `e12b68a`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1787 lines.
+  to about 1638 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -79,6 +79,11 @@ not be changed without a rollback point and test-backed slices.
   (`interaction_mode`, `relation`, `intent_kind`, router action/tags) and
   confidence score buckets, so router/composer/solver drift is visible in trace
   comparisons before risky deletions.
+- Agent shell cleanup continued: memory answer helpers, follow-up validator and
+  selected-candidate assessment, clarification contract/tracking helpers,
+  figure helpers, compound subtask execution, agent-step emit, and paper
+  recommendation reason generation are now called directly from their owning
+  modules or registries instead of through Agent wrapper methods.
 
 ## Remaining High-Risk Work
 
@@ -103,7 +108,7 @@ changes and should continue as small rollback-safe slices:
   production defaults still need latency/cost decisions and provider capability
   checks.
 - Removing remaining legacy alias and compatibility shells that are still used
-  by older frontend/eval traces or by tool registry/subtask monkeypatch tests.
+  by older frontend/eval traces or by runtime/registry integration boundaries.
 
 ## Next Safe Direction
 
@@ -115,3 +120,7 @@ Continue with small, test-backed slices only where behavior can stay compatible:
   adapters, then delete wrapper code once callers are migrated.
 - Add solver/composer parity traces before replacing specialized solver outputs
   with generic compose-loop behavior.
+- Treat the remaining Agent methods that execute core tools
+  (`_agent_search_*`, `_agent_solve_claims`, `_agent_verify_grounding`,
+  retry/reflection and disambiguation refresh) as behavior-bearing boundaries;
+  move them only with broader integration tests.
