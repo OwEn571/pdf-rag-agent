@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from app.domain.models import QueryContract, SessionContext
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
+from app.services.intent_contract_adapter import (
+    research_profile_slots,
+    research_relation_from_slots,
+    research_requirements_from_slots,
+)
 from app.services.library_intents import (
     is_citation_query,
     is_library_status_query,
@@ -69,101 +74,6 @@ INTENT_ROUTER_MARKERS: dict[str, MarkerProfile] = {
     "capability": ("你能做什么", "有什么功能", "capability", "abilities"),
     "previous_rationale": ("为什么选择", "为什么推荐", "推荐理由", "排序依据"),
 }
-
-RESEARCH_SLOT_PROFILES: dict[str, dict[str, Any]] = {
-    "origin": {
-        "relation": "origin_lookup",
-        "requested_fields": ["paper_title", "year", "evidence"],
-        "required_modalities": ["paper_card", "page_text"],
-        "answer_shape": "narrative",
-        "precision_requirement": "exact",
-    },
-    "formula": {
-        "relation": "formula_lookup",
-        "requested_fields": ["formula", "variable_explanation", "source"],
-        "required_modalities": ["page_text", "table"],
-        "answer_shape": "bullets",
-        "precision_requirement": "exact",
-    },
-    "followup_research": {
-        "relation": "followup_research",
-        "requested_fields": ["followup_papers", "relationship", "evidence"],
-        "required_modalities": ["paper_card", "page_text"],
-        "answer_shape": "bullets",
-        "precision_requirement": "high",
-    },
-    "figure": {
-        "relation": "figure_question",
-        "requested_fields": ["figure_conclusion", "caption", "evidence"],
-        "required_modalities": ["figure", "caption", "page_text"],
-        "answer_shape": "bullets",
-        "precision_requirement": "high",
-    },
-    "metric_value": {
-        "relation": "metric_value_lookup",
-        "requested_fields": ["metric_value", "setting", "evidence"],
-        "required_modalities": ["table", "caption", "page_text"],
-        "answer_shape": "narrative",
-        "precision_requirement": "exact",
-    },
-    "paper_summary": {
-        "relation": "paper_summary_results",
-        "requested_fields": ["summary", "results", "evidence"],
-        "required_modalities": ["page_text", "paper_card", "table", "caption"],
-        "answer_shape": "narrative",
-        "precision_requirement": "high",
-    },
-    "paper_recommendation": {
-        "relation": "paper_recommendation",
-        "requested_fields": ["recommended_papers", "rationale"],
-        "required_modalities": ["paper_card", "page_text"],
-        "answer_shape": "bullets",
-        "precision_requirement": "high",
-    },
-    "topology_recommendation": {
-        "relation": "topology_recommendation",
-        "requested_fields": ["best_topology", "langgraph_recommendation"],
-        "required_modalities": ["page_text", "paper_card"],
-        "answer_shape": "bullets",
-        "precision_requirement": "high",
-    },
-    "topology_discovery": {
-        "relation": "topology_discovery",
-        "requested_fields": ["relevant_papers", "topology_types"],
-        "required_modalities": ["page_text", "paper_card"],
-        "answer_shape": "bullets",
-        "precision_requirement": "high",
-    },
-    "entity_definition": {
-        "relation": "entity_definition",
-        "requested_fields": ["definition", "mechanism", "role_in_context"],
-        "required_modalities": ["page_text", "paper_card", "table"],
-        "answer_shape": "narrative",
-        "precision_requirement": "high",
-    },
-    "concept_definition": {
-        "relation": "concept_definition",
-        "requested_fields": ["definition", "mechanism", "examples"],
-        "required_modalities": ["page_text", "paper_card"],
-        "answer_shape": "narrative",
-        "precision_requirement": "high",
-    },
-    "training_component": {
-        "relation": "general_question",
-        "requested_fields": ["mechanism", "reward_model_requirement", "evidence"],
-        "required_modalities": ["page_text", "paper_card"],
-        "answer_shape": "narrative",
-        "precision_requirement": "high",
-    },
-    "general_answer": {
-        "relation": "general_question",
-        "requested_fields": ["answer"],
-        "required_modalities": ["page_text", "paper_card"],
-        "answer_shape": "narrative",
-        "precision_requirement": "high",
-    },
-}
-
 
 class Intent(BaseModel):
     intent_kind: IntentKind = "research"
@@ -636,13 +546,7 @@ class IntentRecognizer:
 
     @staticmethod
     def _research_relation(*, slots: list[str], clean_query: str, targets: list[str]) -> str:
-        profile_slots = IntentRecognizer._research_profile_slots(
-            slots=slots,
-            clean_query=clean_query,
-            targets=targets,
-        )
-        first_profile = RESEARCH_SLOT_PROFILES.get(profile_slots[0] if profile_slots else "general_answer", {})
-        return str(first_profile.get("relation") or "general_question")
+        return research_relation_from_slots(slots=slots, clean_query=clean_query, targets=targets)
 
     @staticmethod
     def _research_requirements(
@@ -651,40 +555,11 @@ class IntentRecognizer:
         targets: list[str],
         clean_query: str,
     ) -> tuple[list[str], list[str], str, Literal["exact", "high", "normal"]]:
-        profile_slots = IntentRecognizer._research_profile_slots(slots=slots, clean_query=clean_query, targets=targets)
-        requested_fields: list[str] = []
-        required_modalities: list[str] = []
-        shapes: list[str] = []
-        precision_values: list[str] = []
-        for slot in profile_slots:
-            profile = RESEARCH_SLOT_PROFILES.get(slot) or RESEARCH_SLOT_PROFILES["general_answer"]
-            requested_fields.extend(str(item) for item in profile.get("requested_fields", []) if str(item))
-            required_modalities.extend(str(item) for item in profile.get("required_modalities", []) if str(item))
-            shapes.append(str(profile.get("answer_shape") or "narrative"))
-            precision_values.append(str(profile.get("precision_requirement") or "high"))
-        answer_shape = "table" if "table" in shapes else "bullets" if "bullets" in shapes else "narrative"
-        precision_requirement: Literal["exact", "high", "normal"] = (
-            "exact" if "exact" in precision_values else "high" if "high" in precision_values else "normal"
-        )
-        return (
-            list(dict.fromkeys(requested_fields or ["answer"])),
-            list(dict.fromkeys(required_modalities or ["page_text", "paper_card"])),
-            answer_shape,
-            precision_requirement,
-        )
+        return research_requirements_from_slots(slots=slots, targets=targets, clean_query=clean_query)
 
     @staticmethod
     def _research_profile_slots(*, slots: list[str], clean_query: str, targets: list[str]) -> list[str]:
-        profile_slots: list[str] = []
-        for slot in slots or ["general_answer"]:
-            key = "_".join(str(slot or "").strip().lower().replace("-", "_").split())
-            if key == "definition":
-                key = "entity_definition" if targets and not str(clean_query or "").startswith("什么是") else "concept_definition"
-            if key not in RESEARCH_SLOT_PROFILES:
-                key = "general_answer"
-            if key not in profile_slots:
-                profile_slots.append(key)
-        return profile_slots or ["general_answer"]
+        return research_profile_slots(slots=slots, clean_query=clean_query, targets=targets)
 
     def _protected_local_intent(self, query: str, *, session: SessionContext | None = None) -> Intent | None:
         normalized = self._compact_text(query)

@@ -6,8 +6,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from app.domain.models import QueryContract, SessionContext
-from app.services.intent import IntentRecognizer
-from app.services.research_intents import normalized_query_text
+from app.services.intent_contract_adapter import research_relation_from_slots, research_requirements_from_slots
+from app.services.research_intents import normalized_query_text, research_answer_slots
 
 RouterAction = Literal["answer_directly", "need_corpus_search", "need_web", "need_clarify"]
 NormalizeTargetsFn = Callable[[list[str], list[str]], list[str]]
@@ -226,14 +226,14 @@ def query_contract_from_router_decision(
     router_targets = [str(item).strip() for item in raw_targets if str(item).strip()] if isinstance(raw_targets, list) else []
     targets = normalize_targets(router_targets or extracted_targets, [])
     lowered, compact = normalized_query_text(query)
-    slots = IntentRecognizer._research_slots(
+    slots = research_answer_slots(
         clean_query=query,
         lowered=lowered,
         compact=compact,
-        session=session,
+        active_relation=session.effective_active_research().relation,
     )
-    relation = IntentRecognizer._research_relation(slots=slots, clean_query=query, targets=targets)
-    requested_fields, required_modalities, answer_shape, precision_requirement = IntentRecognizer._research_requirements(
+    relation = research_relation_from_slots(slots=slots, clean_query=query, targets=targets)
+    requested_fields, required_modalities, answer_shape, precision_requirement = research_requirements_from_slots(
         slots=slots,
         targets=targets,
         clean_query=query,
