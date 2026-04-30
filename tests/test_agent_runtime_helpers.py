@@ -894,13 +894,9 @@ def test_runtime_helpers_execute_tool_loop_runs_planned_and_fallback_actions() -
     contract = QueryContract(clean_query="x")
     session = SimpleNamespace()
     events: list[tuple[str, dict[str, object]]] = []
-    steps: list[dict[str, object]] = []
 
     class Agent:
         agent_settings = SimpleNamespace(max_agent_steps=4)
-
-        def _emit_agent_step(self, **kwargs: object) -> None:
-            steps.append(kwargs)
 
     class Executor:
         def __init__(self) -> None:
@@ -933,9 +929,10 @@ def test_runtime_helpers_execute_tool_loop_runs_planned_and_fallback_actions() -
 
     assert executor.runs == ["read_memory", "compose"]
     assert state["current_tool_input"] == {"style": "short"}
-    assert [step["action"] for step in steps] == ["read_memory", "compose"]
-    assert steps[0]["arguments"] == {"reason": "context"}
-    assert steps[1]["arguments"] == {"style": "short"}
+    agent_steps = [payload for event, payload in events if event == "agent_step"]
+    assert [step["action"] for step in agent_steps] == ["read_memory", "compose"]
+    assert agent_steps[0]["arguments"] == {"reason": "context"}
+    assert agent_steps[1]["arguments"] == {"style": "short"}
 
 
 def test_runtime_helpers_detect_clarification_need_from_contract_confidence() -> None:

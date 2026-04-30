@@ -50,8 +50,6 @@ class _ToolPlanClients:
 class _RegistryProbeAgent:
     def __init__(self) -> None:
         self.observations: list[dict[str, object]] = []
-        self.steps: list[str] = []
-        self.step_payloads: list[dict[str, object]] = []
         self.runtime = AgentRuntime(agent=self)
 
     def _record_agent_observation(self, **kwargs: object) -> None:
@@ -69,10 +67,6 @@ class _RegistryProbeAgent:
 
     def _emit_agent_tool_call(self, **_: object) -> None:
         return None
-
-    def _emit_agent_step(self, *, action: str, arguments: dict[str, object] | None = None, **_: object) -> None:
-        self.steps.append(action)
-        self.step_payloads.append({"action": action, "arguments": arguments or {}})
 
     def _compose_conversation_response(self, **_: object) -> str:
         return "hello from runtime"
@@ -119,6 +113,14 @@ class _RegistryProbeAgent:
 
     def _candidate_from_paper_id(self, paper_id: str) -> None:
         return None
+
+
+def _agent_step_payloads(events: list[tuple[str, dict[str, object]]]) -> list[dict[str, object]]:
+    return [
+        {"action": payload.get("action"), "arguments": payload.get("arguments", {})}
+        for event, payload in events
+        if event == "agent_step"
+    ]
 
 
 class _RerankProbeRetriever:
@@ -429,8 +431,9 @@ def test_agent_runtime_runs_conversation_and_research_loops() -> None:
     assert research_state["confidence"]["basis"] == "verifier"
     assert research_state["confidence"]["score"] > 0.8
     assert any(event == "confidence" and payload["basis"] == "verifier" for event, payload in events)
-    assert "search_corpus" in probe.steps
-    assert "compose" in probe.steps
+    agent_step_actions = [payload["action"] for payload in _agent_step_payloads(events)]
+    assert "search_corpus" in agent_step_actions
+    assert "compose" in agent_step_actions
 
 
 def test_agent_runtime_preserves_structured_tool_arguments() -> None:
@@ -455,7 +458,7 @@ def test_agent_runtime_preserves_structured_tool_arguments() -> None:
     )
 
     assert research_state["tool_inputs"]["search_corpus"] == {"query": "custom PPO query", "top_k": 3}
-    assert {"action": "search_corpus", "arguments": {"query": "custom PPO query", "top_k": 3}} in probe.step_payloads
+    assert {"action": "search_corpus", "arguments": {"query": "custom PPO query", "top_k": 3}} in _agent_step_payloads(events)
 
 
 def test_summarize_and_verify_claim_tools_run_inside_research_loop() -> None:
@@ -499,7 +502,7 @@ def test_summarize_and_verify_claim_tools_run_inside_research_loop() -> None:
     assert "clipped surrogate objective" in state["summaries"][0]["summary"].lower()
     assert state["claim_checks"][0]["status"] == "pass"
     assert state["claim_checks"][0]["supporting_evidence_ids"] == ["inline::1"]
-    assert {"action": "verify_claim", "arguments": state["tool_inputs"]["verify_claim"]} in probe.step_payloads
+    assert {"action": "verify_claim", "arguments": state["tool_inputs"]["verify_claim"]} in _agent_step_payloads(events)
 
 
 def test_query_rewrite_tool_runs_inside_research_loop() -> None:
@@ -641,7 +644,7 @@ def test_todo_write_tool_updates_session_memory_and_emits_event() -> None:
 
     assert session.working_memory["todos"] == todos
     assert ("todo_update", {"items": todos}) in events
-    assert "todo_write" in probe.steps
+    assert "todo_write" in [payload["action"] for payload in _agent_step_payloads(events)]
 
 
 def test_task_tool_runs_subtask_through_conversation_runtime() -> None:

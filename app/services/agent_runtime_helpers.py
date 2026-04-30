@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, VerificationReport
+from app.services.agent_emit import emit_agent_step
 from app.services.agent_tools import conversation_tool_sequence, research_tool_sequence
 from app.services.clarification_intents import (
     ambiguity_options_from_notes,
@@ -953,12 +954,11 @@ def execute_tool_loop(
             break
         tool_input = tool_input_from_state(state, action)
         state["current_tool_input"] = tool_input
-        agent._emit_agent_step(
+        emit_agent_step(
             emit=emit,
             index=index,
             action=action,
             contract=state.get("contract", contract),
-            state=state,
             arguments=tool_input,
         )
         should_stop = executor.run(action)

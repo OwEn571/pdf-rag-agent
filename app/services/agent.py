@@ -27,7 +27,6 @@ from app.services.agent_task import run_task_subagent
 from app.services.model_clients import ModelClients
 from app.services.learnings import load_learnings
 from app.services.agent_emit import (
-    emit_agent_step as emit_agent_step_event,
     emit_agent_tool_call as emit_agent_tool_call_event,
     record_agent_observation as record_agent_observation_event,
 )
@@ -503,24 +502,6 @@ class ResearchAssistantAgentV4(
         arguments: dict[str, Any],
     ) -> None:
         emit_agent_tool_call_event(emit=emit, tool=tool, arguments=arguments)
-
-    def _emit_agent_step(
-        self,
-        *,
-        emit: Callable[[str, dict[str, Any]], None],
-        index: int,
-        action: str,
-        contract: QueryContract,
-        state: dict[str, Any],
-        arguments: dict[str, Any] | None = None,
-    ) -> None:
-        emit_agent_step_event(
-            emit=emit,
-            index=index,
-            action=action,
-            contract=contract,
-            arguments=arguments,
-        )
 
     def _agent_search_papers(
         self,
