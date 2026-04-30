@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `e1eb528`.
+- Latest pushed local baseline before this snapshot: `0126d37`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1602 lines.
+  to about 1565 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -97,6 +97,10 @@ not be changed without a rollback point and test-backed slices.
 - Web-search enablement now runs directly through
   `query_shaping.should_use_web_search` in the turn loop; the Agent no longer
   exposes a pure forwarding method for that decision.
+- Clarification option rendering, pending clarification clearing/reset, and
+  active research construction now call their owning helper modules directly
+  from the turn/compound loops; the Agent no longer exposes those session-state
+  forwarding methods.
 
 ## Remaining High-Risk Work
 

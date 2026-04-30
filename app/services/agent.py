@@ -9,7 +9,6 @@ from uuid import uuid4
 from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
 from app.domain.models import (
-    ActiveResearch,
     AssistantCitation,
     AssistantResponse,
     CandidatePaper,
@@ -57,7 +56,6 @@ from app.services.clarification_intents import (
     acronym_options_from_evidence as build_acronym_options_from_evidence,
     clarification_tracking_key,
     clarification_options_from_contract_notes,
-    clear_pending_clarification,
     contract_from_pending_clarification,
     disambiguation_goal_markers,
     evidence_disambiguation_options,
@@ -66,7 +64,6 @@ from app.services.clarification_intents import (
     disambiguation_judge_system_prompt,
     next_clarification_attempt,
     remember_clarification_attempt,
-    reset_clarification_tracking,
     resolve_disambiguation_judge_decision,
     selected_clarification_paper_id,
     store_pending_clarification,
@@ -148,7 +145,6 @@ from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import SessionStore
 from app.services.session_context_helpers import (
     apply_session_history_compression,
-    make_active_research,
     session_conversation_context,
     session_history_compression_payload,
     session_history_compression_system_prompt,
@@ -444,10 +440,11 @@ class ResearchAssistantAgentV4(
     ) -> dict[str, Any] | None:
         contract: QueryContract = state["contract"]
         verification = state.get("verification")
+        clarification_options = clarification_options_from_contract_notes(contract)
         clarification_key = clarification_tracking_key(
             contract=contract,
             verification=verification,
-            options=self._clarification_options(contract),
+            options=clarification_options,
         )
         next_attempt = next_clarification_attempt(session=session, key=clarification_key)
         decision = clarification_limit_decision(
@@ -455,7 +452,7 @@ class ResearchAssistantAgentV4(
             verification=verification,
             next_attempt=next_attempt,
             max_attempts=self.agent_settings.max_clarification_attempts,
-            options=self._clarification_options(contract),
+            options=clarification_options,
         )
         if decision is None:
             return None
@@ -1237,13 +1234,9 @@ class ResearchAssistantAgentV4(
         key = clarification_tracking_key(
             contract=contract,
             verification=verification,
-            options=self._clarification_options(contract),
+            options=clarification_options_from_contract_notes(contract),
         )
         remember_clarification_attempt(session=session, key=key)
-
-    @staticmethod
-    def _reset_clarification_tracking(session: SessionContext) -> None:
-        reset_clarification_tracking(session)
 
     def _disambiguation_options_from_evidence(
         self,
@@ -1384,39 +1377,9 @@ class ResearchAssistantAgentV4(
             ),
         )
 
-    def _clarification_options(self, contract: QueryContract) -> list[dict[str, Any]]:
-        return clarification_options_from_contract_notes(contract)
-
     def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
-        options = self._clarification_options(contract)
+        options = clarification_options_from_contract_notes(contract)
         store_pending_clarification(session=session, contract=contract, options=options)
-
-    @staticmethod
-    def _clear_pending_clarification(session: SessionContext) -> None:
-        clear_pending_clarification(session)
-
-    @staticmethod
-    def _make_active_research(
-        *,
-        relation: str,
-        targets: list[str],
-        titles: list[str],
-        requested_fields: list[str],
-        required_modalities: list[str],
-        answer_shape: str,
-        precision_requirement: str,
-        clean_query: str,
-    ) -> ActiveResearch:
-        return make_active_research(
-            relation=relation,
-            targets=targets,
-            titles=titles,
-            requested_fields=requested_fields,
-            required_modalities=required_modalities,
-            answer_shape=answer_shape,
-            precision_requirement=precision_requirement,
-            clean_query=clean_query,
-        )
 
     def _excluded_focus_titles(self, *, session: SessionContext, contract: QueryContract) -> set[str]:
         return excluded_focus_titles(

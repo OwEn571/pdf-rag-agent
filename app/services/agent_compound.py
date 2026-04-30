@@ -11,6 +11,11 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.agent_tools import agent_tool_manifest
+from app.services.clarification_intents import (
+    clarification_options_from_contract_notes,
+    clear_pending_clarification,
+    reset_clarification_tracking,
+)
 from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
     compose_compound_comparison_answer,
@@ -22,7 +27,7 @@ from app.services.compound_task_helpers import (
     merge_redundant_field_subtasks,
 )
 from app.services.evidence_presentation import chunk_text, dedupe_citations
-from app.services.session_context_helpers import session_llm_history_messages
+from app.services.session_context_helpers import make_active_research, session_llm_history_messages
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -177,7 +182,7 @@ def run_compound_query_if_needed(
             if isinstance(citation, AssistantCitation) and citation.title
         )
     )
-    active_research = agent._make_active_research(
+    active_research = make_active_research(
         relation="compound_query",
         targets=compound_targets,
         titles=compound_titles,
@@ -188,8 +193,8 @@ def run_compound_query_if_needed(
         clean_query=clean_query,
     )
     session.answered_titles = list(dict.fromkeys([*session.answered_titles, *active_research.titles]))
-    agent._clear_pending_clarification(session)
-    agent._reset_clarification_tracking(session)
+    clear_pending_clarification(session)
+    reset_clarification_tracking(session)
     agent.sessions.commit_turn(
         session,
         SessionTurn.from_contract(
@@ -243,7 +248,7 @@ def compound_clarification_response(
     verification: VerificationReport,
     execution_steps: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    clarification_options = agent._clarification_options(blocked_contract)
+    clarification_options = clarification_options_from_contract_notes(blocked_contract)
     if clarification_options:
         agent._store_pending_clarification(session=session, contract=blocked_contract)
     agent._remember_clarification_attempt(session=session, contract=blocked_contract, verification=verification)

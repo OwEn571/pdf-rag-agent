@@ -13,9 +13,15 @@ from app.domain.models import (
 from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
+from app.services.clarification_intents import (
+    clarification_options_from_contract_notes,
+    clear_pending_clarification,
+    reset_clarification_tracking,
+)
 from app.services.confidence import confidence_from_logprobs, confidence_payload
 from app.services.contract_context import conversation_relation_updates_research_context
 from app.services.query_shaping import should_use_web_search
+from app.services.session_context_helpers import make_active_research
 
 
 def finish_agent_turn(
@@ -135,7 +141,7 @@ def run_conversation_turn(
     citation_titles = [item.title for item in citations if item.title]
     active_research = None
     if conversation_relation_updates_research_context(contract.relation):
-        active_research = agent._make_active_research(
+        active_research = make_active_research(
             relation=contract.relation,
             targets=list(contract.targets),
             titles=citation_titles,
@@ -156,8 +162,8 @@ def run_conversation_turn(
         agent._store_pending_clarification(session=session, contract=contract)
         agent._remember_clarification_attempt(session=session, contract=contract, verification=verification)
     else:
-        agent._clear_pending_clarification(session)
-        agent._reset_clarification_tracking(session)
+        clear_pending_clarification(session)
+        reset_clarification_tracking(session)
     agent.sessions.commit_turn(
         session,
         SessionTurn.from_contract(
@@ -188,7 +194,7 @@ def run_conversation_turn(
         verification_report=verification_payload,
         needs_human=conversation_needs_human,
         clarification_question=agent._clarification_question(contract, session) if conversation_needs_human else "",
-        clarification_options=agent._clarification_options(contract) if conversation_needs_human else [],
+        clarification_options=clarification_options_from_contract_notes(contract) if conversation_needs_human else [],
     )
     return response.model_dump()
 
@@ -281,7 +287,7 @@ def run_research_turn(
             citations=citations,
         )
     session.last_relation = contract.relation
-    active_research = agent._make_active_research(
+    active_research = make_active_research(
         relation=contract.relation,
         targets=list(contract.targets),
         titles=active_titles,
@@ -296,8 +302,8 @@ def run_research_turn(
         agent._store_pending_clarification(session=session, contract=contract)
         agent._remember_clarification_attempt(session=session, contract=contract, verification=verification)
     else:
-        agent._clear_pending_clarification(session)
-        agent._reset_clarification_tracking(session)
+        clear_pending_clarification(session)
+        reset_clarification_tracking(session)
     agent.sessions.commit_turn(
         session,
         SessionTurn.from_contract(
@@ -331,7 +337,7 @@ def run_research_turn(
         verification_report=verification.model_dump(),
         needs_human=verification.status == "clarify",
         clarification_question=agent._clarification_question(contract, session) if verification.status == "clarify" else "",
-        clarification_options=agent._clarification_options(contract) if verification.status == "clarify" else [],
+        clarification_options=clarification_options_from_contract_notes(contract) if verification.status == "clarify" else [],
     )
     return response.model_dump()
 

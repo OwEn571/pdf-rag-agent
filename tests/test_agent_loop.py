@@ -131,7 +131,6 @@ def test_run_conversation_turn_commits_answer_and_response_payload() -> None:
     assert agent.sessions.committed[0]["turn"].answer == "hello"
     assert agent.sessions.committed[0]["active"].titles == ["Demo Paper"]
     assert context.events[0]["data"]["name"] == "compose"
-    assert agent.cleared_pending is True
 
 
 def test_run_conversation_turn_keeps_clarification_payload() -> None:
@@ -160,7 +159,7 @@ def test_run_conversation_turn_keeps_clarification_payload() -> None:
 
     assert payload["needs_human"] is True
     assert payload["clarification_question"] == "Which target?"
-    assert payload["clarification_options"] == [{"label": "A"}]
+    assert payload["clarification_options"] == []
     assert agent.stored_pending is True
     assert agent.remembered_verification.missing_fields == ["target"]
     assert agent.remembered_verification.unsupported_claims == ["claim"]
@@ -313,7 +312,6 @@ class _FakeAgent:
         self.sessions = _FakeSessions()
         self.standard_contract = standard_contract
         self.stored_pending = False
-        self.cleared_pending = False
         self.remembered_verification = None
         self.remembered_research = False
         self.extract_call: dict[str, Any] = {}
@@ -334,22 +332,11 @@ class _FakeAgent:
     def _conversation_relation_updates_research_context(relation: str) -> bool:
         return relation == "library_status"
 
-    @staticmethod
-    def _make_active_research(**kwargs: Any) -> SimpleNamespace:
-        return SimpleNamespace(**kwargs)
-
     def _store_pending_clarification(self, **_: Any) -> None:
         self.stored_pending = True
 
     def _remember_clarification_attempt(self, **kwargs: Any) -> None:
         self.remembered_verification = kwargs["verification"]
-
-    def _clear_pending_clarification(self, _: SessionContext) -> None:
-        self.cleared_pending = True
-
-    @staticmethod
-    def _reset_clarification_tracking(_: SessionContext) -> None:
-        return None
 
     @staticmethod
     def _runtime_summary(**kwargs: Any) -> dict[str, Any]:
@@ -395,7 +382,3 @@ class _FakeAgent:
     @staticmethod
     def _clarification_question(_: QueryContract, __: SessionContext) -> str:
         return "Which target?"
-
-    @staticmethod
-    def _clarification_options(_: QueryContract) -> list[dict[str, str]]:
-        return [{"label": "A"}]
