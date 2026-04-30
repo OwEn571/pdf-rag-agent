@@ -65,3 +65,27 @@ def test_openai_tool_definitions_preserve_input_schema() -> None:
     assert function["name"] == "search_corpus"
     assert function["parameters"] == schema
     assert "reason" not in function["parameters"]["properties"]
+
+
+def test_extract_chunk_logprobs_reads_openai_content_entries_without_top_alternatives() -> None:
+    chunk = SimpleNamespace(
+        response_metadata={
+            "logprobs": {
+                "content": [
+                    {"token": "A", "logprob": -0.1, "top_logprobs": [{"token": "B", "logprob": -5.0}]},
+                    {"token": "B", "logprob": "-0.2"},
+                ]
+            }
+        }
+    )
+
+    assert ModelClients._extract_chunk_logprobs(chunk) == [-0.1, -0.2]
+
+
+def test_extract_chunk_logprobs_handles_generation_info_and_bad_values() -> None:
+    chunk = SimpleNamespace(
+        generation_info={"logprobs": {"content": [{"logprob": "bad"}, {"logprob": -0.3}]}},
+        additional_kwargs={"ignored": True},
+    )
+
+    assert ModelClients._extract_chunk_logprobs(chunk) == [-0.3]

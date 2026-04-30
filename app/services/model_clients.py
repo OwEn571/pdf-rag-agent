@@ -100,6 +100,8 @@ class ModelClients:
         system_prompt: str,
         human_prompt: str,
         on_delta: Callable[[str], None],
+        on_logprobs: Callable[[list[float]], None] | None = None,
+        request_logprobs: bool = False,
         fallback: str = "",
     ) -> str:
         model = self.chat
@@ -109,7 +111,8 @@ class ModelClients:
             return fallback
         chunks: list[str] = []
         try:
-            for chunk in model.stream([SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]):
+            stream_model = model.bind(logprobs=True) if request_logprobs else model
+            for chunk in stream_model.stream([SystemMessage(content=system_prompt), HumanMessage(content=human_prompt)]):
                 content = chunk.content
                 if isinstance(content, str):
                     text = content
@@ -121,6 +124,10 @@ class ModelClients:
                     continue
                 chunks.append(text)
                 on_delta(text)
+                if on_logprobs is not None:
+                    logprobs = self._extract_chunk_logprobs(chunk)
+                    if logprobs:
+                        on_logprobs(logprobs)
             text = "".join(chunks).strip()
             return text or fallback
         except Exception as exc:  # noqa: BLE001
@@ -331,6 +338,42 @@ class ModelClients:
             actions.append(name)
             arguments.append({"name": name, "args": parsed_args})
         return actions, arguments
+
+    @staticmethod
+    def _extract_chunk_logprobs(chunk: Any) -> list[float]:
+        payloads: list[Any] = []
+        for attr in ("response_metadata", "generation_info", "additional_kwargs"):
+            value = getattr(chunk, attr, None)
+            if isinstance(value, dict) and value:
+                payloads.append(value.get("logprobs", value))
+        values: list[float] = []
+        for payload in payloads:
+            values.extend(ModelClients._extract_logprob_values(payload))
+        return values
+
+    @staticmethod
+    def _extract_logprob_values(payload: Any) -> list[float]:
+        values: list[float] = []
+        if isinstance(payload, dict):
+            content = payload.get("content")
+            if isinstance(content, list):
+                for item in content:
+                    values.extend(ModelClients._extract_logprob_values(item))
+                return values
+            if "logprob" in payload:
+                try:
+                    values.append(float(payload["logprob"]))
+                except (TypeError, ValueError):
+                    pass
+                return values
+            for key, value in payload.items():
+                if key == "top_logprobs":
+                    continue
+                values.extend(ModelClients._extract_logprob_values(value))
+        elif isinstance(payload, list):
+            for item in payload:
+                values.extend(ModelClients._extract_logprob_values(item))
+        return values
 
     @staticmethod
     def _safe_parse_json_object(raw: str) -> dict[str, Any] | None:
