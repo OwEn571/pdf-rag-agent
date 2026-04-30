@@ -121,10 +121,6 @@ from app.services.followup_candidate_helpers import (
 )
 from app.services.intent import IntentRecognizer
 from app.services.intent_router import LLMIntentRouter, query_contract_from_router_decision
-from app.services.memory_followup_answers import (
-    compose_memory_followup_answer,
-    compose_memory_synthesis_answer,
-)
 from app.services.pdf_rendering import render_pdf_page_image_data_url
 from app.services.query_shaping import (
     extract_targets,
@@ -399,26 +395,6 @@ class ResearchAssistantAgentV4(
             answer_confidence=answer_confidence,
             claims=claims,
             citations=citations,
-        )
-
-    def _compose_memory_synthesis_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
-        return compose_memory_synthesis_answer(
-            query=query,
-            session=session,
-            contract=contract,
-            clients=self.clients,
-            conversation_context=self._session_conversation_context,
-            clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _compose_memory_followup_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
-        return compose_memory_followup_answer(
-            query=query,
-            session=session,
-            contract=contract,
-            clients=self.clients,
-            conversation_context=self._session_conversation_context,
-            clean_text=self._clean_common_ocr_artifacts,
         )
 
     def _execute_compound_task_subagent(

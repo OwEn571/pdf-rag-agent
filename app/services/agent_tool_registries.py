@@ -14,6 +14,10 @@ from app.services.citation_ranking import (
 from app.services.conversation_memory_contract import active_memory_bindings, memory_binding_doc_ids
 from app.services.evidence_presentation import dedupe_citations
 from app.services.memory_artifact_helpers import conversation_tool_result_artifact
+from app.services.memory_followup_answers import (
+    compose_memory_followup_answer,
+    compose_memory_synthesis_answer,
+)
 from app.services.query_rewrite import rewrite_query
 from app.services.tool_registry_helpers import (
     atomic_search_observation_payload,
@@ -264,7 +268,14 @@ def build_conversation_tool_registry(
             tool="answer_from_memory",
             arguments={"query": query, "targets": contract.targets},
         )
-        answer = agent._compose_memory_followup_answer(query=query, session=session, contract=contract)
+        answer = compose_memory_followup_answer(
+            query=query,
+            session=session,
+            contract=contract,
+            clients=agent.clients,
+            conversation_context=agent._session_conversation_context,
+            clean_text=agent._clean_common_ocr_artifacts,
+        )
         payload = store_conversation_answer_result(
             agent=agent, state=state, session=session, contract=contract, emit=emit,
             tool="answer_from_memory", query=query, answer=answer,
@@ -277,7 +288,14 @@ def build_conversation_tool_registry(
 
     def synthesize_previous_results() -> None:
         agent._emit_agent_tool_call(emit=emit, tool="synthesize_previous_results", arguments={"targets": contract.targets})
-        answer = agent._compose_memory_synthesis_answer(query=query, session=session, contract=contract)
+        answer = compose_memory_synthesis_answer(
+            query=query,
+            session=session,
+            contract=contract,
+            clients=agent.clients,
+            conversation_context=agent._session_conversation_context,
+            clean_text=agent._clean_common_ocr_artifacts,
+        )
         bindings = active_memory_bindings(session)
         state["citations"] = dedupe_citations(agent._citations_from_doc_ids(memory_binding_doc_ids(bindings), []))
         payload = store_conversation_answer_result(

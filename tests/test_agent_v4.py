@@ -17,6 +17,7 @@ from app.services.clarification_intents import (
 from app.services.evidence_presentation import build_figure_contexts
 from app.services.figure_intents import figure_signal_score
 from app.services.library import LibraryBrowserService
+from app.services.memory_followup_answers import compose_memory_followup_answer
 from app.services.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import InMemorySessionStore
@@ -3530,7 +3531,14 @@ def test_formula_interpretation_followup_uses_memory_not_retrieval(tmp_path: Pat
     )
 
     contract = agent._extract_query_contract(query="怎么理解这个公式？", session=session, mode="auto")
-    answer = agent._compose_memory_followup_answer(query="怎么理解这个公式？", session=session, contract=contract)
+    answer = compose_memory_followup_answer(
+        query="怎么理解这个公式？",
+        session=session,
+        contract=contract,
+        clients=agent.clients,
+        conversation_context=agent._session_conversation_context,
+        clean_text=agent._clean_common_ocr_artifacts,
+    )
 
     assert contract.interaction_mode == "conversation"
     assert contract.relation == "memory_followup"
@@ -3578,7 +3586,14 @@ def test_language_preference_followup_does_not_search_random_papers(tmp_path: Pa
     )
 
     contract = agent._extract_query_contract(query="你怎么回答还中英文混杂，我要中文", session=session, mode="auto")
-    answer = agent._compose_memory_followup_answer(query="你怎么回答还中英文混杂，我要中文", session=session, contract=contract)
+    answer = compose_memory_followup_answer(
+        query="你怎么回答还中英文混杂，我要中文",
+        session=session,
+        contract=contract,
+        clients=agent.clients,
+        conversation_context=agent._session_conversation_context,
+        clean_text=agent._clean_common_ocr_artifacts,
+    )
 
     assert contract.interaction_mode == "conversation"
     assert contract.relation == "memory_followup"
