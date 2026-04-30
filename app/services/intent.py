@@ -7,6 +7,7 @@ from typing import Any, Callable, Literal, cast
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.conversation_intents import protected_conversation_intent
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.intent_contract_adapter import (
     answer_slots_from_relation,
@@ -72,8 +73,6 @@ AnswerSlot = Literal[
 INTENT_ROUTER_MARKERS: dict[str, MarkerProfile] = {
     "contextual_origin_refine": ("最早", "起源", "最初", "首次", "出处", "来源", "不对", "不是", "确定"),
     "strong_origin_refine": ("最早", "起源"),
-    "self_identity": ("你是谁", "who are you", "你的身份"),
-    "capability": ("你能做什么", "有什么功能", "capability", "abilities"),
     "previous_rationale": ("为什么选择", "为什么推荐", "推荐理由", "排序依据"),
 }
 
@@ -542,70 +541,21 @@ class IntentRecognizer:
         return research_profile_slots(slots=slots, clean_query=clean_query, targets=targets)
 
     def _protected_local_intent(self, query: str, *, session: SessionContext | None = None) -> Intent | None:
+        protected_conversation = protected_conversation_intent(query)
+        if protected_conversation is not None:
+            return Intent(
+                intent_kind="smalltalk",
+                topic_state="new",
+                needs_local_corpus=False,
+                target_entities=[],
+                user_goal=protected_conversation.user_goal,
+                answer_slots=protected_conversation.answer_slots,  # type: ignore[arg-type]
+                confidence=protected_conversation.confidence,
+                ambiguous_slots=protected_conversation.ambiguous_slots,
+                notes=protected_conversation.notes,
+            )
         normalized = self._compact_text(query)
         lowered = " ".join(str(query or "").strip().lower().split())
-        if not normalized:
-            return Intent(
-                intent_kind="smalltalk",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="用户没有输入有效内容，需要澄清。",
-                answer_slots=["clarify"],
-                confidence=0.95,
-                notes=["local_protected_empty_query"],
-            )
-        greetings = {
-            "你好",
-            "您好",
-            "你好吗",
-            "嗨",
-            "嗨嗨",
-            "哈喽",
-            "哈啰",
-            "hello",
-            "hi",
-            "hey",
-            "yo",
-            "在吗",
-            "早上好",
-            "下午好",
-            "晚上好",
-        }
-        punctuation_stripped = re.sub(r"[\s,.!?。！？~～]+", "", lowered)
-        if punctuation_stripped in greetings:
-            return Intent(
-                intent_kind="smalltalk",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="回应用户寒暄。",
-                answer_slots=["greeting"],
-                confidence=0.99,
-                notes=["local_protected_greeting"],
-            )
-        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["self_identity"]):
-            return Intent(
-                intent_kind="smalltalk",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="介绍助手身份。",
-                answer_slots=["self_identity"],
-                confidence=0.96,
-                notes=["local_protected_self_identity"],
-            )
-        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["capability"]):
-            return Intent(
-                intent_kind="smalltalk",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="介绍助手能力范围。",
-                answer_slots=["capability"],
-                confidence=0.96,
-                notes=["local_protected_capability"],
-            )
         if looks_like_origin_lookup_query(query):
             targets = fallback_query_targets(query)
             if targets:
@@ -661,18 +611,6 @@ class IntentRecognizer:
                     confidence=0.86,
                     notes=["local_protected_explicit_target_summary"],
                 )
-        if normalized in {"何意味", "什么意思", "啥意思"}:
-            return Intent(
-                intent_kind="smalltalk",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="用户表达过短，需要补充想问的对象。",
-                answer_slots=["clarify"],
-                confidence=0.88,
-                ambiguous_slots=["missing_target"],
-                notes=["local_protected_short_clarification"],
-            )
         if self._is_pdf_agent_topology_design_query(lowered=lowered, compact=normalized):
             return Intent(
                 intent_kind="research",
