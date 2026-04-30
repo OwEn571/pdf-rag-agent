@@ -109,7 +109,6 @@ from app.services.contextual_contract_helpers import (
 from app.services.conversation_memory_contract import (
     active_memory_bindings,
     apply_conversation_memory_to_contract,
-    llm_memory_followup_contract,
     target_binding_from_memory,
 )
 from app.services.conversation_contract_helpers import normalize_conversation_tool_contract
@@ -436,21 +435,6 @@ class ResearchAssistantAgentV4(
             clients=self.clients,
             conversation_context=self._session_conversation_context,
             clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _llm_memory_followup_contract(
-        self,
-        *,
-        clean_query: str,
-        session: SessionContext,
-        current_contract: QueryContract,
-    ) -> QueryContract | None:
-        return llm_memory_followup_contract(
-            clean_query=clean_query,
-            session=session,
-            current_contract=current_contract,
-            clients=self.clients,
-            conversation_context=self._session_conversation_context,
         )
 
     def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
