@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `1218f63`.
+- Latest pushed local baseline before this snapshot: `483e442`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1529 lines.
+  to about 1520 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -113,6 +113,9 @@ not be changed without a rollback point and test-backed slices.
 - Runtime summary construction now calls `agent_runtime_summary.build_runtime_summary`
   directly from standard and compound turn loops; the Agent no longer exposes a
   runtime-summary forwarding method.
+- Citation resolution now calls `evidence_presentation.citations_from_doc_ids`
+  directly from answer composition, tool registries, and tests; the Agent no
+  longer exposes a citation-resolution forwarding method.
 
 ## Remaining High-Risk Work
 

@@ -18,7 +18,7 @@ from app.domain.models import (
     VerificationReport,
 )
 from app.services.contract_normalization import normalize_lookup_text
-from app.services.evidence_presentation import claim_evidence_ids, extract_topology_terms
+from app.services.evidence_presentation import claim_evidence_ids, citations_from_doc_ids, extract_topology_terms
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
 from app.services.session_context_helpers import session_llm_history_messages
@@ -107,10 +107,20 @@ class AnswerComposerMixin:
             return self._clarification_question(contract, session or SessionContext(session_id="clarify")), []
         if verification.status == "retry":
             return self._compose_retry_answer(contract=contract, verification=verification, claims=claims), []
-        citations = self._citations_from_doc_ids(claim_evidence_ids(claims), evidence)
+        citations = citations_from_doc_ids(
+            claim_evidence_ids(claims),
+            evidence,
+            block_doc_lookup=self.retriever.block_doc_by_id,
+            paper_doc_lookup=self.retriever.paper_doc_by_id,
+        )
         if not citations and papers:
             fallback_doc_ids = [doc_id for paper in papers[:2] for doc_id in paper.doc_ids[:1]]
-            citations = self._citations_from_doc_ids(fallback_doc_ids, evidence)
+            citations = citations_from_doc_ids(
+                fallback_doc_ids,
+                evidence,
+                block_doc_lookup=self.retriever.block_doc_by_id,
+                paper_doc_lookup=self.retriever.paper_doc_by_id,
+            )
         if contract.allow_web_search:
             citations = self._prioritize_web_citations(claims=claims, evidence=evidence, citations=citations)
         if any(claim.claim_type == "topology_recommendation" for claim in claims):
@@ -227,7 +237,12 @@ class AnswerComposerMixin:
                 web_doc_ids.extend(claim.evidence_ids)
         if not web_doc_ids:
             return citations
-        web_citations = self._citations_from_doc_ids(web_doc_ids, evidence)
+        web_citations = citations_from_doc_ids(
+            web_doc_ids,
+            evidence,
+            block_doc_lookup=self.retriever.block_doc_by_id,
+            paper_doc_lookup=self.retriever.paper_doc_by_id,
+        )
         seen = {(item.title, item.file_path, item.page) for item in web_citations}
         ordered = list(web_citations)
         for item in citations:

@@ -15,7 +15,7 @@ from app.services.clarification_intents import (
     contract_with_ambiguity_options,
 )
 from app.services.contract_normalization import normalize_contract_targets
-from app.services.evidence_presentation import build_figure_contexts
+from app.services.evidence_presentation import build_figure_contexts, citations_from_doc_ids
 from app.services.figure_intents import figure_signal_score
 from app.services.library import LibraryBrowserService
 from app.services.memory_followup_answers import compose_memory_followup_answer
@@ -1904,7 +1904,12 @@ def test_figure_verifier_rejects_wrong_primary_paper(tmp_path: Path) -> None:
 def test_followup_citations_can_resolve_paper_card_doc_ids(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 
-    citations = agent._citations_from_doc_ids(["paper::TOPO"], evidence=[])
+    citations = citations_from_doc_ids(
+        ["paper::TOPO"],
+        evidence=[],
+        block_doc_lookup=agent.retriever.block_doc_by_id,
+        paper_doc_lookup=agent.retriever.paper_doc_by_id,
+    )
 
     assert len(citations) == 1
     assert citations[0].title == "Scaling Large Language Model-based Multi-Agent Collaboration"

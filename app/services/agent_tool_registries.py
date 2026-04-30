@@ -12,7 +12,7 @@ from app.services.citation_ranking import (
     semantic_scholar_citation_evidence,
 )
 from app.services.conversation_memory_contract import active_memory_bindings, memory_binding_doc_ids
-from app.services.evidence_presentation import dedupe_citations
+from app.services.evidence_presentation import citations_from_doc_ids, dedupe_citations
 from app.services.memory_artifact_helpers import conversation_tool_result_artifact
 from app.services.memory_followup_answers import (
     compose_memory_followup_answer,
@@ -297,7 +297,14 @@ def build_conversation_tool_registry(
             clean_text=agent._clean_common_ocr_artifacts,
         )
         bindings = active_memory_bindings(session)
-        state["citations"] = dedupe_citations(agent._citations_from_doc_ids(memory_binding_doc_ids(bindings), []))
+        state["citations"] = dedupe_citations(
+            citations_from_doc_ids(
+                memory_binding_doc_ids(bindings),
+                [],
+                block_doc_lookup=agent.retriever.block_doc_by_id,
+                paper_doc_lookup=agent.retriever.paper_doc_by_id,
+            )
+        )
         payload = store_conversation_answer_result(
             agent=agent, state=state, session=session, contract=contract, emit=emit,
             tool="synthesize_previous_results", query=query, answer=answer,
@@ -365,7 +372,14 @@ def build_conversation_tool_registry(
             web_enabled=bool(lookup.get("web_enabled")),
         )
         evidence, citation_doc_ids, report, summary = citation_ranking_result_payload(lookup)
-        state["citations"] = dedupe_citations(agent._citations_from_doc_ids(citation_doc_ids, evidence))
+        state["citations"] = dedupe_citations(
+            citations_from_doc_ids(
+                citation_doc_ids,
+                evidence,
+                block_doc_lookup=agent.retriever.block_doc_by_id,
+                paper_doc_lookup=agent.retriever.paper_doc_by_id,
+            )
+        )
         state["verification_report"] = report
         store_conversation_answer_result(
             agent=agent, state=state, session=session, contract=contract, emit=emit,

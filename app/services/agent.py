@@ -105,7 +105,6 @@ from app.services.followup_relationship_contracts import (
 )
 from app.services.evidence_presentation import (
     chunk_text,
-    citations_from_doc_ids,
 )
 from app.services.followup_candidate_helpers import (
     expand_followup_candidate_pool,
@@ -1497,14 +1496,6 @@ class ResearchAssistantAgentV4(
             return ""
         meta = dict(doc.metadata or {})
         return str(meta.get("generated_summary") or meta.get("abstract_note") or doc.page_content[:400]).strip()
-
-    def _citations_from_doc_ids(self, doc_ids: list[str], evidence: list[EvidenceBlock]) -> list[AssistantCitation]:
-        return citations_from_doc_ids(
-            doc_ids,
-            evidence,
-            block_doc_lookup=self.retriever.block_doc_by_id,
-            paper_doc_lookup=self.retriever.paper_doc_by_id,
-        )
 
     def _prefer_identity_matching_papers(self, *, candidates: list[CandidatePaper], targets: list[str]) -> list[CandidatePaper]:
         matched = [item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)]
