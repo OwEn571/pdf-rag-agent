@@ -1582,36 +1582,21 @@ class ResearchAssistantAgentV4(
             evidence=evidence or [],
             clients=self.clients,
             paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            selected_candidate_assessment=lambda paper: self._selected_followup_candidate_assessment(
+            selected_candidate_assessment=lambda paper: selected_followup_candidate_assessment(
                 contract=contract,
                 seed_papers=seed_papers,
                 paper=paper,
                 evidence=evidence or [],
+                clients=self.clients,
+                expand_evidence=lambda paper_ids, query, evidence_contract, limit: self.retriever.expand_evidence(
+                    paper_ids=paper_ids,
+                    query=query,
+                    contract=evidence_contract,
+                    limit=limit,
+                ),
+                paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
+                coerce_confidence=lambda value: self._coerce_confidence(value),
             ),
-            coerce_confidence=lambda value: self._coerce_confidence(value),
-        )
-
-    def _selected_followup_candidate_assessment(
-        self,
-        *,
-        contract: QueryContract,
-        seed_papers: list[CandidatePaper],
-        paper: CandidatePaper,
-        evidence: list[EvidenceBlock],
-    ) -> dict[str, Any]:
-        return selected_followup_candidate_assessment(
-            contract=contract,
-            seed_papers=seed_papers,
-            paper=paper,
-            evidence=evidence,
-            clients=self.clients,
-            expand_evidence=lambda paper_ids, query, evidence_contract, limit: self.retriever.expand_evidence(
-                paper_ids=paper_ids,
-                query=query,
-                contract=evidence_contract,
-                limit=limit,
-            ),
-            paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
             coerce_confidence=lambda value: self._coerce_confidence(value),
         )
 
