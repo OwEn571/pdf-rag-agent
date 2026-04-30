@@ -22,6 +22,7 @@ from app.services.compound_task_helpers import (
     merge_redundant_field_subtasks,
 )
 from app.services.evidence_presentation import chunk_text, dedupe_citations
+from app.services.session_context_helpers import session_llm_history_messages
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -47,7 +48,7 @@ def run_compound_query_if_needed(
         clients=agent.clients,
         available_tools=list(agent_tool_manifest()),
         conversation_context=agent._session_conversation_context,
-        history_messages=agent._session_llm_history_messages,
+        history_messages=session_llm_history_messages,
         target_normalizer=lambda targets, fields: agent._normalize_contract_targets(
             targets=targets,
             requested_fields=fields,

@@ -6,6 +6,7 @@ from app.domain.models import QueryContract, SessionContext
 from app.services.contract_normalization import normalize_lookup_text, normalize_modalities
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.research_planning import research_plan_goals
+from app.services.session_context_helpers import session_llm_history_messages
 
 
 FOLLOWUP_ROUTING_MARKERS: dict[str, MarkerProfile] = {
@@ -168,7 +169,7 @@ class FollowupRoutingMixin:
             payload = invoke_json_messages(
                 system_prompt=system_prompt,
                 messages=[
-                    *self._session_llm_history_messages(session),
+                    *session_llm_history_messages(session),
                     {"role": "user", "content": json.dumps(human_payload, ensure_ascii=False)},
                 ],
                 fallback={},

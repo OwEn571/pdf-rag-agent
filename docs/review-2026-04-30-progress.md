@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `5425676`.
+- Latest pushed local baseline before this snapshot: `75581f9`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1636 lines.
+  to about 1625 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -87,6 +87,10 @@ not be changed without a rollback point and test-backed slices.
 - Persistent learning context now loads through the session context boundary
   directly; the Agent no longer keeps a separate learnings-only forwarding
   method while preserving the same failure logging and empty-context fallback.
+- Session LLM history rendering now uses the `session_context_helpers` helper
+  directly from planner, compound planning, answer composition, and follow-up
+  refinement call sites; the Agent no longer keeps a history-message forwarding
+  method.
 
 ## Remaining High-Risk Work
 

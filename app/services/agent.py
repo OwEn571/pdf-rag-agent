@@ -187,7 +187,7 @@ class ResearchAssistantAgentV4(
         self.planner = AgentPlanner(
             clients=self.clients,
             conversation_context=self._session_conversation_context,
-            conversation_messages=lambda session: self._session_llm_history_messages(
+            conversation_messages=lambda session: session_llm_history_messages(
                 session,
                 max_turns=6,
                 answer_limit=900,
@@ -198,7 +198,7 @@ class ResearchAssistantAgentV4(
         self.intent_router = IntentRecognizer(
             clients=self.clients,
             conversation_context=lambda session: self._session_conversation_context(session, max_chars=12000),
-            conversation_messages=lambda session: self._session_llm_history_messages(
+            conversation_messages=lambda session: session_llm_history_messages(
                 session,
                 max_turns=6,
                 answer_limit=900,
@@ -211,7 +211,7 @@ class ResearchAssistantAgentV4(
         self.llm_intent_router = LLMIntentRouter(
             clients=self.clients,
             conversation_context=lambda session: self._session_conversation_context(session, max_chars=12000),
-            conversation_messages=lambda session: self._session_llm_history_messages(
+            conversation_messages=lambda session: session_llm_history_messages(
                 session,
                 max_turns=6,
                 answer_limit=900,
@@ -1093,17 +1093,6 @@ class ResearchAssistantAgentV4(
             persistent_learnings=persistent_learnings,
             max_chars=max_chars,
         )
-
-    def _session_llm_history_messages(
-        self,
-        session: SessionContext,
-        *,
-        max_turns: int = 4,
-        answer_limit: int = 700,
-    ) -> list[dict[str, str]]:
-        """Render recent turns as real chat messages for context-aware LLM calls."""
-
-        return session_llm_history_messages(session, max_turns=max_turns, answer_limit=answer_limit)
 
     def _remember_research_outcome(
         self,

@@ -21,6 +21,7 @@ from app.services.contract_normalization import normalize_lookup_text
 from app.services.evidence_presentation import claim_evidence_ids, extract_topology_terms
 from app.services.intent_marker_matching import MarkerProfile, query_matches_any
 from app.services.prompt_safety import DOCUMENT_SAFETY_INSTRUCTION, wrap_untrusted_document_text
+from app.services.session_context_helpers import session_llm_history_messages
 from app.services.zotero_sqlite import ZoteroSQLiteReader
 
 
@@ -396,7 +397,7 @@ class AnswerComposerMixin:
                     + prompt
                 ),
                 messages=[
-                    *self._session_llm_history_messages(session, max_turns=6, answer_limit=900),
+                    *session_llm_history_messages(session, max_turns=6, answer_limit=900),
                     {"role": "user", "content": contract.clean_query},
                 ],
                 fallback="",
