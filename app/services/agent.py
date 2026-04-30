@@ -141,8 +141,6 @@ from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
 from app.services.intent_router import LLMIntentRouter, query_contract_from_router_decision
 from app.services.memory_followup_answers import (
-    compose_formula_interpretation_followup_answer,
-    compose_language_preference_followup_answer,
     compose_memory_followup_answer,
     compose_memory_synthesis_answer,
 )
@@ -432,38 +430,6 @@ class ResearchAssistantAgentV4(
 
     def _compose_memory_followup_answer(self, *, query: str, session: SessionContext, contract: QueryContract) -> str:
         return compose_memory_followup_answer(
-            query=query,
-            session=session,
-            contract=contract,
-            clients=self.clients,
-            conversation_context=self._session_conversation_context,
-            clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _compose_formula_interpretation_followup_answer(
-        self,
-        *,
-        query: str,
-        session: SessionContext,
-        contract: QueryContract,
-    ) -> str:
-        return compose_formula_interpretation_followup_answer(
-            query=query,
-            session=session,
-            contract=contract,
-            clients=self.clients,
-            conversation_context=self._session_conversation_context,
-            clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _compose_language_preference_followup_answer(
-        self,
-        *,
-        query: str,
-        session: SessionContext,
-        contract: QueryContract,
-    ) -> str:
-        return compose_language_preference_followup_answer(
             query=query,
             session=session,
             contract=contract,
