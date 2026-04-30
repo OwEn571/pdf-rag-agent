@@ -3868,6 +3868,37 @@ def test_contextual_method_result_query_binds_to_active_paper(tmp_path: Path) ->
     assert "PersonaDual" not in contract.clean_query
 
 
+def test_extract_query_contract_prefers_llm_tool_router_when_available(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router")
+
+    def plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {
+            "actions": ["need_corpus_search"],
+            "tool_call_args": [
+                {
+                    "name": "need_corpus_search",
+                    "args": {
+                        "query": "PBA 准确率多少",
+                        "targets": ["PBA"],
+                        "confidence": 0.91,
+                        "rationale": "table-backed metric question",
+                    },
+                }
+            ],
+        }
+
+    agent.clients.invoke_tool_plan_messages = MethodType(plan_messages, agent.clients)
+
+    contract = agent._extract_query_contract(query="PBA 准确率多少", session=session, mode="auto")
+
+    assert contract.relation == "metric_value_lookup"
+    assert contract.targets == ["PBA"]
+    assert "llm_tool_router" in contract.notes
+    assert "intent_confidence=0.91" in contract.notes
+    assert "local_protected_explicit_target_metric" not in contract.notes
+
+
 def test_metric_definition_followup_reuses_active_metric_context(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     session = agent.sessions.get("metric-definition-followup")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models import SessionContext
-from app.services.intent_router import LLMIntentRouter, ROUTER_TOOLS
+from app.services.intent_router import LLMIntentRouter, ROUTER_TOOLS, RouterDecision, query_contract_from_router_decision
 
 
 class _RouterClients:
@@ -91,3 +91,44 @@ def test_llm_intent_router_falls_back_to_clarify_without_chat() -> None:
     assert decision.action == "need_clarify"
     assert decision.confidence == 0.0
     assert "router_unavailable" in decision.tags
+
+
+def test_router_decision_converts_corpus_search_to_query_contract() -> None:
+    contract = query_contract_from_router_decision(
+        decision=RouterDecision(
+            action="need_corpus_search",
+            confidence=0.88,
+            args={"query": "PBA 准确率多少", "targets": ["PBA"], "rationale": "table metric"},
+            rationale="table metric",
+            tags=["need_corpus_search", "target:PBA"],
+        ),
+        clean_query="PBA 准确率多少",
+        session=SessionContext(session_id="demo"),
+        extracted_targets=[],
+        normalize_targets=lambda targets, requested_fields: targets,
+    )
+
+    assert contract is not None
+    assert contract.relation == "metric_value_lookup"
+    assert contract.targets == ["PBA"]
+    assert contract.answer_slots == ["metric_value"]
+    assert "llm_tool_router" in contract.notes
+    assert "intent_confidence=0.88" in contract.notes
+
+
+def test_router_decision_unavailable_returns_none_for_legacy_fallback() -> None:
+    contract = query_contract_from_router_decision(
+        decision=RouterDecision(
+            action="need_clarify",
+            confidence=0.0,
+            args={},
+            rationale="router_unavailable",
+            tags=["router_unavailable"],
+        ),
+        clean_query="PBA 是什么？",
+        session=SessionContext(session_id="demo"),
+        extracted_targets=["PBA"],
+        normalize_targets=lambda targets, requested_fields: targets,
+    )
+
+    assert contract is None

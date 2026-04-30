@@ -143,6 +143,7 @@ from app.services.followup_candidate_helpers import (
 )
 from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
+from app.services.intent_router import LLMIntentRouter, query_contract_from_router_decision
 from app.services.memory_followup_answers import (
     compose_formula_interpretation_followup_answer,
     compose_language_preference_followup_answer,
@@ -236,6 +237,15 @@ class ResearchAssistantAgentV4(
             normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
                 targets=targets,
                 requested_fields=requested_fields,
+            ),
+        )
+        self.llm_intent_router = LLMIntentRouter(
+            clients=self.clients,
+            conversation_context=lambda session: self._session_conversation_context(session, max_chars=12000),
+            conversation_messages=lambda session: self._session_llm_history_messages(
+                session,
+                max_turns=6,
+                answer_limit=900,
             ),
         )
         self.runtime = AgentRuntime(agent=self)
@@ -1242,11 +1252,17 @@ class ResearchAssistantAgentV4(
         if clarified_contract is not None:
             return clarified_contract
         targets = extract_targets(clean_query)
-        contract = self.intent_router.contract_for_query(
+        contract = self._contract_from_llm_tool_router(
             clean_query=clean_query,
             session=session,
             extracted_targets=targets,
         )
+        if contract is None:
+            contract = self.intent_router.contract_for_query(
+                clean_query=clean_query,
+                session=session,
+                extracted_targets=targets,
+            )
         contract = self._normalize_conversation_tool_contract(
             contract=contract,
             clean_query=clean_query,
@@ -1279,6 +1295,25 @@ class ResearchAssistantAgentV4(
             contract=refined_contract,
             session=session,
             selected_clarification_paper_id=selected_clarification_paper_id(refined_contract),
+        )
+
+    def _contract_from_llm_tool_router(
+        self,
+        *,
+        clean_query: str,
+        session: SessionContext,
+        extracted_targets: list[str],
+    ) -> QueryContract | None:
+        decision = self.llm_intent_router.route(query=clean_query, session=session)
+        return query_contract_from_router_decision(
+            decision=decision,
+            clean_query=clean_query,
+            session=session,
+            extracted_targets=extracted_targets,
+            normalize_targets=lambda targets, requested_fields: self._normalize_contract_targets(
+                targets=targets,
+                requested_fields=requested_fields,
+            ),
         )
 
     def _normalize_conversation_tool_contract(
