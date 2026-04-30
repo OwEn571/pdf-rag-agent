@@ -5,7 +5,12 @@ from typing import Any, Callable
 from app.domain.models import EvidenceBlock, QueryContract, SessionContext, VerificationReport
 from app.services.agent_task import run_task_subagent
 from app.services.agent_tools import RegisteredAgentTool
-from app.services.citation_ranking import format_citation_ranking_answer
+from app.services.citation_ranking import (
+    format_citation_ranking_answer,
+    lookup_candidate_citation_counts,
+    select_citation_ranking_candidates,
+    semantic_scholar_citation_evidence,
+)
 from app.services.conversation_memory_contract import active_memory_bindings, memory_binding_doc_ids
 from app.services.evidence_presentation import dedupe_citations
 from app.services.memory_artifact_helpers import conversation_tool_result_artifact
@@ -286,7 +291,13 @@ def build_conversation_tool_registry(
         )
 
     def recover_previous_recommendation_candidates() -> None:
-        candidates = agent._select_citation_ranking_candidates(session=session, query=query, limit=6)
+        candidates = select_citation_ranking_candidates(
+            paper_documents=list(agent.retriever.paper_documents()),
+            session=session,
+            query=query,
+            limit=6,
+            rank_library_papers_for_recommendation=agent._rank_library_papers_for_recommendation,
+        )
         summary, payload = store_citation_candidates_payload(state=state, candidates=candidates)
         agent._emit_agent_tool_call(emit=emit, tool="recover_previous_recommendation_candidates", arguments={"query": query, "limit": 6})
         record_observation(
@@ -297,11 +308,28 @@ def build_conversation_tool_registry(
 
     def web_citation_lookup() -> None:
         candidates = list(state.get("citation_candidates", []) or [])
-        lookup = agent._lookup_candidate_citation_counts(
+        lookup = lookup_candidate_citation_counts(
             candidates=candidates,
             max_web_results=max_web_results,
+            web_search=agent.web_search,
             emit=emit,
-            execution_steps=execution_steps,
+            emit_tool_call=lambda tool, arguments: agent._emit_agent_tool_call(
+                emit=emit,
+                tool=tool,
+                arguments=arguments,
+            ),
+            record_observation=lambda tool, summary, payload: agent._record_agent_observation(
+                emit=emit,
+                execution_steps=execution_steps,
+                tool=tool,
+                summary=summary,
+                payload=payload,
+            ),
+            semantic_scholar_lookup=lambda title: semantic_scholar_citation_evidence(
+                title=title,
+                web_search=agent.web_search,
+                timeout_seconds=float(agent.settings.tavily_timeout_seconds),
+            ),
         )
         summary, payload = store_citation_lookup_payload(state=state, lookup=lookup)
         record_observation(

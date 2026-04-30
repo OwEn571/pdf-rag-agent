@@ -74,12 +74,6 @@ from app.services.clarification_intents import (
     store_pending_clarification,
 )
 from app.services.clarification_question_helpers import build_clarification_question
-from app.services.citation_ranking import (
-    format_citation_ranking_answer,
-    lookup_candidate_citation_counts,
-    select_citation_ranking_candidates,
-    semantic_scholar_citation_evidence,
-)
 from app.services.compound_task_helpers import (
     compound_task_label,
     compound_task_result_from_task_payload,
@@ -495,56 +489,6 @@ class ResearchAssistantAgentV4(
             },
         )
         return result
-
-    def _select_citation_ranking_candidates(
-        self,
-        *,
-        session: SessionContext,
-        query: str,
-        limit: int,
-    ) -> list[dict[str, str]]:
-        return select_citation_ranking_candidates(
-            paper_documents=list(self.retriever.paper_documents()),
-            session=session,
-            query=query,
-            limit=limit,
-            rank_library_papers_for_recommendation=self._rank_library_papers_for_recommendation,
-        )
-
-    def _lookup_candidate_citation_counts(
-        self,
-        *,
-        candidates: list[dict[str, str]],
-        max_web_results: int,
-        emit: Callable[[str, dict[str, Any]], None],
-        execution_steps: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return lookup_candidate_citation_counts(
-            candidates=candidates,
-            max_web_results=max_web_results,
-            web_search=self.web_search,
-            emit=emit,
-            emit_tool_call=lambda tool, arguments: self._emit_agent_tool_call(
-                emit=emit,
-                tool=tool,
-                arguments=arguments,
-            ),
-            record_observation=lambda tool, summary, payload: self._record_agent_observation(
-                emit=emit,
-                execution_steps=execution_steps,
-                tool=tool,
-                summary=summary,
-                payload=payload,
-            ),
-            semantic_scholar_lookup=lambda title: self._semantic_scholar_citation_evidence(title=title),
-        )
-
-    def _semantic_scholar_citation_evidence(self, *, title: str) -> EvidenceBlock | None:
-        return semantic_scholar_citation_evidence(
-            title=title,
-            web_search=self.web_search,
-            timeout_seconds=float(self.settings.tavily_timeout_seconds),
-        )
 
     def _force_best_effort_after_clarification_limit(
         self,
