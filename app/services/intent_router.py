@@ -104,15 +104,8 @@ class LLMIntentRouter:
         self.conversation_messages = conversation_messages or (lambda session: [])
 
     def route(self, *, query: str, session: SessionContext) -> RouterDecision:
-        fallback = RouterDecision(
-            action="need_clarify",
-            confidence=0.0,
-            args={"question": "请补充你想查询的论文或问题目标。", "reason": "router_unavailable"},
-            rationale="router_unavailable",
-            tags=["router_unavailable"],
-        )
         if getattr(self.clients, "chat", None) is None:
-            return fallback
+            return unavailable_router_decision("router_unavailable")
         system_prompt = (
             "你是 PDF-RAG 助手的 intent router。"
             "只通过 tool call 表达路由决策，不要直接回答用户。"
@@ -141,14 +134,16 @@ class LLMIntentRouter:
         else:
             planner = getattr(self.clients, "invoke_tool_plan", None)
             if not callable(planner):
-                return fallback
+                return unavailable_router_decision("router_unavailable")
             payload = planner(
                 system_prompt=system_prompt,
                 human_prompt=json.dumps({"query": query, **context_payload}, ensure_ascii=False),
                 tools=ROUTER_TOOLS,
                 fallback={},
             )
-        return self._decision_from_payload(payload=payload, query=query) or fallback
+        return self._decision_from_payload(payload=payload, query=query) or unavailable_router_decision(
+            "router_invalid_payload"
+        )
 
     @staticmethod
     def _decision_from_payload(*, payload: Any, query: str) -> RouterDecision | None:
@@ -260,6 +255,20 @@ def query_contract_from_router_decision(
         continuation_mode="fresh",
         allow_web_search=decision.action == "need_web",
         notes=list(dict.fromkeys(notes)),
+    )
+
+
+def unavailable_router_decision(reason: str = "router_unavailable") -> RouterDecision:
+    normalized_reason = str(reason or "router_unavailable").strip() or "router_unavailable"
+    tags = ["router_unavailable"]
+    if normalized_reason != "router_unavailable":
+        tags.append(normalized_reason)
+    return RouterDecision(
+        action="need_clarify",
+        confidence=0.0,
+        args={"question": "请补充你想查询的论文或问题目标。", "reason": normalized_reason},
+        rationale=normalized_reason,
+        tags=tags,
     )
 
 

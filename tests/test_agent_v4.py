@@ -3899,6 +3899,23 @@ def test_extract_query_contract_prefers_llm_tool_router_when_available(tmp_path:
     assert "local_protected_explicit_target_metric" not in contract.notes
 
 
+def test_extract_query_contract_falls_back_when_llm_tool_router_misses(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router-miss")
+
+    def bad_plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {"actions": ["not_a_router_tool"], "tool_call_args": []}
+
+    agent.clients.invoke_tool_plan_messages = MethodType(bad_plan_messages, agent.clients)
+
+    contract = agent._extract_query_contract(query="PBA 准确率多少", session=session, mode="auto")
+
+    assert contract.relation == "metric_value_lookup"
+    assert contract.targets == ["PBA"]
+    assert "llm_tool_router" not in contract.notes
+    assert "local_protected_explicit_target_metric" in contract.notes
+
+
 def test_metric_definition_followup_reuses_active_metric_context(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     session = agent.sessions.get("metric-definition-followup")

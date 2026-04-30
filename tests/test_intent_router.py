@@ -93,6 +93,21 @@ def test_llm_intent_router_falls_back_to_clarify_without_chat() -> None:
     assert "router_unavailable" in decision.tags
 
 
+def test_llm_intent_router_tags_invalid_tool_plan_payload() -> None:
+    router = LLMIntentRouter(
+        clients=_RouterClients({"actions": ["not_a_router_tool"], "tool_call_args": []}),
+        conversation_context=lambda session: {},
+    )
+
+    decision = router.route(query="PBA 准确率多少", session=SessionContext(session_id="demo"))
+
+    assert decision.action == "need_clarify"
+    assert decision.confidence == 0.0
+    assert decision.rationale == "router_invalid_payload"
+    assert "router_unavailable" in decision.tags
+    assert "router_invalid_payload" in decision.tags
+
+
 def test_router_decision_converts_corpus_search_to_query_contract() -> None:
     contract = query_contract_from_router_decision(
         decision=RouterDecision(
