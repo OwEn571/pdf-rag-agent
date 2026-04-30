@@ -87,8 +87,22 @@ def _event_signature(*, event: str, data: dict[str, Any]) -> dict[str, Any]:
         item["status"] = status
     if event == "verification" and isinstance(data.get("recommended_action"), str):
         item["recommended_action"] = data["recommended_action"]
+    if event == "contract":
+        item["interaction_mode"] = str(data.get("interaction_mode", "") or "")
+        item["relation"] = str(data.get("relation", "") or "")
+        notes = _notes(data.get("notes"))
+        router_action = _note_value(notes=notes, prefix="router_action=")
+        router_tags = _note_values(notes=notes, prefix="router_tag=")
+        if router_action:
+            item["router_action"] = router_action
+        if router_tags:
+            item["router_tags"] = router_tags
+        intent_kind = _note_value(notes=notes, prefix="intent_kind=")
+        if intent_kind:
+            item["intent_kind"] = intent_kind
     if event == "confidence":
         item["basis"] = str(data.get("basis", "") or "")
+        item["score_bucket"] = _confidence_score_bucket(data.get("value", data.get("score")))
     if event == "ask_human":
         item["question"] = str(data.get("question", "") or "")[:200]
         item["options_count"] = len(data.get("options", [])) if isinstance(data.get("options"), list) else 0
@@ -155,6 +169,37 @@ def _answer_chars_bucket(value: Any) -> str:
     if count < 1200:
         return "<1200"
     return ">=1200"
+
+
+def _confidence_score_bucket(value: Any) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if score < 0.4:
+        return "<0.4"
+    if score < 0.6:
+        return "<0.6"
+    if score < 0.8:
+        return "<0.8"
+    return ">=0.8"
+
+
+def _notes(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
+def _note_value(*, notes: list[str], prefix: str) -> str:
+    for note in notes:
+        if note.startswith(prefix):
+            return note.split("=", 1)[1]
+    return ""
+
+
+def _note_values(*, notes: list[str], prefix: str) -> list[str]:
+    return [note.split("=", 1)[1] for note in notes if note.startswith(prefix)]
 
 
 def _safe_int(value: Any) -> int:

@@ -128,3 +128,51 @@ def test_diff_agent_traces_reports_todo_update_changes() -> None:
     assert diff.ok is False
     assert "查找表格证据" in diff.differences[0]
     assert "解释指标定义" in diff.differences[0]
+
+
+def test_diff_agent_traces_reports_confidence_bucket_changes() -> None:
+    expected = [{"event": "confidence", "data": {"type": "confidence", "basis": "logprobs", "score": 0.86}}]
+    actual = [{"event": "confidence", "data": {"type": "confidence", "basis": "logprobs", "score": 0.52}}]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is False
+    assert ">=0.8" in diff.differences[0]
+    assert "<0.6" in diff.differences[0]
+
+
+def test_diff_agent_traces_reports_contract_router_changes() -> None:
+    expected = [
+        {
+            "event": "contract",
+            "data": {
+                "type": "contract",
+                "interaction_mode": "research",
+                "relation": "metric_value_lookup",
+                "notes": [
+                    "llm_tool_router",
+                    "intent_kind=research",
+                    "router_action=need_corpus_search",
+                    "router_tag=need_corpus_search",
+                    "router_tag=target:PBA",
+                ],
+            },
+        }
+    ]
+    actual = [
+        {
+            "event": "contract",
+            "data": {
+                "type": "contract",
+                "interaction_mode": "conversation",
+                "relation": "general_question",
+                "notes": ["llm_tool_router", "intent_kind=smalltalk", "router_action=answer_directly"],
+            },
+        }
+    ]
+
+    diff = diff_agent_traces(expected, actual)
+
+    assert diff.ok is False
+    assert "metric_value_lookup" in diff.differences[0]
+    assert "answer_directly" in diff.differences[0]
