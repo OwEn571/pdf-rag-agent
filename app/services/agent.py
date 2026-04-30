@@ -538,10 +538,10 @@ class ResearchAssistantAgentV4(
             excluded_titles=excluded_titles,
             paper_lookup=self._candidate_from_paper_id,
             paper_summary_text=lambda paper_id: self._paper_summary_text(paper_id),
-            prefer_identity_matching_papers=lambda candidates, targets: self._prefer_identity_matching_papers(
-                candidates=candidates,
-                targets=targets,
-            ),
+            prefer_identity_matching_papers=lambda candidates, targets: [
+                item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)
+            ]
+            or candidates,
             search_entity_evidence=lambda query, search_contract, limit: self.retriever.search_entity_evidence(
                 query=query,
                 contract=search_contract,
@@ -873,10 +873,10 @@ class ResearchAssistantAgentV4(
                 papers=retry_papers,
                 evidence=retry_evidence,
             ),
-            prefer_identity_matching_papers=lambda candidates, targets: self._prefer_identity_matching_papers(
-                candidates=candidates,
-                targets=targets,
-            ),
+            prefer_identity_matching_papers=lambda candidates, targets: [
+                item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)
+            ]
+            or candidates,
         )
         if retry_result.should_replace_materials:
             state["screened_papers"] = retry_result.candidate_papers
@@ -1473,10 +1473,6 @@ class ResearchAssistantAgentV4(
             return ""
         meta = dict(doc.metadata or {})
         return str(meta.get("generated_summary") or meta.get("abstract_note") or doc.page_content[:400]).strip()
-
-    def _prefer_identity_matching_papers(self, *, candidates: list[CandidatePaper], targets: list[str]) -> list[CandidatePaper]:
-        matched = [item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)]
-        return matched or candidates
 
     def _render_page_image_data_url(self, *, file_path: str, page: int) -> str:
         return render_pdf_page_image_data_url(

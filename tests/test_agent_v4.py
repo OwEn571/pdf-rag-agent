@@ -2758,7 +2758,7 @@ def test_formula_screening_prefers_exact_target_paper_over_higher_scored_noise(t
         ),
     ]
 
-    screened = agent._prefer_identity_matching_papers(candidates=candidates, targets=["DPO"])
+    screened = [item for item in candidates if agent._paper_identity_matches_targets(paper=item, targets=["DPO"])] or candidates
 
     assert [item.paper_id for item in screened] == ["DPO"]
 

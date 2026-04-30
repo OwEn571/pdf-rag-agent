@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `1bd49da`.
+- Latest pushed local baseline before this snapshot: `6c03d0e`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1497 lines.
+  to about 1493 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -122,6 +122,9 @@ not be changed without a rollback point and test-backed slices.
 - Pending clarification storage and clarification-attempt tracking now call
   `clarification_intents` helpers directly from standard and compound turn
   loops; the Agent no longer exposes those clarification forwarding methods.
+- Identity-match paper filtering is now passed inline to screening/retry helper
+  callbacks; the Agent no longer exposes a one-off identity-filter forwarding
+  method.
 
 ## Remaining High-Risk Work
 
