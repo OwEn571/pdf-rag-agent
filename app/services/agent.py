@@ -109,7 +109,6 @@ from app.services.followup_relationship_contracts import (
     normalize_followup_direction_contract,
 )
 from app.services.evidence_presentation import (
-    build_figure_contexts,
     chunk_text,
     citations_from_doc_ids,
     paper_recommendation_reason,
@@ -120,7 +119,6 @@ from app.services.followup_candidate_helpers import (
     resolve_followup_seed_papers,
     selected_followup_candidate_assessment,
 )
-from app.services.figure_intents import figure_signal_score
 from app.services.intent import IntentRecognizer
 from app.services.intent_router import LLMIntentRouter, query_contract_from_router_decision
 from app.services.memory_followup_answers import (
@@ -1721,13 +1719,6 @@ class ResearchAssistantAgentV4(
     def _prefer_identity_matching_papers(self, *, candidates: list[CandidatePaper], targets: list[str]) -> list[CandidatePaper]:
         matched = [item for item in candidates if self._paper_identity_matches_targets(paper=item, targets=targets)]
         return matched or candidates
-
-    def _build_figure_contexts(self, evidence: list[EvidenceBlock], limit: int = 2) -> list[dict[str, Any]]:
-        return build_figure_contexts(evidence, limit=limit)
-
-    @staticmethod
-    def _figure_signal_score(text: str) -> int:
-        return figure_signal_score(text)
 
     def _render_page_image_data_url(self, *, file_path: str, page: int) -> str:
         return render_pdf_page_image_data_url(

@@ -14,6 +14,8 @@ from app.services.clarification_intents import (
     contract_from_selected_clarification_option,
     contract_with_ambiguity_options,
 )
+from app.services.evidence_presentation import build_figure_contexts
+from app.services.figure_intents import figure_signal_score
 from app.services.library import LibraryBrowserService
 from app.services.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
@@ -1796,7 +1798,6 @@ def test_figure_solver_fallback_uses_caption_when_vlm_disabled(tmp_path: Path) -
 
 
 def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
     evidence = [
         EvidenceBlock(
             doc_id="page-summary-1",
@@ -1827,7 +1828,7 @@ def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tm
         ),
     ]
 
-    contexts = agent._build_figure_contexts(evidence)
+    contexts = build_figure_contexts(evidence)
 
     assert contexts
     assert contexts[0]["page"] == 1
@@ -4215,9 +4216,7 @@ def test_conversation_turn_does_not_clear_active_research_memory(tmp_path: Path)
 
 
 def test_figure_signal_score_detects_benchmark_rich_caption(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-
-    score = agent._figure_signal_score(
+    score = figure_signal_score(
         "Figure 1 | Benchmark performance on AIME, Codeforces, GPQA, MATH-500, MMLU and SWE-bench."
     )
 
