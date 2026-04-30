@@ -13,13 +13,8 @@ from app.services.intent_contract_adapter import (
     research_relation_from_slots,
     research_requirements_from_slots,
 )
-from app.services.library_intents import (
-    is_citation_query,
-    is_library_status_query,
-    is_scoped_library_recommendation_query,
-)
+from app.services.intent_fallback_helpers import non_research_fallback_intent
 from app.services.memory_intents import (
-    is_memory_comparison_query,
     is_pdf_agent_topology_design_query,
     is_short_followup,
     looks_like_memory_reference,
@@ -70,7 +65,6 @@ AnswerSlot = Literal[
 INTENT_ROUTER_MARKERS: dict[str, MarkerProfile] = {
     "contextual_origin_refine": ("最早", "起源", "最初", "首次", "出处", "来源", "不对", "不是", "确定"),
     "strong_origin_refine": ("最早", "起源"),
-    "previous_rationale": ("为什么选择", "为什么推荐", "推荐理由", "排序依据"),
 }
 
 class Intent(BaseModel):
@@ -610,65 +604,15 @@ class IntentRecognizer:
         refers_previous = looks_like_memory_reference(clean_query) or (
             bool(active.targets) and is_short_followup(clean_query)
         )
-        if is_library_status_query(clean_query):
-            return Intent(
-                intent_kind="meta_library",
-                topic_state="new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="读取本地论文库状态。",
-                answer_slots=["library_status"],
-                confidence=0.9,
-                notes=["local_intent_library_status"],
-            )
-        if is_scoped_library_recommendation_query(clean_query):
-            return Intent(
-                intent_kind="meta_library",
-                topic_state="continue" if session.turns else "new",
-                needs_local_corpus=False,
-                target_entities=[],
-                user_goal="基于本地论文库给出阅读推荐。",
-                answer_slots=["library_recommendation"],
-                confidence=0.86,
-                notes=["local_intent_library_recommendation"],
-            )
-        if is_citation_query(clean_query):
-            return Intent(
-                intent_kind="meta_library",
-                topic_state="continue" if session.turns else "new",
-                needs_local_corpus=False,
-                needs_web=True,
-                refers_previous_turn=bool(session.turns),
-                target_entities=[],
-                user_goal="对库内或上一轮候选按引用数排序。",
-                answer_slots=["citation_ranking"],
-                confidence=0.82,
-                notes=["local_intent_citation_ranking"],
-            )
-        if is_memory_comparison_query(lowered) and session.turns:
-            return Intent(
-                intent_kind="memory_op",
-                topic_state="continue",
-                needs_local_corpus=False,
-                refers_previous_turn=True,
-                target_entities=list(active.targets),
-                user_goal="基于上一轮结果做比较或综合。",
-                answer_slots=["comparison"],
-                confidence=0.82,
-                notes=["local_intent_memory_synthesis"],
-            )
-        if query_matches_any(lowered, "", INTENT_ROUTER_MARKERS["previous_rationale"]) and session.turns:
-            return Intent(
-                intent_kind="memory_op",
-                topic_state="continue",
-                needs_local_corpus=False,
-                refers_previous_turn=True,
-                target_entities=targets or list(active.targets),
-                user_goal="解释上一轮工具输出的依据。",
-                answer_slots=["previous_rationale"],
-                confidence=0.84,
-                notes=["local_intent_memory_followup"],
-            )
+        non_research = non_research_fallback_intent(
+            clean_query=clean_query,
+            lowered=lowered,
+            session_has_turns=bool(session.turns),
+            active_targets=list(active.targets),
+            extracted_targets=targets,
+        )
+        if non_research is not None:
+            return Intent(**non_research.as_intent_kwargs())  # type: ignore[arg-type]
 
         slots = cast(
             list[AnswerSlot],
