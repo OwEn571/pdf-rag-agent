@@ -11,6 +11,7 @@ class AgentSettings:
     confidence_floor: float = 0.6
     answer_logprobs_enabled: bool = False
     answer_logprobs_min_tokens: int = 3
+    legacy_intent_fallback_enabled: bool = True
     max_clarification_attempts: int = 2
     disambiguation_auto_resolve_threshold: float = 0.85
     disambiguation_recommend_threshold: float = 0.65
@@ -46,6 +47,10 @@ class AgentSettings:
                 default=defaults.answer_logprobs_min_tokens,
                 minimum=1,
                 maximum=512,
+            ),
+            legacy_intent_fallback_enabled=_bounded_bool(
+                getattr(settings, "agent_legacy_intent_fallback_enabled", defaults.legacy_intent_fallback_enabled),
+                default=defaults.legacy_intent_fallback_enabled,
             ),
             max_clarification_attempts=_bounded_int(
                 getattr(settings, "agent_max_clarification_attempts", defaults.max_clarification_attempts),

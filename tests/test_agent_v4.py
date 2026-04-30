@@ -6,6 +6,7 @@ from types import MethodType
 
 from langchain_core.documents import Document
 
+from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn, VerificationReport
 from app.services.agent import ResearchAssistantAgentV4
@@ -3914,6 +3915,25 @@ def test_extract_query_contract_falls_back_when_llm_tool_router_misses(tmp_path:
     assert contract.targets == ["PBA"]
     assert "llm_tool_router" not in contract.notes
     assert "local_protected_explicit_target_metric" in contract.notes
+
+
+def test_extract_query_contract_can_disable_legacy_router_fallback(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router-disabled-fallback")
+
+    def bad_plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {"actions": ["not_a_router_tool"], "tool_call_args": []}
+
+    agent.clients.invoke_tool_plan_messages = MethodType(bad_plan_messages, agent.clients)
+    agent.agent_settings = AgentSettings(legacy_intent_fallback_enabled=False)
+
+    contract = agent._extract_query_contract(query="PBA 准确率多少", session=session, mode="auto")
+
+    assert contract.interaction_mode == "conversation"
+    assert contract.relation == "clarify_user_intent"
+    assert contract.targets == []
+    assert "legacy_intent_fallback_disabled" in contract.notes
+    assert "local_protected_explicit_target_metric" not in contract.notes
 
 
 def test_metric_definition_followup_reuses_active_metric_context(tmp_path: Path) -> None:

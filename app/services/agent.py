@@ -1054,11 +1054,14 @@ class ResearchAssistantAgentV4(
             extracted_targets=targets,
         )
         if contract is None:
-            contract = self.intent_router.contract_for_query(
-                clean_query=clean_query,
-                session=session,
-                extracted_targets=targets,
-            )
+            if self.agent_settings.legacy_intent_fallback_enabled:
+                contract = self.intent_router.contract_for_query(
+                    clean_query=clean_query,
+                    session=session,
+                    extracted_targets=targets,
+                )
+            else:
+                contract = self._router_miss_clarification_contract(clean_query=clean_query)
         contract = self._normalize_conversation_tool_contract(
             contract=contract,
             clean_query=clean_query,
@@ -1091,6 +1094,30 @@ class ResearchAssistantAgentV4(
             contract=refined_contract,
             session=session,
             selected_clarification_paper_id=selected_clarification_paper_id(refined_contract),
+        )
+
+    @staticmethod
+    def _router_miss_clarification_contract(*, clean_query: str) -> QueryContract:
+        return QueryContract(
+            clean_query=clean_query,
+            interaction_mode="conversation",
+            relation="clarify_user_intent",
+            targets=[],
+            answer_slots=["clarify"],
+            requested_fields=[],
+            required_modalities=[],
+            answer_shape="narrative",
+            precision_requirement="normal",
+            continuation_mode="fresh",
+            allow_web_search=False,
+            notes=[
+                "structured_intent",
+                "llm_tool_router",
+                "router_unavailable",
+                "legacy_intent_fallback_disabled",
+                "intent_needs_clarification",
+                "low_intent_confidence",
+            ],
         )
 
     def _contract_from_llm_tool_router(

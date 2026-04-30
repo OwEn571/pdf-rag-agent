@@ -863,6 +863,9 @@ def test_agent_settings_are_loaded_from_runtime_settings(tmp_path) -> None:
         eval_cases_path=tmp_path / "evals" / "cases.yaml",
         agent_max_steps=12,
         agent_confidence_floor=0.72,
+        agent_answer_logprobs_enabled=True,
+        agent_answer_logprobs_min_tokens=8,
+        agent_legacy_intent_fallback_enabled=False,
         agent_max_clarification_attempts=3,
     )
 
@@ -870,4 +873,7 @@ def test_agent_settings_are_loaded_from_runtime_settings(tmp_path) -> None:
 
     assert agent_settings.max_agent_steps == 12
     assert agent_settings.confidence_floor == 0.72
+    assert agent_settings.answer_logprobs_enabled is True
+    assert agent_settings.answer_logprobs_min_tokens == 8
+    assert agent_settings.legacy_intent_fallback_enabled is False
     assert agent_settings.max_clarification_attempts == 3

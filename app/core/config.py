@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     agent_confidence_floor: float = 0.6
     agent_answer_logprobs_enabled: bool = False
     agent_answer_logprobs_min_tokens: int = 3
+    agent_legacy_intent_fallback_enabled: bool = True
     agent_max_clarification_attempts: int = 2
     agent_disambiguation_auto_resolve_threshold: float = 0.85
     agent_disambiguation_recommend_threshold: float = 0.65
