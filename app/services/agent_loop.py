@@ -89,7 +89,7 @@ def run_standard_turn(
         contract = contract.model_copy(update={"allow_web_search": True})
     run_context.emit("contract", contract.model_dump())
     run_context.execution_steps.append({"node": "query_contract_extractor", "summary": contract.relation})
-    agent_plan = agent._plan_agent_actions(contract=contract, session=session, use_web_search=web_enabled)
+    agent_plan = agent.planner.plan_actions(contract=contract, session=session, use_web_search=web_enabled)
     run_context.emit("agent_plan", agent_plan)
     run_context.execution_steps.append({"node": "agent_planner", "summary": " -> ".join(agent_plan.get("actions", []))})
     if contract.interaction_mode == "conversation":

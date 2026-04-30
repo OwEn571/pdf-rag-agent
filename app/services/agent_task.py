@@ -39,7 +39,7 @@ def run_task_subagent(
         mode="auto",
         clarification_choice=None,
     )
-    sub_plan = agent._plan_agent_actions(contract=sub_contract, session=session, use_web_search=False)
+    sub_plan = agent.planner.plan_actions(contract=sub_contract, session=session, use_web_search=False)
     sub_plan = task_plan_with_allow_list(sub_plan, tools_allowed)
     emit("agent_plan", {"subtask": prompt, "task_tool": True, **sub_plan})
     agent._emit_agent_tool_call(

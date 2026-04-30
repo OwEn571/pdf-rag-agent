@@ -1341,13 +1341,6 @@ class ResearchAssistantAgentV4(
             ),
         )
 
-    def _plan_agent_actions(self, *, contract: QueryContract, session: SessionContext, use_web_search: bool) -> dict[str, Any]:
-        return self.planner.plan_actions(
-            contract=contract,
-            session=session,
-            use_web_search=use_web_search,
-        )
-
     def _reflect_agent_state(
         self,
         *,

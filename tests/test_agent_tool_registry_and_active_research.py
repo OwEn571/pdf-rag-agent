@@ -52,6 +52,7 @@ class _RegistryProbeAgent:
         self.observations: list[dict[str, object]] = []
         self.runtime = AgentRuntime(agent=self)
         self.settings = SimpleNamespace(paper_limit_default=6, evidence_limit_default=2, llm_retry_budget=1)
+        self.planner = SimpleNamespace(plan_actions=lambda **_: {"actions": ["compose"], "tool_call_args": []})
 
     def _record_agent_observation(self, **kwargs: object) -> None:
         self.observations.append(kwargs)
@@ -77,9 +78,6 @@ class _RegistryProbeAgent:
 
     def _extract_query_contract(self, *, query: str, **_: object) -> QueryContract:
         return QueryContract(clean_query=query, interaction_mode="conversation", relation="greeting")
-
-    def _plan_agent_actions(self, **_: object) -> dict[str, object]:
-        return {"actions": ["compose"], "tool_call_args": []}
 
     def _is_negative_correction_query(self, query: str) -> bool:
         return False
@@ -739,7 +737,7 @@ def test_planner_prefers_tool_call_payload_over_json_fallback(tmp_path) -> None:
     )
     agent = _planner_agent(tmp_path, clients)
 
-    plan = agent._plan_agent_actions(
+    plan = agent.planner.plan_actions(
         contract=QueryContract(clean_query="PPO 公式", relation="formula_lookup", targets=["PPO"]),
         session=SessionContext(session_id="demo"),
         use_web_search=False,
@@ -781,7 +779,7 @@ def test_planner_falls_back_to_json_when_tool_calls_are_empty(tmp_path) -> None:
     clients = _ToolPlanClients({})
     agent = _planner_agent(tmp_path, clients)
 
-    plan = agent._plan_agent_actions(
+    plan = agent.planner.plan_actions(
         contract=QueryContract(clean_query="PPO 公式", relation="formula_lookup", targets=["PPO"]),
         session=SessionContext(session_id="demo"),
         use_web_search=False,

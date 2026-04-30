@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `6c03d0e`.
+- Latest pushed local baseline before this snapshot: `942b463`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1493 lines.
+  to about 1486 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -125,6 +125,9 @@ not be changed without a rollback point and test-backed slices.
 - Identity-match paper filtering is now passed inline to screening/retry helper
   callbacks; the Agent no longer exposes a one-off identity-filter forwarding
   method.
+- Agent planning now calls `AgentPlanner.plan_actions` directly from the
+  standard turn loop and Task subagent; the Agent no longer exposes a planner
+  forwarding method.
 
 ## Remaining High-Risk Work
 

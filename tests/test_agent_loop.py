@@ -311,6 +311,7 @@ class _FakeAgent:
         self.sessions = _FakeSessions()
         self.standard_contract = standard_contract
         self.retriever = SimpleNamespace(paper_doc_by_id=lambda _: None)
+        self.planner = SimpleNamespace(plan_actions=self._plan_actions)
         self.remembered_research = False
         self.extract_call: dict[str, Any] = {}
         self.plan_contract: QueryContract | None = None
@@ -322,7 +323,7 @@ class _FakeAgent:
             raise AssertionError("missing standard contract")
         return self.standard_contract
 
-    def _plan_agent_actions(self, *, contract: QueryContract, **_: Any) -> dict[str, list[str]]:
+    def _plan_actions(self, *, contract: QueryContract, **_: Any) -> dict[str, list[str]]:
         self.plan_contract = contract
         return {"actions": ["compose"]}
 

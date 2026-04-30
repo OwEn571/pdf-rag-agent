@@ -39,12 +39,13 @@ def test_run_task_subagent_can_use_precomputed_contract() -> None:
     class _Agent:
         def __init__(self) -> None:
             self.runtime = _Runtime()
+            self.planner = self
 
         def _extract_query_contract(self, **_: object) -> QueryContract:
             raise AssertionError("precomputed compound contracts should not be re-extracted")
 
         @staticmethod
-        def _plan_agent_actions(**_: object) -> dict[str, object]:
+        def plan_actions(**_: object) -> dict[str, object]:
             return {"actions": ["compose"], "tool_call_args": []}
 
         @staticmethod
