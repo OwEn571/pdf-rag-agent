@@ -3382,7 +3382,7 @@ def test_compound_query_stops_for_subtask_clarification(tmp_path: Path) -> None:
             "verification": verification,
         }
 
-    agent._execute_compound_research_subtask = MethodType(fake_execute, agent)
+    agent._execute_compound_task_subagent = MethodType(fake_execute, agent)
 
     result, _ = agent._run(
         query="PPO和DPO有什么区别",

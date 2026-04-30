@@ -421,36 +421,6 @@ class ResearchAssistantAgentV4(
             clean_text=self._clean_common_ocr_artifacts,
         )
 
-    def _execute_compound_conversation_subtask(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        emit: Callable[[str, dict[str, Any]], None],
-        execution_steps: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return self._execute_compound_task_subagent(
-            contract=contract,
-            session=session,
-            emit=emit,
-            execution_steps=execution_steps,
-        )
-
-    def _execute_compound_research_subtask(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext,
-        emit: Callable[[str, dict[str, Any]], None],
-        execution_steps: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        return self._execute_compound_task_subagent(
-            contract=contract,
-            session=session,
-            emit=emit,
-            execution_steps=execution_steps,
-        )
-
     def _execute_compound_task_subagent(
         self,
         *,

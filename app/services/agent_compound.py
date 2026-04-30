@@ -127,7 +127,7 @@ def run_compound_query_if_needed(
         if sub_contract.interaction_mode == "conversation":
             heading = compound_section_heading(contract=sub_contract, index=index)
             publish("\n\n" + heading + "\n\n")
-            subtask_result = agent._execute_compound_conversation_subtask(
+            subtask_result = agent._execute_compound_task_subagent(
                 contract=sub_contract,
                 session=session,
                 emit=emit,
@@ -137,7 +137,7 @@ def run_compound_query_if_needed(
             subtask_results.append(subtask_result)
             continue
         publish("\n\n" + compound_research_progress_markdown(contract=sub_contract, index=index) + "\n\n")
-        subtask_result = agent._execute_compound_research_subtask(
+        subtask_result = agent._execute_compound_task_subagent(
             contract=sub_contract,
             session=session,
             emit=emit,
