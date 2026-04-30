@@ -32,7 +32,6 @@ from app.services.agent_emit import (
 from app.services.agent_events import normalize_agent_event
 from app.services.agent_planner import AgentPlanner
 from app.services.agent_runtime import AgentRuntime
-from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_runtime_helpers import (
     claim_focus_titles,
     clarify_retry_verification_if_needed,
@@ -364,31 +363,6 @@ class ResearchAssistantAgentV4(
         state["answer"] = answer
         for chunk in chunk_text(str(answer or ""), size=96):
             emit("answer_delta", {"text": chunk})
-
-    def _runtime_summary(
-        self,
-        *,
-        contract: QueryContract,
-        session: SessionContext | None = None,
-        tool_plan: dict[str, Any] | None = None,
-        research_plan: dict[str, Any] | None = None,
-        execution_steps: list[dict[str, Any]] | None = None,
-        verification_report: dict[str, Any] | None = None,
-        answer_confidence: dict[str, Any] | None = None,
-        claims: list[Claim] | None = None,
-        citations: list[AssistantCitation] | None = None,
-    ) -> dict[str, Any]:
-        return build_runtime_summary(
-            contract=contract,
-            active_research_context=session.active_research_context_payload() if session is not None else None,
-            tool_plan=tool_plan,
-            research_plan=research_plan,
-            execution_steps=execution_steps,
-            verification_report=verification_report,
-            answer_confidence=answer_confidence,
-            claims=claims,
-            citations=citations,
-        )
 
     def _execute_compound_task_subagent(
         self,

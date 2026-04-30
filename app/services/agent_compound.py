@@ -10,6 +10,7 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
+from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.agent_tools import agent_tool_manifest
 from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
@@ -223,9 +224,9 @@ def run_compound_query_if_needed(
         citations=citations,
         query_contract=compound_contract.model_dump(),
         research_plan_summary=plan_summary,
-        runtime_summary=agent._runtime_summary(
+        runtime_summary=build_runtime_summary(
             contract=compound_contract,
-            session=session,
+            active_research_context=session.active_research_context_payload(),
             tool_plan=plan_summary,
             execution_steps=execution_steps,
             verification_report={"status": "pass", "recommended_action": "compound_answer"},
@@ -292,9 +293,9 @@ def compound_clarification_response(
         citations=[],
         query_contract=response_contract.model_dump(),
         research_plan_summary=plan_summary,
-        runtime_summary=agent._runtime_summary(
+        runtime_summary=build_runtime_summary(
             contract=response_contract,
-            session=session,
+            active_research_context=session.active_research_context_payload(),
             tool_plan=plan_summary,
             execution_steps=execution_steps,
             verification_report=verification.model_dump(),

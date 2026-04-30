@@ -271,7 +271,7 @@ def test_run_research_turn_can_emit_answer_logprob_confidence() -> None:
     ]
     assert confidence_events
     assert confidence_events[-1]["detail"]["token_count"] == 2
-    assert payload["runtime_summary"]["answer_confidence"]["basis"] == "logprobs"
+    assert payload["runtime_summary"]["answer_generation"]["confidence"]["basis"] == "logprobs"
 
 
 class _FakeRuntime:
@@ -337,13 +337,6 @@ class _FakeAgent:
 
     def _remember_clarification_attempt(self, **kwargs: Any) -> None:
         self.remembered_verification = kwargs["verification"]
-
-    @staticmethod
-    def _runtime_summary(**kwargs: Any) -> dict[str, Any]:
-        return {
-            "steps": len(kwargs["execution_steps"]),
-            "answer_confidence": kwargs.get("answer_confidence"),
-        }
 
     @staticmethod
     def _force_best_effort_after_clarification_limit(**_: Any) -> None:

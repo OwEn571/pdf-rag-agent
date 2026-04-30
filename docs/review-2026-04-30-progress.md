@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `d3a8375`.
+- Latest pushed local baseline before this snapshot: `1218f63`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1555 lines.
+  to about 1529 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -110,6 +110,9 @@ not be changed without a rollback point and test-backed slices.
 - Contract target normalization now calls `contract_normalization` directly
   from router, follow-up, compound, and test call sites; the Agent no longer
   exposes a target-normalization forwarding method.
+- Runtime summary construction now calls `agent_runtime_summary.build_runtime_summary`
+  directly from standard and compound turn loops; the Agent no longer exposes a
+  runtime-summary forwarding method.
 
 ## Remaining High-Risk Work
 

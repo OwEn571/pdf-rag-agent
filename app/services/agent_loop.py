@@ -13,6 +13,7 @@ from app.domain.models import (
 from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
+from app.services.agent_runtime_summary import build_runtime_summary
 from app.services.clarification_intents import (
     clarification_options_from_contract_notes,
     clear_pending_clarification,
@@ -182,9 +183,9 @@ def run_conversation_turn(
         citations=citations,
         query_contract=contract.model_dump(),
         research_plan_summary=agent_plan,
-        runtime_summary=agent._runtime_summary(
+        runtime_summary=build_runtime_summary(
             contract=contract,
-            session=session,
+            active_research_context=session.active_research_context_payload(),
             tool_plan=agent_plan,
             execution_steps=execution_steps,
             verification_report=verification_payload,
@@ -322,9 +323,9 @@ def run_research_turn(
         citations=citations,
         query_contract=contract.model_dump(),
         research_plan_summary=plan.model_dump(),
-        runtime_summary=agent._runtime_summary(
+        runtime_summary=build_runtime_summary(
             contract=contract,
-            session=session,
+            active_research_context=session.active_research_context_payload(),
             tool_plan=agent_plan,
             research_plan=plan.model_dump(),
             execution_steps=execution_steps,
