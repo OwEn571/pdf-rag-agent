@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from app.domain.models import QueryContract, SessionContext
 from app.services.intent_contract_adapter import research_relation_from_slots, research_requirements_from_slots
+from app.services.query_shaping import fallback_query_targets
 from app.services.research_intents import normalized_query_text, research_answer_slots
 
 RouterAction = Literal["answer_directly", "need_corpus_search", "need_web", "need_clarify"]
@@ -224,7 +225,7 @@ def query_contract_from_router_decision(
     query = str(decision.args.get("query", "") or clean_query).strip() or clean_query
     raw_targets = decision.args.get("targets", [])
     router_targets = [str(item).strip() for item in raw_targets if str(item).strip()] if isinstance(raw_targets, list) else []
-    targets = normalize_targets(router_targets or extracted_targets, [])
+    targets = normalize_targets(router_targets or extracted_targets or fallback_query_targets(query), [])
     lowered, compact = normalized_query_text(query)
     slots = research_answer_slots(
         clean_query=query,

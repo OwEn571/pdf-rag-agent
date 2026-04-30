@@ -116,6 +116,27 @@ def test_router_decision_converts_corpus_search_to_query_contract() -> None:
     assert "intent_confidence=0.88" in contract.notes
 
 
+def test_router_decision_extracts_targets_when_tool_args_omit_them() -> None:
+    contract = query_contract_from_router_decision(
+        decision=RouterDecision(
+            action="need_corpus_search",
+            confidence=0.84,
+            args={"query": "Alignx 是什么？", "rationale": "entity definition"},
+            rationale="entity definition",
+            tags=["need_corpus_search"],
+        ),
+        clean_query="Alignx 是什么？",
+        session=SessionContext(session_id="demo"),
+        extracted_targets=[],
+        normalize_targets=lambda targets, requested_fields: targets,
+    )
+
+    assert contract is not None
+    assert contract.relation == "entity_definition"
+    assert contract.targets == ["Alignx"]
+    assert contract.answer_slots == ["definition"]
+
+
 def test_router_decision_unavailable_returns_none_for_legacy_fallback() -> None:
     contract = query_contract_from_router_decision(
         decision=RouterDecision(
