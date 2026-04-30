@@ -19,6 +19,7 @@ from app.services.figure_intents import figure_signal_score
 from app.services.library import LibraryBrowserService
 from app.services.memory_followup_answers import compose_memory_followup_answer
 from app.services.model_clients import ModelClients
+from app.services.query_shaping import should_use_web_search
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import InMemorySessionStore
 from app.services.web_evidence import build_web_research_claim, collect_web_evidence
@@ -3158,7 +3159,7 @@ def test_latest_query_auto_enables_external_search(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     contract = QueryContract(clean_query="最新的多模态RAG论文有哪些？", relation="paper_recommendation")
 
-    assert agent._should_use_web_search(use_web_search=False, contract=contract)
+    assert should_use_web_search(use_web_search=False, contract=contract)
 
 
 def test_correction_followup_reuses_active_target_for_repair(tmp_path: Path) -> None:

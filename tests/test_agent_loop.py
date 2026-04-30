@@ -79,7 +79,6 @@ def test_run_standard_turn_extracts_plans_and_routes_conversation() -> None:
     agent = _FakeAgent(
         conversation_state={"answer": "hello"},
         standard_contract=contract,
-        web_enabled=True,
     )
     context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
 
@@ -309,12 +308,10 @@ class _FakeAgent:
         conversation_state: dict[str, Any],
         research_state: dict[str, Any] | None = None,
         standard_contract: QueryContract | None = None,
-        web_enabled: bool = False,
     ) -> None:
         self.runtime = _FakeRuntime(conversation_state, research_state)
         self.sessions = _FakeSessions()
         self.standard_contract = standard_contract
-        self.web_enabled = web_enabled
         self.stored_pending = False
         self.cleared_pending = False
         self.remembered_verification = None
@@ -328,9 +325,6 @@ class _FakeAgent:
         if self.standard_contract is None:
             raise AssertionError("missing standard contract")
         return self.standard_contract
-
-    def _should_use_web_search(self, **_: Any) -> bool:
-        return self.web_enabled
 
     def _plan_agent_actions(self, *, contract: QueryContract, **_: Any) -> dict[str, list[str]]:
         self.plan_contract = contract

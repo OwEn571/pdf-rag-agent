@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `7adc048`.
+- Latest pushed local baseline before this snapshot: `e1eb528`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1606 lines.
+  to about 1602 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -94,6 +94,9 @@ not be changed without a rollback point and test-backed slices.
 - Web evidence collection and web-claim construction now call the
   `web_evidence.py` helpers directly from Agent/test call sites instead of
   keeping Agent forwarding methods.
+- Web-search enablement now runs directly through
+  `query_shaping.should_use_web_search` in the turn loop; the Agent no longer
+  exposes a pure forwarding method for that decision.
 
 ## Remaining High-Risk Work
 

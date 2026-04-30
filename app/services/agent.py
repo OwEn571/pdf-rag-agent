@@ -123,7 +123,6 @@ from app.services.pdf_rendering import render_pdf_page_image_data_url
 from app.services.query_shaping import (
     extract_targets,
     is_short_acronym,
-    should_use_web_search,
 )
 from app.services.research_planning import (
     build_research_plan,
@@ -1487,9 +1486,6 @@ class ResearchAssistantAgentV4(
         ).strip()
         apply_session_history_compression(session, compressed=compressed, retained_turns=retained_turns)
         self.sessions.upsert(session)
-
-    def _should_use_web_search(self, *, use_web_search: bool, contract: QueryContract) -> bool:
-        return should_use_web_search(use_web_search=use_web_search, contract=contract)
 
     def _claim_focus_titles(self, *, claims: list[Claim], papers: list[CandidatePaper]) -> list[str]:
         def paper_title_lookup(paper_id: str) -> str | None:

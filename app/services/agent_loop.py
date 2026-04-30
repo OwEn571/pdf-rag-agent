@@ -15,6 +15,7 @@ from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
 from app.services.confidence import confidence_from_logprobs, confidence_payload
 from app.services.contract_context import conversation_relation_updates_research_context
+from app.services.query_shaping import should_use_web_search
 
 
 def finish_agent_turn(
@@ -72,7 +73,7 @@ def run_standard_turn(
         mode=mode,
         clarification_choice=clarification_choice,
     )
-    web_enabled = agent._should_use_web_search(use_web_search=use_web_search, contract=contract)
+    web_enabled = should_use_web_search(use_web_search=use_web_search, contract=contract)
     if web_enabled:
         contract = contract.model_copy(update={"allow_web_search": True})
     run_context.emit("contract", contract.model_dump())
