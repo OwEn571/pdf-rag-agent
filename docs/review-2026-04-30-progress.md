@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `1ed3878`.
+- Latest pushed local baseline before this snapshot: `4c638d0`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1561 lines.
+  to about 1558 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -104,6 +104,9 @@ not be changed without a rollback point and test-backed slices.
 - Research plan construction now lives at the runtime boundary through
   `research_planning.build_research_plan`; the Agent no longer exposes a
   plan-building forwarding method.
+- Excluded-focus title filtering now calls `agent_runtime_helpers` directly
+  from runtime and disambiguation paths; the Agent no longer exposes a separate
+  forwarding method for that helper.
 
 ## Remaining High-Risk Work
 

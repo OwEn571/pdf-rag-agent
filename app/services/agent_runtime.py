@@ -16,6 +16,7 @@ from app.services.agent_runtime_helpers import (
     conversation_runtime_actions,
     conversation_runtime_state,
     execute_tool_loop,
+    excluded_focus_titles,
     finalize_research_runtime,
     next_conversation_action,
     next_research_action,
@@ -99,7 +100,11 @@ class AgentRuntime:
         execution_steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
         plan = build_research_plan(contract=contract, settings=self.agent.settings)
-        excluded_titles = self.agent._excluded_focus_titles(session=session, contract=contract)
+        excluded_titles = excluded_focus_titles(
+            session=session,
+            contract=contract,
+            is_negative_correction_query=is_negative_correction_query,
+        )
         state = research_runtime_state(
             contract=contract,
             plan=plan,

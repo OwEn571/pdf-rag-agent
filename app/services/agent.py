@@ -1266,7 +1266,11 @@ class ResearchAssistantAgentV4(
                 papers=papers,
                 evidence=self._acronym_evidence_from_corpus(target=target, limit=160),
             ),
-            excluded_titles=self._excluded_focus_titles(session=session, contract=contract),
+            excluded_titles=excluded_focus_titles(
+                session=session,
+                contract=contract,
+                is_negative_correction_query=is_negative_correction_query,
+            ),
         )
 
     def _judge_disambiguation_options(
@@ -1379,13 +1383,6 @@ class ResearchAssistantAgentV4(
     def _store_pending_clarification(self, *, session: SessionContext, contract: QueryContract) -> None:
         options = clarification_options_from_contract_notes(contract)
         store_pending_clarification(session=session, contract=contract, options=options)
-
-    def _excluded_focus_titles(self, *, session: SessionContext, contract: QueryContract) -> set[str]:
-        return excluded_focus_titles(
-            session=session,
-            contract=contract,
-            is_negative_correction_query=is_negative_correction_query,
-        )
 
     def _plan_agent_actions(self, *, contract: QueryContract, session: SessionContext, use_web_search: bool) -> dict[str, Any]:
         return self.planner.plan_actions(

@@ -81,9 +81,6 @@ class _RegistryProbeAgent:
     def _plan_agent_actions(self, **_: object) -> dict[str, object]:
         return {"actions": ["compose"], "tool_call_args": []}
 
-    def _excluded_focus_titles(self, **_: object) -> set[str]:
-        return set()
-
     def _is_negative_correction_query(self, query: str) -> bool:
         return False
 
