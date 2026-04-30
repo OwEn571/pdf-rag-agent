@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -69,6 +70,35 @@ def confidence_from_self_consistency(samples: list[str], *, min_samples: int = 2
             "sample_count": len(normalized),
             "pairwise_scores": [round(item, 4) for item in pairwise_scores],
             "min_pairwise": round(min(pairwise_scores), 4) if pairwise_scores else 0.0,
+        },
+    )
+
+
+def confidence_from_logprobs(logprobs: list[Any], *, min_tokens: int = 1) -> Confidence:
+    values: list[float] = []
+    for item in list(logprobs or []):
+        try:
+            value = float(item)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            values.append(max(-20.0, min(0.0, value)))
+    if len(values) < max(1, min_tokens):
+        return Confidence(
+            score=0.5 if values else 0.0,
+            basis="logprobs",
+            detail={"token_count": len(values), "reason": "insufficient_logprobs"},
+        )
+    avg_logprob = sum(values) / len(values)
+    min_logprob = min(values)
+    score = math.exp(avg_logprob)
+    return Confidence(
+        score=max(0.0, min(1.0, score)),
+        basis="logprobs",
+        detail={
+            "token_count": len(values),
+            "avg_logprob": round(avg_logprob, 6),
+            "min_logprob": round(min_logprob, 6),
         },
     )
 

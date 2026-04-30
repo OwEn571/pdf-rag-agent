@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from app.domain.models import QueryContract, VerificationReport
 from app.services.confidence import (
     confidence_from_contract,
+    confidence_from_logprobs,
     confidence_from_self_consistency,
     confidence_from_verification_report,
     confidence_payload,
@@ -65,6 +66,25 @@ def test_confidence_from_self_consistency_scores_conflicting_samples_low() -> No
 
     assert confidence.score < 0.2
     assert should_ask_human(confidence, SimpleNamespace(confidence_floor=0.6)) is True
+
+
+def test_confidence_from_logprobs_maps_average_token_probability() -> None:
+    confidence = confidence_from_logprobs([-0.1, "-0.2", -0.3, "bad"])
+
+    assert confidence.basis == "logprobs"
+    assert 0.8 < confidence.score < 0.9
+    assert confidence.detail["token_count"] == 3
+    assert confidence.detail["avg_logprob"] == -0.2
+
+
+def test_confidence_from_logprobs_reports_missing_signal() -> None:
+    confidence = confidence_from_logprobs([], min_tokens=2)
+    sparse = confidence_from_logprobs([-0.2], min_tokens=2)
+
+    assert confidence.score == 0.0
+    assert confidence.detail["reason"] == "insufficient_logprobs"
+    assert sparse.score == 0.5
+    assert sparse.detail["token_count"] == 1
 
 
 def test_confidence_from_verification_report_maps_status_to_score() -> None:
