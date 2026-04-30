@@ -10,12 +10,15 @@ from app.domain.models import (
     SessionTurn,
     VerificationReport,
 )
+from app.services.agent_tools import agent_tool_manifest
+from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
     compose_compound_comparison_answer,
     compound_research_progress_markdown,
     compound_section_heading,
     demote_markdown_headings,
     format_compound_section,
+    llm_decompose_compound_query,
     merge_redundant_field_subtasks,
 )
 from app.services.evidence_presentation import chunk_text, dedupe_citations
@@ -36,9 +39,20 @@ def run_compound_query_if_needed(
     if clarification_choice is not None:
         return None
     clean_query = " ".join(query.strip().split())
-    if not agent._should_try_compound_decomposition(clean_query, session=session):
+    if not should_try_compound_decomposition_query(clean_query, session=session):
         return None
-    subcontracts = agent._llm_decompose_compound_query(clean_query=clean_query, session=session)
+    subcontracts = llm_decompose_compound_query(
+        clean_query=clean_query,
+        session=session,
+        clients=agent.clients,
+        available_tools=list(agent_tool_manifest()),
+        conversation_context=agent._session_conversation_context,
+        history_messages=agent._session_llm_history_messages,
+        target_normalizer=lambda targets, fields: agent._normalize_contract_targets(
+            targets=targets,
+            requested_fields=fields,
+        ),
+    )
     subcontracts = merge_redundant_field_subtasks(subcontracts)
     if len(subcontracts) < 2:
         return None

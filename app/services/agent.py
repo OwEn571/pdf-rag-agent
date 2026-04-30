@@ -53,7 +53,6 @@ from app.services.agent_runtime_helpers import (
     verification_observation_payload,
     verify_grounding_tool_call_arguments,
 )
-from app.services.agent_tools import agent_tool_manifest
 from app.services.clarification_intents import (
     acronym_evidence_from_corpus as build_acronym_evidence_from_corpus,
     acronym_options_from_evidence as build_acronym_options_from_evidence,
@@ -81,11 +80,9 @@ from app.services.citation_ranking import (
     select_citation_ranking_candidates,
     semantic_scholar_citation_evidence,
 )
-from app.services.compound_intents import should_try_compound_decomposition as should_try_compound_decomposition_query
 from app.services.compound_task_helpers import (
     compound_task_label,
     compound_task_result_from_task_payload,
-    llm_decompose_compound_query,
 )
 from app.services.contract_normalization import (
     normalize_contract_targets,
@@ -430,23 +427,6 @@ class ResearchAssistantAgentV4(
             clients=self.clients,
             conversation_context=self._session_conversation_context,
             clean_text=self._clean_common_ocr_artifacts,
-        )
-
-    def _should_try_compound_decomposition(self, clean_query: str, *, session: SessionContext | None = None) -> bool:
-        return should_try_compound_decomposition_query(clean_query, session=session)
-
-    def _llm_decompose_compound_query(self, *, clean_query: str, session: SessionContext) -> list[QueryContract]:
-        return llm_decompose_compound_query(
-            clean_query=clean_query,
-            session=session,
-            clients=self.clients,
-            available_tools=list(agent_tool_manifest()),
-            conversation_context=self._session_conversation_context,
-            history_messages=self._session_llm_history_messages,
-            target_normalizer=lambda targets, fields: self._normalize_contract_targets(
-                targets=targets,
-                requested_fields=fields,
-            ),
         )
 
     def _execute_compound_conversation_subtask(
