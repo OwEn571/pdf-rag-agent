@@ -25,6 +25,7 @@ from app.services.agent_runtime_helpers import (
     tool_loop_ready_tool,
 )
 from app.services.followup_intents import is_negative_correction_query
+from app.services.research_planning import build_research_plan
 
 EmitFn = Callable[[str, dict[str, Any]], None]
 
@@ -97,7 +98,7 @@ class AgentRuntime:
         emit: EmitFn,
         execution_steps: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        plan = self.agent._build_research_plan(contract)
+        plan = build_research_plan(contract=contract, settings=self.agent.settings)
         excluded_titles = self.agent._excluded_focus_titles(session=session, contract=contract)
         state = research_runtime_state(
             contract=contract,

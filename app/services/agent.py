@@ -122,7 +122,6 @@ from app.services.query_shaping import (
     is_short_acronym,
 )
 from app.services.research_planning import (
-    build_research_plan,
     research_plan_goals,
 )
 from app.services.research_memory import remember_compound_outcome, remember_research_outcome
@@ -1426,9 +1425,6 @@ class ResearchAssistantAgentV4(
             requested_fields=requested_fields,
             canonicalize_targets=self.retriever.canonicalize_targets,
         )
-
-    def _build_research_plan(self, contract: QueryContract) -> ResearchPlan:
-        return build_research_plan(contract=contract, settings=self.settings)
 
     def _compress_session_history_if_needed(self, session: SessionContext) -> None:
         if self.clients.chat is None:

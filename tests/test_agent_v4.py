@@ -20,6 +20,7 @@ from app.services.library import LibraryBrowserService
 from app.services.memory_followup_answers import compose_memory_followup_answer
 from app.services.model_clients import ModelClients
 from app.services.query_shaping import should_use_web_search
+from app.services.research_planning import build_research_plan
 from app.services.retrieval import DualIndexRetriever
 from app.services.session_store import InMemorySessionStore
 from app.services.web_evidence import build_web_research_claim, collect_web_evidence
@@ -1502,7 +1503,7 @@ def test_research_plan_uses_larger_evidence_budget_for_results_queries(tmp_path:
         targets=["POPI"],
     )
 
-    plan = agent._build_research_plan(contract)
+    plan = build_research_plan(contract=contract, settings=agent.settings)
 
     assert plan.paper_limit >= 8
     assert plan.evidence_limit >= 36
@@ -4206,8 +4207,14 @@ def test_schema_claim_solver_is_not_used_for_formula_or_followup(tmp_path: Path)
         required_modalities=["paper_card", "page_text"],
     )
 
-    assert not agent._should_use_schema_claim_solver(contract=formula_contract, plan=agent._build_research_plan(formula_contract))
-    assert not agent._should_use_schema_claim_solver(contract=followup_contract, plan=agent._build_research_plan(followup_contract))
+    assert not agent._should_use_schema_claim_solver(
+        contract=formula_contract,
+        plan=build_research_plan(contract=formula_contract, settings=agent.settings),
+    )
+    assert not agent._should_use_schema_claim_solver(
+        contract=followup_contract,
+        plan=build_research_plan(contract=followup_contract, settings=agent.settings),
+    )
 
 
 def test_paper_recommendation_query_does_not_fall_into_topology_followup(tmp_path: Path) -> None:

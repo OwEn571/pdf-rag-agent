@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from app.core.agent_settings import AgentSettings
 from app.core.config import Settings
-from app.domain.models import ActiveResearch, EvidenceBlock, ResearchPlan, SessionContext, VerificationReport
+from app.domain.models import ActiveResearch, EvidenceBlock, SessionContext, VerificationReport
 from app.domain.models import QueryContract
 from app.services import agent_tools
 from app.services.agent import ResearchAssistantAgentV4
@@ -51,6 +51,7 @@ class _RegistryProbeAgent:
     def __init__(self) -> None:
         self.observations: list[dict[str, object]] = []
         self.runtime = AgentRuntime(agent=self)
+        self.settings = SimpleNamespace(paper_limit_default=6, evidence_limit_default=2, llm_retry_budget=1)
 
     def _record_agent_observation(self, **kwargs: object) -> None:
         self.observations.append(kwargs)
@@ -79,9 +80,6 @@ class _RegistryProbeAgent:
 
     def _plan_agent_actions(self, **_: object) -> dict[str, object]:
         return {"actions": ["compose"], "tool_call_args": []}
-
-    def _build_research_plan(self, contract: QueryContract) -> ResearchPlan:
-        return ResearchPlan(solver_sequence=["probe"], evidence_limit=2)
 
     def _excluded_focus_titles(self, **_: object) -> set[str]:
         return set()
@@ -538,7 +536,7 @@ def test_query_rewrite_tool_runs_inside_research_loop() -> None:
 
 def test_rerank_tool_accepts_explicit_candidates() -> None:
     probe = _RegistryProbeAgent()
-    probe.settings = SimpleNamespace(evidence_limit_default=2)
+    probe.settings.evidence_limit_default = 2
     probe.retriever = _RerankProbeRetriever()
     runtime = AgentRuntime(agent=probe)
     session = SessionContext(session_id="demo")
@@ -584,7 +582,7 @@ def test_rerank_tool_accepts_explicit_candidates() -> None:
 
 def test_search_corpus_can_delegate_to_atomic_strategy() -> None:
     probe = _RegistryProbeAgent()
-    probe.settings = SimpleNamespace(evidence_limit_default=2)
+    probe.settings.evidence_limit_default = 2
     retriever = _AtomicSearchProbeRetriever()
     probe.retriever = retriever
     runtime = AgentRuntime(agent=probe)

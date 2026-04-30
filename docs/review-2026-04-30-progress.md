@@ -6,9 +6,9 @@ not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `0126d37`.
+- Latest pushed local baseline before this snapshot: `1ed3878`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1565 lines.
+  to about 1561 lines.
 - `app/services/intent.py` has been reduced to about 510 lines after the legacy
   recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
@@ -101,6 +101,9 @@ not be changed without a rollback point and test-backed slices.
   active research construction now call their owning helper modules directly
   from the turn/compound loops; the Agent no longer exposes those session-state
   forwarding methods.
+- Research plan construction now lives at the runtime boundary through
+  `research_planning.build_research_plan`; the Agent no longer exposes a
+  plan-building forwarding method.
 
 ## Remaining High-Risk Work
 
