@@ -4568,6 +4568,84 @@ def test_final_answer_composer_streams_llm_deltas(tmp_path: Path) -> None:
     assert citations
 
 
+def test_final_answer_composer_forwards_optional_logprobs(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    contract = QueryContract(
+        clean_query="AlignX是什么",
+        relation="entity_definition",
+        targets=["AlignX"],
+        requested_fields=["definition"],
+        required_modalities=["page_text", "paper_card"],
+    )
+    papers = [
+        CandidatePaper(
+            paper_id="ALIGNX",
+            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+            year="2025",
+            doc_ids=["paper::ALIGNX"],
+        )
+    ]
+    evidence = [
+        EvidenceBlock(
+            doc_id="block-alignx-definition",
+            paper_id="ALIGNX",
+            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+            file_path="/tmp/alignx.pdf",
+            page=1,
+            block_type="page_text",
+            snippet="AlignX is a large-scale dataset and benchmark.",
+            metadata={"authors": "Li et al.", "year": "2025"},
+        )
+    ]
+    claims = [
+        Claim(
+            claim_type="entity_definition",
+            entity="AlignX",
+            value="偏好数据集",
+            structured_data={"definition_lines": ["AlignX is a large-scale dataset and benchmark."]},
+            evidence_ids=["block-alignx-definition"],
+            paper_ids=["ALIGNX"],
+        )
+    ]
+    chunks: list[str] = []
+    logprobs: list[float] = []
+    captured: dict[str, object] = {}
+
+    def stream_text(
+        *,
+        system_prompt: str,
+        human_prompt: str,
+        on_delta,
+        on_logprobs=None,
+        request_logprobs: bool = False,
+        fallback: str = "",
+    ) -> str:
+        captured["request_logprobs"] = request_logprobs
+        captured["has_logprob_callback"] = on_logprobs is not None
+        on_delta("## 定义\n\nAlignX 是偏好数据集。")
+        if on_logprobs is not None:
+            on_logprobs([-0.1, -0.2])
+        return "## 定义\n\nAlignX 是偏好数据集。"
+
+    agent.clients.stream_text = stream_text
+
+    answer, citations = agent._compose_answer(
+        contract=contract,
+        claims=claims,
+        evidence=evidence,
+        papers=papers,
+        verification=VerificationReport(status="pass"),
+        stream_callback=chunks.append,
+        logprob_callback=logprobs.extend,
+        request_logprobs=True,
+    )
+
+    assert captured == {"request_logprobs": True, "has_logprob_callback": True}
+    assert logprobs == [-0.1, -0.2]
+    assert "".join(chunks).strip() == answer
+    assert citations
+
+
 def test_correction_agent_reflects_previous_answer_before_search(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     session = agent.sessions.get("pba-agent-loop")

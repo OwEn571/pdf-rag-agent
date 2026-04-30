@@ -99,6 +99,8 @@ class AnswerComposerMixin:
         verification: VerificationReport,
         session: SessionContext | None = None,
         stream_callback: Callable[[str], None] | None = None,
+        logprob_callback: Callable[[list[float]], None] | None = None,
+        request_logprobs: bool = False,
     ) -> tuple[str, list[AssistantCitation]]:
         if verification.status == "clarify":
             return self._clarification_question(contract, session or SessionContext(session_id="clarify")), []
@@ -129,6 +131,8 @@ class AnswerComposerMixin:
                     verification=verification,
                     session=session,
                     stream_callback=stream_callback,
+                    logprob_callback=logprob_callback,
+                    request_logprobs=request_logprobs,
                 )
             except RuntimeError:
                 llm_answer = ""
@@ -153,6 +157,8 @@ class AnswerComposerMixin:
                     verification=verification,
                     session=session,
                     stream_callback=stream_callback,
+                    logprob_callback=logprob_callback,
+                    request_logprobs=request_logprobs,
                 )
             except RuntimeError:
                 llm_answer = ""
@@ -183,6 +189,8 @@ class AnswerComposerMixin:
             verification=verification,
             session=session,
             stream_callback=stream_callback,
+            logprob_callback=logprob_callback,
+            request_logprobs=request_logprobs,
         )
         return llm_answer, citations
 
@@ -281,6 +289,8 @@ class AnswerComposerMixin:
         verification: VerificationReport,
         session: SessionContext | None = None,
         stream_callback: Callable[[str], None] | None = None,
+        logprob_callback: Callable[[list[float]], None] | None = None,
+        request_logprobs: bool = False,
     ) -> str:
         if self.clients.chat is None:
             raise RuntimeError("Research answer generation requires an available chat model.")
@@ -368,12 +378,16 @@ class AnswerComposerMixin:
                 f"{DOCUMENT_SAFETY_INSTRUCTION}"
             )
         if stream_callback is not None and hasattr(self.clients, "stream_text"):
-            response_text = self.clients.stream_text(
-                system_prompt=system_prompt,
-                human_prompt=prompt,
-                on_delta=stream_callback,
-                fallback="",
-            ).strip()
+            stream_kwargs: dict[str, Any] = {
+                "system_prompt": system_prompt,
+                "human_prompt": prompt,
+                "on_delta": stream_callback,
+                "fallback": "",
+            }
+            if request_logprobs or logprob_callback is not None:
+                stream_kwargs["request_logprobs"] = request_logprobs
+                stream_kwargs["on_logprobs"] = logprob_callback
+            response_text = self.clients.stream_text(**stream_kwargs).strip()
         elif session is not None and callable(getattr(self.clients, "invoke_text_messages", None)):
             response_text = self.clients.invoke_text_messages(
                 system_prompt=(

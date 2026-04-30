@@ -13,6 +13,7 @@ from app.domain.models import (
 from app.services.agent_compound import run_compound_query_if_needed
 from app.services.agent_context import AgentRunContext
 from app.services.agent_emit import write_turn_trace_safe
+from app.services.confidence import confidence_from_logprobs, confidence_payload
 from app.services.contract_context import conversation_relation_updates_research_context
 
 
@@ -241,6 +242,10 @@ def run_research_turn(
             claims = agent_state["claims"]
             verification = agent_state["verification"]
 
+    answer_logprobs: list[float] = []
+    request_answer_logprobs = bool(
+        stream_answer and getattr(agent.agent_settings, "answer_logprobs_enabled", False)
+    )
     answer, citations = agent._compose_answer(
         contract=contract,
         claims=claims,
@@ -249,7 +254,19 @@ def run_research_turn(
         verification=verification,
         session=session,
         stream_callback=(lambda text: run_context.emit("answer_delta", {"text": text})) if stream_answer else None,
+        logprob_callback=answer_logprobs.extend if request_answer_logprobs else None,
+        request_logprobs=request_answer_logprobs,
     )
+    answer_confidence = None
+    if request_answer_logprobs:
+        answer_confidence = confidence_payload(
+            confidence_from_logprobs(
+                answer_logprobs,
+                min_tokens=int(getattr(agent.agent_settings, "answer_logprobs_min_tokens", 3)),
+            )
+        )
+        agent_state["answer_logprob_confidence"] = answer_confidence
+        run_context.emit("confidence", answer_confidence)
     focus_titles = agent._claim_focus_titles(claims=claims, papers=screened_papers)
     active_titles = focus_titles if verification.status == "pass" else []
     if verification.status == "pass":
@@ -305,6 +322,7 @@ def run_research_turn(
             research_plan=plan.model_dump(),
             execution_steps=execution_steps,
             verification_report=verification.model_dump(),
+            answer_confidence=answer_confidence,
             claims=claims,
             citations=citations,
         ),

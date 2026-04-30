@@ -9,6 +9,8 @@ class AgentSettings:
     max_agent_steps: int = 8
     max_parallel_tools: int = 4
     confidence_floor: float = 0.6
+    answer_logprobs_enabled: bool = False
+    answer_logprobs_min_tokens: int = 3
     max_clarification_attempts: int = 2
     disambiguation_auto_resolve_threshold: float = 0.85
     disambiguation_recommend_threshold: float = 0.65
@@ -34,6 +36,16 @@ class AgentSettings:
                 default=defaults.confidence_floor,
                 minimum=0.0,
                 maximum=1.0,
+            ),
+            answer_logprobs_enabled=_bounded_bool(
+                getattr(settings, "agent_answer_logprobs_enabled", defaults.answer_logprobs_enabled),
+                default=defaults.answer_logprobs_enabled,
+            ),
+            answer_logprobs_min_tokens=_bounded_int(
+                getattr(settings, "agent_answer_logprobs_min_tokens", defaults.answer_logprobs_min_tokens),
+                default=defaults.answer_logprobs_min_tokens,
+                minimum=1,
+                maximum=512,
             ),
             max_clarification_attempts=_bounded_int(
                 getattr(settings, "agent_max_clarification_attempts", defaults.max_clarification_attempts),
@@ -78,3 +90,14 @@ def _bounded_float(value: Any, *, default: float, minimum: float, maximum: float
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, parsed))
+
+
+def _bounded_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return default

@@ -30,6 +30,7 @@ def test_build_runtime_summary_canonicalizes_tools_and_context() -> None:
         research_plan={"solver_sequence": ["formula_lookup"]},
         execution_steps=[{"node": "agent_tool:web_citation_lookup"}, {"node": "compound_task:1"}],
         verification_report={"status": "pass"},
+        answer_confidence={"score": 0.82, "basis": "logprobs", "detail": {"token_count": 42}},
         claims=[Claim(claim_type="formula", structured_data={"source": "schema_solver"})],
         citations=[
             AssistantCitation(
@@ -49,6 +50,7 @@ def test_build_runtime_summary_canonicalizes_tools_and_context() -> None:
     assert summary["tool_loop"]["legacy_tools"] == ["web_citation_lookup"]
     assert summary["grounding"]["claim_sources"] == {"schema_solver": 1}
     assert summary["grounding"]["citation_count"] == 1
+    assert summary["answer_generation"]["confidence"]["basis"] == "logprobs"
     assert summary["contract_context"]["selected_paper_id"] == "paper-1"
     assert summary["contract_context"]["clarification_reasons"] == ["paper", "low_intent_confidence"]
     assert summary["active_research_context"] == {"targets": ["DPO"]}

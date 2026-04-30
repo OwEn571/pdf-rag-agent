@@ -389,6 +389,7 @@ class ResearchAssistantAgentV4(
         research_plan: dict[str, Any] | None = None,
         execution_steps: list[dict[str, Any]] | None = None,
         verification_report: dict[str, Any] | None = None,
+        answer_confidence: dict[str, Any] | None = None,
         claims: list[Claim] | None = None,
         citations: list[AssistantCitation] | None = None,
     ) -> dict[str, Any]:
@@ -399,6 +400,7 @@ class ResearchAssistantAgentV4(
             research_plan=research_plan,
             execution_steps=execution_steps,
             verification_report=verification_report,
+            answer_confidence=answer_confidence,
             claims=claims,
             citations=citations,
         )

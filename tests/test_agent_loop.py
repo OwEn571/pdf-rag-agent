@@ -221,6 +221,61 @@ def test_run_research_turn_composes_commits_and_streams_answer_delta() -> None:
     assert any(item["event"] == "answer_delta" for item in context.events)
 
 
+def test_run_research_turn_can_emit_answer_logprob_confidence() -> None:
+    contract = QueryContract(
+        clean_query="DPO是什么",
+        interaction_mode="research",
+        relation="entity_definition",
+        targets=["DPO"],
+        requested_fields=["definition"],
+    )
+    paper = CandidatePaper(paper_id="paper-1", title="DPO Paper")
+    evidence = EvidenceBlock(
+        doc_id="doc-1",
+        paper_id="paper-1",
+        title="DPO Paper",
+        file_path="/tmp/dpo.pdf",
+        page=2,
+        block_type="text",
+        snippet="DPO is a preference optimization method.",
+    )
+    claim = Claim(claim_type="definition", entity="DPO", value="preference optimization", evidence_ids=["doc-1"])
+    agent = _FakeAgent(
+        conversation_state={},
+        research_state={
+            "contract": contract,
+            "plan": ResearchPlan(required_claims=["definition"]),
+            "screened_papers": [paper],
+            "evidence": [evidence],
+            "claims": [claim],
+            "verification": VerificationReport(status="pass"),
+        },
+    )
+    agent.agent_settings = SimpleNamespace(answer_logprobs_enabled=True, answer_logprobs_min_tokens=2)
+    context = AgentRunContext.create(session_id="demo", session=SessionContext(session_id="demo"))
+
+    payload = run_research_turn(
+        agent=agent,
+        run_context=context,
+        query="DPO是什么",
+        contract=contract,
+        agent_plan={"actions": ["search_corpus", "compose"]},
+        web_enabled=False,
+        explicit_web_search=False,
+        max_web_results=3,
+        stream_answer=True,
+    )
+
+    confidence_events = [
+        item["data"]
+        for item in context.events
+        if item["event"] == "confidence" and item["data"].get("basis") == "logprobs"
+    ]
+    assert confidence_events
+    assert confidence_events[-1]["detail"]["token_count"] == 2
+    assert payload["runtime_summary"]["answer_confidence"]["basis"] == "logprobs"
+
+
 class _FakeRuntime:
     def __init__(self, conversation_state: dict[str, Any], research_state: dict[str, Any] | None = None) -> None:
         self.conversation_state = conversation_state
@@ -266,6 +321,7 @@ class _FakeAgent:
         self.remembered_research = False
         self.extract_call: dict[str, Any] = {}
         self.plan_contract: QueryContract | None = None
+        self.agent_settings = SimpleNamespace(answer_logprobs_enabled=False, answer_logprobs_min_tokens=3)
 
     def _extract_query_contract(self, **kwargs: Any) -> QueryContract:
         self.extract_call = dict(kwargs)
@@ -303,7 +359,10 @@ class _FakeAgent:
 
     @staticmethod
     def _runtime_summary(**kwargs: Any) -> dict[str, Any]:
-        return {"steps": len(kwargs["execution_steps"])}
+        return {
+            "steps": len(kwargs["execution_steps"]),
+            "answer_confidence": kwargs.get("answer_confidence"),
+        }
 
     @staticmethod
     def _force_best_effort_after_clarification_limit(**_: Any) -> None:
@@ -315,6 +374,9 @@ class _FakeAgent:
         if callable(stream_callback):
             stream_callback("research ")
             stream_callback("answer")
+        logprob_callback = kwargs.get("logprob_callback")
+        if kwargs.get("request_logprobs") and callable(logprob_callback):
+            logprob_callback([-0.1, -0.2])
         return (
             "research answer",
             [

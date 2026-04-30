@@ -26,6 +26,7 @@ def build_runtime_summary(
     research_plan: dict[str, Any] | None = None,
     execution_steps: list[dict[str, Any]] | None = None,
     verification_report: dict[str, Any] | None = None,
+    answer_confidence: dict[str, Any] | None = None,
     claims: list[Claim] | None = None,
     citations: list[AssistantCitation] | None = None,
 ) -> dict[str, Any]:
@@ -114,6 +115,9 @@ def build_runtime_summary(
             "citation_count": len(citations or []),
             "claim_sources": claim_source_counts,
             "research_solver_sequence": list((research_plan or {}).get("solver_sequence", []) or []),
+        },
+        "answer_generation": {
+            "confidence": answer_confidence,
         },
         "contract_context": contract_context,
     }
