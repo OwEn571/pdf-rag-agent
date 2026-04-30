@@ -2,17 +2,21 @@
 
 This note tracks the safe refactor slices completed against
 `docs/review-2026-04-28.md` and names the remaining high-risk work that should
-not be changed mechanically.
+not be changed without a rollback point and test-backed slices.
 
 ## Current Baseline
 
-- Latest pushed local baseline before this snapshot: `481e34a`.
+- Latest pushed local baseline before this snapshot: `9c08c81`.
 - `app/services/agent.py` has been reduced from the reviewed 7400-line monolith
-  to about 1929 lines.
+  to about 1964 lines.
+- `app/services/intent.py` has been reduced to about 510 lines after the legacy
+  recognizer fallback was split into adapter/helper modules.
 - The latest validated full test suite before this snapshot collected and passed
-  566 tests in the `zotero-paper-rag` conda environment.
+  585 tests in the `zotero-paper-rag` conda environment.
 - Published branch target remains `publish/main`
   (`git@github.com:OwEn571/pdf-rag-agent.git`).
+- Rollback marker for the high-risk migration path:
+  `rollback-review-high-risk-start-2026-04-30`.
 
 ## Completed Safe Slices
 
@@ -51,18 +55,26 @@ not be changed mechanically.
 - Sandbox documentation: `docs/tool-sandbox.md` defines the approval stages,
   deny-by-default runtime requirements, audit fields, and non-goals for dynamic
   tool execution.
+- LLM intent router migration: `LLMIntentRouter` now runs before the legacy
+  `IntentRecognizer`; router decisions are converted into compatible
+  `QueryContract` objects, including fallback target recovery when tool-call
+  args omit targets.
+- Legacy intent recognizer thinning: research slot profiles, relation/slot
+  compatibility, target shaping, protected conversation intents, fallback
+  payload assembly, and legacy relation-style payload conversion have been
+  extracted into focused helper/adapter modules.
 
 ## Remaining High-Risk Work
 
-These items are still aligned with the review, but they change core behavior
-enough that they should stop for explicit product/architecture confirmation:
+These items are still aligned with the review, but they remain core behavior
+changes and should continue as small rollback-safe slices:
 
 - Fully demoting `QueryContract` from control-flow driver to read-only tags.
   Many stable workflows still depend on relation/notes compatibility, active
   paper binding, ambiguity state, and follow-up memory.
 - Deleting the remaining `IntentRecognizer` fallback path and forcing all
-  routing through `LLMIntentRouter`. This can improve generality, but it may
-  regress latency, offline behavior, and deterministic precision tasks.
+  routing through `LLMIntentRouter`. The fallback is now much thinner, but full
+  removal can still regress offline behavior and deterministic precision tasks.
 - Removing `agent_mixins/solver_pipeline.py` and replacing the 15+ specialized
   solvers with a single generic compose loop. This is the largest remaining
   behavior risk because citation-grounded paper QA currently relies on those
@@ -80,9 +92,9 @@ enough that they should stop for explicit product/architecture confirmation:
 
 Continue with small, test-backed slices only where behavior can stay compatible:
 
-- Add more regression coverage around user-visible paper QA failures before
-  deleting deterministic compatibility paths.
-- Replace remaining inline marker fragments only when they are clearly isolated
-  formatting or routing helpers.
-- Improve trace/eval tooling so high-risk architectural replacements can be
-  measured before deleting existing deterministic paths.
+- Add regression coverage for LLM router misses before fully deleting
+  deterministic fallback paths.
+- Continue moving compatibility mappings out of the Agent/Recognizer into
+  typed adapters, then delete wrapper code once callers are migrated.
+- Improve trace/eval tooling around router decisions and solver/composer output
+  so generic replacements can be measured before deleting specialized paths.
