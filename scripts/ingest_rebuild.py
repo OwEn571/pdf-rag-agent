@@ -9,8 +9,8 @@ if str(PROJECT_ROOT := Path(__file__).resolve().parents[1]) not in sys.path:
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.logging import setup_logging  # noqa: E402
-from app.services.indexing import V4IngestionService  # noqa: E402
-from app.services.model_clients import ModelClients  # noqa: E402
+from app.services.retrieval.indexing import V4IngestionService  # noqa: E402
+from app.services.infra.model_clients import ModelClients  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
