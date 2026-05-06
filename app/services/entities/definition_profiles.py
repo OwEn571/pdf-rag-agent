@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+from app.services.intents.marker_matching import MarkerProfile
+
+
+ENTITY_DEFINITION_MARKERS: dict[str, MarkerProfile] = {
+    "algorithm_type": (
+        "algorithm",
+        "policy optimization",
+        "reinforcement learning",
+        "reward model",
+        "rule-based rewards",
+        "rubric-based rewards",
+        "objective",
+        "loss",
+        "training objective",
+        "ppo",
+        "grpo",
+        "advantage",
+        "critic",
+        "group relative",
+        "算法",
+        "优化",
+        "训练目标",
+        "目标函数",
+    ),
+    "dataset_type": ("dataset", "benchmark", "corpus", "leaderboard", "数据集", "基准"),
+    "framework_type": ("framework", "system", "platform", "agent", "架构", "系统", "框架"),
+    "model_type": ("model", "llm", "language model", "simulator", "classifier", "policy", "模型"),
+    "intro_dataset": ("dataset", "benchmark", "corpus", "数据集", "基准"),
+    "intro_algorithm": ("algorithm", "policy optimization", "reinforcement learning", "算法", "优化"),
+    "group_comparison": (
+        "group of outputs",
+        "group scores",
+        "relative rewards",
+        "group-based reward",
+        "group relative",
+    ),
+    "critic_free": ("critic", "value model", "value function", "foregoes the critic", "obviates the need"),
+    "resource_saving": (
+        "training resources",
+        "memory usage",
+        "computational burden",
+        "overhead",
+        "sample-efficient",
+        "reduce training resources",
+    ),
+    "reasoning_alignment": (
+        "reasoning",
+        "alignment",
+        "instruction following",
+        "mathematical reasoning",
+        "推理",
+    ),
+    "workflow_sampling": (
+        "sample a group",
+        "sampled output",
+        "sample 64 outputs",
+        "group of outputs",
+        "sample g outputs",
+    ),
+    "workflow_reward": (
+        "compute rewards",
+        "reward model",
+        "score the outputs",
+        "rule refers",
+        "rule judgment",
+        "average reward",
+        "group scores",
+        "baseline",
+    ),
+    "workflow_advantage": (
+        "group average",
+        "group standard deviation",
+        "relative rewards",
+        "mean(r)",
+        "std(r)",
+        "advantage",
+        "advantage estimation",
+        "group relative",
+    ),
+    "workflow_policy_update": (
+        "update the policy",
+        "policy model",
+        "objective",
+        "clip",
+        "kl penalty",
+        "maximizing the grpo objective",
+    ),
+    "summary_group_comparison": ("group scores", "relative rewards", "group relative", "advantage"),
+    "summary_critic": ("critic", "value model", "value function"),
+    "summary_resource": ("training resources", "memory", "computational burden", "less memory", "reduce"),
+    "summary_reasoning": ("reasoning", "alignment", "mathematical reasoning", "推理"),
+}
+
+
+__all__ = ["ENTITY_DEFINITION_MARKERS"]
