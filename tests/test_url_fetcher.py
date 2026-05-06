@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.services.url_fetcher import fetch_url, validate_fetch_url
+from app.services.retrieval.url_fetcher import fetch_url, validate_fetch_url
 
 
 class _FakeResponse:

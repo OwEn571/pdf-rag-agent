@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.domain.models import QueryContract, SessionTurn
-from app.services.session_store import SQLiteSessionStore
+from app.services.memory.session_store import SQLiteSessionStore
 
 
 def test_sqlite_session_store_persists_context(tmp_path) -> None:

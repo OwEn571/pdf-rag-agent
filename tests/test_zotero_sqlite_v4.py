@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.config import Settings
-from app.services.zotero_sqlite import PaperRecord, ZoteroSQLiteReader
+from app.services.intents.marker_matching import query_matches_any
+from app.services.library.zotero_sqlite import (
+    PAPERLIKE_WEBPAGE_TITLE_MARKERS,
+    PaperRecord,
+    ZoteroSQLiteReader,
+)
 
 
 def _settings() -> Settings:
@@ -70,3 +75,17 @@ def test_reader_excludes_non_academic_webpage_pdf() -> None:
     )
 
     assert reader.should_include_record(record) is False
+
+
+def test_reader_uses_paperlike_webpage_title_markers() -> None:
+    reader = ZoteroSQLiteReader(_settings())
+
+    record = _record(
+        item_type="webpage",
+        title="A Survey on Alignment Reasoning",
+        source_url="https://example.com/paper.pdf",
+        website_title="Example",
+    )
+
+    assert query_matches_any("alignment survey", "", PAPERLIKE_WEBPAGE_TITLE_MARKERS)
+    assert reader.should_include_record(record) is True

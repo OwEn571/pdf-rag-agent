@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from types import MethodType
 
@@ -9,10 +10,34 @@ from langchain_core.documents import Document
 from app.core.config import Settings
 from app.domain.models import CandidatePaper, Claim, EvidenceBlock, QueryContract, ResearchPlan, SessionContext, SessionTurn, VerificationReport
 from app.services.agent import ResearchAssistantAgentV4
+from app.services.agent.chat_runtime import run_agent_chat_turn
+from app.services.agent.contract_extraction import extract_agent_query_contract
+from app.services.agent import compound as agent_compound_module
+from app.services.agent.runtime_helpers import claim_focus_titles
+from app.services.clarification.questions import build_agent_clarification_question
+from app.services.clarification.intents import (
+    contract_from_selected_clarification_option,
+    contract_with_ambiguity_options,
+)
+from app.services.infra.confidence import coerce_claim_confidence
+from app.services.contracts.normalization import normalize_contract_targets
+from app.services.answers.evidence_presentation import build_figure_contexts, citations_from_doc_ids
+from app.services.claims import formula_text as formula_helpers
+from app.services.claims.figure_solver import solve_figure_claims
+from app.services.intents.figure import figure_signal_score
+from app.services.claims.followup_research_solver import solve_followup_research_claims
+from app.services.claims.formula_solver import solve_formula_claims
 from app.services.library import LibraryBrowserService
-from app.services.model_clients import ModelClients
+from app.services.answers.memory_followup import compose_memory_followup_answer
+from app.services.infra.model_clients import ModelClients
+from app.services.planning.query_shaping import should_use_web_search
+from app.services.planning.research import build_research_plan
 from app.services.retrieval import DualIndexRetriever
-from app.services.session_store import InMemorySessionStore
+from app.services.planning.schema_claims import should_use_schema_claim_solver
+from app.services.contracts.session_context import agent_session_conversation_context
+from app.services.memory.session_store import InMemorySessionStore
+from app.services.claims.table_solver import solve_table_claims
+from app.services.retrieval.web_evidence import build_web_research_claim, collect_web_evidence
 
 
 class StubModelClients:
@@ -29,6 +54,125 @@ class StubModelClients:
     def invoke_json_messages(self, *, system_prompt: str, messages: list[dict[str, str]], fallback: object) -> object:
         human_prompt = messages[-1]["content"] if messages else "{}"
         return self.invoke_json(system_prompt=system_prompt, human_prompt=human_prompt, fallback=fallback)
+
+    def invoke_tool_plan_messages(
+        self,
+        *,
+        system_prompt: str,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, object]],
+        fallback: object,
+    ) -> object:
+        del tools
+        query = next(
+            (str(message.get("content", "") or "") for message in reversed(messages) if message.get("role") == "user"),
+            "",
+        )
+        router_context = self._router_context_from_system_prompt(system_prompt)
+        active = dict(router_context.get("active_research_context", {}) or {})
+        payload = self.invoke_json(
+            system_prompt="意图路由器",
+            human_prompt=json.dumps(
+                {
+                    "current_query": query,
+                    "query": query,
+                    "active_research_context": active,
+                    "last_relation": active.get("relation", ""),
+                },
+                ensure_ascii=False,
+            ),
+            fallback={},
+        )
+        return self._router_tool_plan_from_contract(payload=payload, query=query) or fallback
+
+    @staticmethod
+    def _router_context_from_system_prompt(system_prompt: str) -> dict[str, object]:
+        marker = "上下文：\n"
+        if marker not in system_prompt:
+            return {}
+        raw_payload = system_prompt.rsplit(marker, 1)[-1].strip()
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _router_tool_plan_from_contract(*, payload: object, query: str) -> dict[str, object] | None:
+        if not isinstance(payload, dict):
+            return None
+        relation = str(payload.get("relation", "") or "").strip()
+        interaction_mode = str(payload.get("interaction_mode", "") or "").strip()
+        if not relation or not interaction_mode:
+            return None
+        confidence = 0.86
+        rationale = f"stubbed route: {relation}"
+        direct_relations = {"greeting", "self_identity", "capability", "general_question"}
+        conversation_tool_relations = {
+            "clarify_user_intent",
+            "library_status",
+            "library_recommendation",
+            "library_citation_ranking",
+            "memory_followup",
+            "memory_synthesis",
+        }
+        if interaction_mode == "conversation" and relation in direct_relations:
+            return {
+                "actions": ["answer_directly"],
+                "tool_call_args": [
+                    {
+                        "name": "answer_directly",
+                        "args": {
+                            "answer_style": relation,
+                            "confidence": confidence,
+                            "rationale": rationale,
+                        },
+                    }
+                ],
+            }
+        if interaction_mode == "conversation" and relation in conversation_tool_relations:
+            return {
+                "actions": ["need_conversation_tool"],
+                "tool_call_args": [
+                    {
+                        "name": "need_conversation_tool",
+                        "args": {
+                            "relation": relation,
+                            "targets": list(payload.get("targets", []) or []),
+                            "requested_fields": list(payload.get("requested_fields", []) or []),
+                            "answer_shape": str(payload.get("answer_shape", "") or "narrative"),
+                            "precision_requirement": str(payload.get("precision_requirement", "") or "normal"),
+                            "continuation_mode": str(payload.get("continuation_mode", "") or "fresh"),
+                            "notes": list(payload.get("notes", []) or []),
+                            "confidence": confidence,
+                            "rationale": rationale,
+                        },
+                    }
+                ],
+            }
+        if interaction_mode == "research":
+            return {
+                "actions": ["need_corpus_search"],
+                "tool_call_args": [
+                    {
+                        "name": "need_corpus_search",
+                        "args": {
+                            "query": query,
+                            "relation": relation,
+                            "targets": list(payload.get("targets", []) or []),
+                            "requested_fields": list(payload.get("requested_fields", []) or []),
+                            "required_modalities": list(payload.get("required_modalities", []) or []),
+                            "answer_shape": str(payload.get("answer_shape", "") or "narrative"),
+                            "precision_requirement": str(payload.get("precision_requirement", "") or "high"),
+                            "continuation_mode": str(payload.get("continuation_mode", "") or "fresh"),
+                            "notes": list(payload.get("notes", []) or []),
+                            "confidence": confidence,
+                            "rationale": rationale,
+                        },
+                    }
+                ],
+            }
+        return None
 
     def invoke_text(self, *, system_prompt: str, human_prompt: str, fallback: str = "") -> str:
         if "论文公式讲解器" in system_prompt:
@@ -419,8 +563,39 @@ class StubModelClients:
                 return contract(interaction_mode="conversation", relation="capability", precision_requirement="normal")
             if query == "你是谁":
                 return contract(interaction_mode="conversation", relation="self_identity", precision_requirement="normal")
+            active_targets = [str(item).strip() for item in list(active.get("targets", []) or []) if str(item).strip()]
             if query == "何意味":
                 return contract(interaction_mode="conversation", relation="clarify_user_intent", precision_requirement="normal")
+            if query == "好，那他具体说了啥":
+                target = active_targets[0] if active_targets else "A Survey on LLM-as-a-Judge"
+                return contract(
+                    interaction_mode="research",
+                    relation="paper_summary_results",
+                    continuation_mode="followup",
+                    targets=[target],
+                    requested_fields=["summary", "key_findings", "method", "experiments"],
+                    required_modalities=["page_text", "paper_card", "table", "caption"],
+                    answer_shape="bullets",
+                    precision_requirement="high",
+                    notes=["resolved_from_conversation_memory", "requires_paper_reading"],
+                )
+            if "多少论文" in query or "有多少篇" in query or "一共有多少" in query:
+                return contract(
+                    interaction_mode="conversation",
+                    relation="library_status",
+                    requested_fields=["paper_count", "library_summary"],
+                    answer_shape="bullets",
+                    precision_requirement="exact",
+                )
+            if "论文库" in query and ("值得一看" in query or "最值得" in query or "推荐" in query):
+                return contract(
+                    interaction_mode="conversation",
+                    relation="library_recommendation",
+                    requested_fields=["recommended_papers", "rationale"],
+                    answer_shape="bullets",
+                    precision_requirement="normal",
+                    notes=["dynamic_library_recommendation"],
+                )
             if "为什么选择" in query or "为什么推荐这篇" in query:
                 return contract(
                     interaction_mode="conversation",
@@ -457,8 +632,64 @@ class StubModelClients:
                     precision_requirement="normal",
                     notes=["needs_contextual_refine"],
                 )
+            if "AlignX" in query and ("后续" in query or "后续工作" in query):
+                return contract(
+                    interaction_mode="research",
+                    relation="followup_research",
+                    continuation_mode="fresh" if not active.get("relation") else "followup",
+                    targets=["AlignX"],
+                    requested_fields=["followup_papers", "relationship", "evidence"],
+                    required_modalities=["paper_card", "page_text"],
+                    answer_shape="bullets",
+                    notes=["followup_direction_resolved"],
+                )
+            if (
+                "仔细看看" in query
+                and "Extended Inductive Reasoning for Personalized Preference Inference from Behavioral Signals" in query
+            ):
+                return contract(
+                    interaction_mode="research",
+                    relation="followup_research",
+                    continuation_mode="followup",
+                    targets=active_targets or ["AlignX"],
+                    requested_fields=["followup_papers", "relationship", "evidence"],
+                    required_modalities=["paper_card", "page_text"],
+                    answer_shape="bullets",
+                    notes=["inherited_followup_relationship"],
+                )
+            if "严格后续" in query and (active.get("relation") == "followup_research" or active_targets):
+                return contract(
+                    interaction_mode="research",
+                    relation="followup_research",
+                    continuation_mode="followup",
+                    targets=active_targets or ["AlignX"],
+                    requested_fields=["followup_papers", "relationship", "evidence"],
+                    required_modalities=["paper_card", "page_text"],
+                    answer_shape="bullets",
+                    notes=["inherited_followup_relationship"],
+                )
+            if query == "最早不是在这里吧" and active_targets:
+                return contract(
+                    interaction_mode="research",
+                    relation="general_question",
+                    continuation_mode="followup",
+                    targets=active_targets,
+                    requested_fields=["answer"],
+                    required_modalities=["page_text", "paper_card"],
+                    notes=["needs_contextual_refine"],
+                )
             if query == "最早不是在这里吧":
                 return contract(interaction_mode="conversation", relation="clarify_user_intent", precision_requirement="normal")
+            if ("第一篇论文" in query or "第一个提出" in query or "最早提出" in query) and "AlignX" in query:
+                return contract(
+                    interaction_mode="research",
+                    relation="origin_lookup",
+                    continuation_mode="followup" if active.get("relation") else "fresh",
+                    targets=["AlignX"],
+                    requested_fields=["paper_title", "year", "supporting_paper"],
+                    required_modalities=["page_text", "paper_card"],
+                    precision_requirement="exact",
+                )
             if query == "不对吧":
                 repair_relation = str(active.get("relation") or last_relation or "general_question")
                 return contract(
@@ -536,6 +767,17 @@ class StubModelClients:
                     answer_shape="bullets",
                     notes=["local_protected_pdf_agent_topology_design"],
                 )
+            if "reward model" in query_lower and "DPO" in query:
+                return contract(
+                    interaction_mode="research",
+                    relation="general_question",
+                    continuation_mode="followup" if active.get("relation") else "fresh",
+                    targets=["DPO"],
+                    requested_fields=["mechanism", "reward_model_requirement", "evidence"],
+                    required_modalities=["page_text", "paper_card"],
+                    answer_shape="narrative",
+                    notes=["resolved_from_conversation_memory"],
+                )
             if "看哪些论文" in query or "推荐一些论文" in query or "如何入门" in query:
                 return contract(
                     interaction_mode="research",
@@ -546,14 +788,24 @@ class StubModelClients:
                     required_modalities=["paper_card", "page_text"],
                     answer_shape="bullets",
                 )
+            if "主要结论" in query and ("数据支持" in query or "什么数据" in query):
+                target = "AlignX" if "AlignX" in query else ""
+                return contract(
+                    interaction_mode="research",
+                    relation="paper_summary_results",
+                    targets=[target] if target else [],
+                    requested_fields=["summary", "results", "evidence"],
+                    required_modalities=["page_text", "paper_card", "table", "caption"],
+                    answer_shape="narrative",
+                )
             if "核心结论" in query and "实验结果" in query:
                 target = "POPI" if "POPI" in query else ""
                 return contract(
                     interaction_mode="research",
                     relation="paper_summary_results",
                     targets=[target] if target else [],
-                    requested_fields=["answer"],
-                    required_modalities=["page_text", "paper_card"],
+                    requested_fields=["summary", "results", "evidence"],
+                    required_modalities=["page_text", "paper_card", "table", "caption"],
                     answer_shape="narrative",
                 )
             if (
@@ -590,6 +842,29 @@ class StubModelClients:
                     required_modalities=["figure", "caption", "page_text"],
                     answer_shape="bullets",
                 )
+            if "PBA" in query and "ICA" in query and ("效果" in query or "结果" in query):
+                return contract(
+                    interaction_mode="research",
+                    relation="metric_value_lookup",
+                    continuation_mode="followup" if active.get("relation") else "fresh",
+                    targets=["PBA", "ICA"],
+                    requested_fields=["metric_value", "setting", "evidence"],
+                    required_modalities=["table", "caption", "page_text"],
+                    answer_shape="narrative",
+                    precision_requirement="exact",
+                )
+            if "AlignX最初的论文" in query and active_targets:
+                return contract(
+                    interaction_mode="research",
+                    relation=str(active.get("relation") or "metric_value_lookup"),
+                    continuation_mode="followup",
+                    targets=active_targets,
+                    requested_fields=list(active.get("requested_fields", []) or ["metric_value", "setting", "evidence"]),
+                    required_modalities=["table", "caption", "page_text"],
+                    answer_shape=str(active.get("answer_shape") or "narrative"),
+                    precision_requirement=str(active.get("precision_requirement") or "exact"),
+                    notes=["paper_scope_correction"],
+                )
             if "表现如何" in query or "指标" in query:
                 return contract(
                     interaction_mode="research",
@@ -608,6 +883,17 @@ class StubModelClients:
                     requested_fields=["definition", "mechanism"],
                     required_modalities=["page_text", "paper_card"],
                     precision_requirement="high",
+                )
+            if "PBA" in query and "AlignX" in query and ("论文里" in query or "就在" in query):
+                return contract(
+                    interaction_mode="research",
+                    relation="formula_lookup",
+                    continuation_mode="followup",
+                    targets=["PBA"],
+                    requested_fields=["formula", "variable_explanation"],
+                    required_modalities=["page_text", "table"],
+                    answer_shape="bullets",
+                    precision_requirement="exact",
                 )
             if "公式" in query or "objective" in query_lower or "loss" in query_lower:
                 target = "DPO" if "DPO" in query else ""
@@ -1194,10 +1480,10 @@ def test_query_contract_routes_conversation_and_capability(tmp_path: Path) -> No
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="demo")
 
-    greeting = agent._extract_query_contract(query="你好", session=session, mode="auto")
-    capability = agent._extract_query_contract(query="你有什么功能", session=session, mode="auto")
-    identity = agent._extract_query_contract(query="你是谁", session=session, mode="auto")
-    library_status = agent._extract_query_contract(query="你一共有多少论文？", session=session, mode="auto")
+    greeting = extract_agent_query_contract(agent=agent, query="你好", session=session)
+    capability = extract_agent_query_contract(agent=agent, query="你有什么功能", session=session)
+    identity = extract_agent_query_contract(agent=agent, query="你是谁", session=session)
+    library_status = extract_agent_query_contract(agent=agent, query="你一共有多少论文？", session=session)
 
     assert greeting.interaction_mode == "conversation"
     assert capability.interaction_mode == "conversation"
@@ -1241,10 +1527,10 @@ def test_recommendation_rationale_followup_uses_generic_memory_tool(tmp_path: Pa
     events: list[dict[str, object]] = []
 
     agent.chat(query="知识库中有多少论文?最值得一读的是哪篇?", session_id="recommendation-memory")
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="为什么选择A Survey on LLM-as-a-Judge",
         session_id="recommendation-memory",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1268,10 +1554,10 @@ def test_contextual_paper_content_followup_uses_memory_to_route_then_reads_paper
 
     agent.chat(query="知识库中有多少论文?最值得一读的是哪篇?", session_id="recommendation-paper-read")
     agent.chat(query="为什么推荐这篇？", session_id="recommendation-paper-read")
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="好，那他具体说了啥",
         session_id="recommendation-paper-read",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1306,10 +1592,10 @@ def test_worth_reading_library_query_prioritizes_recommendation_over_inventory(t
     fixture_total = len(retriever.paper_documents())
     events: list[dict[str, object]] = []
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="你的论文库中有哪些论文值得一看呢",
         session_id="worth-reading-tool-loop",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1331,10 +1617,10 @@ def test_greeting_uses_conversation_tool_instead_of_direct_answer(tmp_path: Path
     agent, _ = _build_agent(tmp_path)
     events: list[dict[str, object]] = []
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="你好",
         session_id="greeting-tool-loop",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1352,10 +1638,10 @@ def test_library_list_plus_recommendation_stays_self_knowledge_and_streams_secti
     fixture_total = len(retriever.paper_documents())
     events: list[dict[str, object]] = []
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="你的论文库里有哪些文章啊，哪个值得一看",
         session_id="library-list-recommend",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1418,10 +1704,10 @@ def test_citation_count_followup_uses_web_lookup_instead_of_default_recommendati
     assert first["query_contract"]["relation"] == "compound_query"
 
     events: list[dict[str, object]] = []
-    result, emitted = agent._run(
+    result, emitted = run_agent_chat_turn(
+        agent=agent,
         query="按引用数呢",
         session_id=session_id,
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -1454,7 +1740,7 @@ def test_query_contract_routes_concept_definition_without_whitespace(tmp_path: P
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="demo")
 
-    contract = agent._extract_query_contract(query="什么是PPO", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="什么是PPO", session=session)
 
     assert contract.relation == "concept_definition"
     assert contract.targets == ["PPO"]
@@ -1464,7 +1750,7 @@ def test_paper_summary_results_always_requests_table_evidence(tmp_path: Path) ->
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="demo")
 
-    contract = agent._extract_query_contract(query="POPI的核心结论是什么，实验结果如何？", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="POPI的核心结论是什么，实验结果如何？", session=session)
 
     assert contract.relation == "paper_summary_results"
     assert "page_text" in contract.required_modalities
@@ -1492,7 +1778,7 @@ def test_research_plan_uses_larger_evidence_budget_for_results_queries(tmp_path:
         targets=["POPI"],
     )
 
-    plan = agent._build_research_plan(contract)
+    plan = build_research_plan(contract=contract, settings=agent.settings)
 
     assert plan.paper_limit >= 8
     assert plan.evidence_limit >= 36
@@ -1512,10 +1798,10 @@ def test_followup_contract_inherits_topology_context(tmp_path: Path) -> None:
         clean_query="agent topology",
     )
 
-    contract = agent._extract_query_contract(
+    contract = extract_agent_query_contract(
+        agent=agent,
         query="这些不同的拓扑结构哪种最好呢？如果我要组织LangGraph节点，你觉得哪种比较好？",
         session=session,
-        mode="auto",
     )
 
     assert contract.relation == "topology_recommendation"
@@ -1535,7 +1821,7 @@ def test_title_anchor_prefers_attention_is_all_you_need(tmp_path: Path) -> None:
 def test_topology_search_prefers_scaling_multi_agent_collaboration(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="demo")
-    contract = agent._extract_query_contract(query="论文中有没有研究agent拓扑结构的", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="论文中有没有研究agent拓扑结构的", session=session)
     papers = agent.retriever.search_papers(query=contract.clean_query, contract=contract, limit=4)
 
     assert papers
@@ -1645,14 +1931,28 @@ def test_table_solver_returns_metric_claim(tmp_path: Path) -> None:
         )
     ]
 
-    claims = agent._solve_table(contract=contract, papers=papers, evidence=evidence)
+    claims = solve_table_claims(
+        clients=agent.clients,
+        settings=agent.settings,
+        rendered_page_data_url_cache=agent._rendered_page_data_url_cache,
+        contract=contract,
+        papers=papers,
+        evidence=evidence,
+        paper_identity_matches_targets=lambda paper, targets: agent._paper_identity_matches_targets(
+            paper=paper,
+            targets=targets,
+        ),
+        logger=logging.getLogger(__name__),
+    )
 
     assert claims
     assert claims[0].claim_type == "metric_value"
     assert "win rate" in claims[0].structured_data["metric_lines"][0].lower()
 
 
-def test_table_solver_uses_vlm_when_page_image_is_available(tmp_path: Path) -> None:
+def test_table_solver_uses_vlm_when_page_image_is_available(tmp_path: Path, monkeypatch) -> None:
+    import app.services.claims.table_solver as table_claim_solver
+
     agent, _ = _build_agent(tmp_path)
     calls: list[list[dict[str, object]]] = []
 
@@ -1670,7 +1970,11 @@ def test_table_solver_uses_vlm_when_page_image_is_available(tmp_path: Path) -> N
         }
 
     agent.clients.invoke_multimodal_json = fake_multimodal_json  # type: ignore[method-assign]
-    agent._render_page_image_data_url = lambda *, file_path, page: "data:image/png;base64,ZmFrZQ=="  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        table_claim_solver,
+        "render_pdf_page_image_data_url",
+        lambda **_: "data:image/png;base64,ZmFrZQ==",
+    )
     contract = QueryContract(
         clean_query="AlignX的PBA表现如何？",
         relation="metric_value_lookup",
@@ -1697,7 +2001,19 @@ def test_table_solver_uses_vlm_when_page_image_is_available(tmp_path: Path) -> N
         )
     ]
 
-    claims = agent._solve_table(contract=contract, papers=papers, evidence=evidence)
+    claims = solve_table_claims(
+        clients=agent.clients,
+        settings=agent.settings,
+        rendered_page_data_url_cache=agent._rendered_page_data_url_cache,
+        contract=contract,
+        papers=papers,
+        evidence=evidence,
+        paper_identity_matches_targets=lambda paper, targets: agent._paper_identity_matches_targets(
+            paper=paper,
+            targets=targets,
+        ),
+        logger=logging.getLogger(__name__),
+    )
 
     assert calls
     assert claims
@@ -1754,7 +2070,19 @@ def test_table_solver_grounds_primary_paper_in_metric_evidence(tmp_path: Path) -
         ),
     ]
 
-    claims = agent._solve_table(contract=contract, papers=papers, evidence=evidence)
+    claims = solve_table_claims(
+        clients=agent.clients,
+        settings=agent.settings,
+        rendered_page_data_url_cache=agent._rendered_page_data_url_cache,
+        contract=contract,
+        papers=papers,
+        evidence=evidence,
+        paper_identity_matches_targets=lambda paper, targets: agent._paper_identity_matches_targets(
+            paper=paper,
+            targets=targets,
+        ),
+        logger=logging.getLogger(__name__),
+    )
 
     assert claims
     assert claims[0].paper_ids[0] == "ALIGNX"
@@ -1783,7 +2111,15 @@ def test_figure_solver_fallback_uses_caption_when_vlm_disabled(tmp_path: Path) -
         )
     ]
 
-    claims = agent._solve_figure(contract=contract, papers=papers, evidence=evidence)
+    claims = solve_figure_claims(
+        clients=agent.clients,
+        settings=agent.settings,
+        rendered_page_data_url_cache=agent._rendered_page_data_url_cache,
+        contract=contract,
+        papers=papers,
+        evidence=evidence,
+        logger=logging.getLogger(__name__),
+    )
 
     assert claims
     assert claims[0].structured_data["mode"] == "caption_fallback"
@@ -1791,7 +2127,6 @@ def test_figure_solver_fallback_uses_caption_when_vlm_disabled(tmp_path: Path) -
 
 
 def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
     evidence = [
         EvidenceBlock(
             doc_id="page-summary-1",
@@ -1822,7 +2157,7 @@ def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tm
         ),
     ]
 
-    contexts = agent._build_figure_contexts(evidence)
+    contexts = build_figure_contexts(evidence)
 
     assert contexts
     assert contexts[0]["page"] == 1
@@ -1831,9 +2166,10 @@ def test_build_figure_contexts_prefers_explicit_figure_page_over_summary_page(tm
 def test_normalize_contract_targets_drops_structural_figure_reference(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 
-    targets = agent._normalize_contract_targets(
+    targets = normalize_contract_targets(
         targets=["Deepseek R1", "figure1"],
         requested_fields=["problem_addressed"],
+        canonicalize_targets=agent.retriever.canonicalize_targets,
     )
 
     assert targets == ["Deepseek R1"]
@@ -1892,16 +2228,21 @@ def test_figure_verifier_rejects_wrong_primary_paper(tmp_path: Path) -> None:
 def test_followup_citations_can_resolve_paper_card_doc_ids(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 
-    citations = agent._citations_from_doc_ids(["paper::TOPO"], evidence=[])
+    citations = citations_from_doc_ids(
+        ["paper::TOPO"],
+        evidence=[],
+        block_doc_lookup=agent.retriever.block_doc_by_id,
+        paper_doc_lookup=agent.retriever.paper_doc_by_id,
+    )
 
     assert len(citations) == 1
     assert citations[0].title == "Scaling Large Language Model-based Multi-Agent Collaboration"
 
 
 def test_figure_confidence_accepts_string_labels(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
+    _build_agent(tmp_path)
 
-    assert agent._coerce_confidence("high") > agent._coerce_confidence("medium")
+    assert coerce_claim_confidence("high") > coerce_claim_confidence("medium")
 
 
 def test_concept_definition_answer_uses_definition_evidence(tmp_path: Path) -> None:
@@ -1924,7 +2265,7 @@ def test_unknown_concept_returns_clarification_instead_of_random_summary(tmp_pat
     assert result["query_contract"]["relation"] in {"concept_definition", "entity_definition"}
     assert result["needs_human"] is True
     assert "没有稳定定位" in result["answer"]
-    assert agent._coerce_confidence("low") < agent._coerce_confidence("medium")
+    assert coerce_claim_confidence("low") < coerce_claim_confidence("medium")
 
 
 def test_ambiguous_acronym_asks_human_instead_of_guessing(tmp_path: Path) -> None:
@@ -2015,7 +2356,7 @@ def test_short_vague_query_routes_to_conversation_clarification(tmp_path: Path) 
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="demo")
 
-    contract = agent._extract_query_contract(query="何意味", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="何意味", session=session)
 
     assert contract.interaction_mode == "conversation"
     assert contract.relation == "clarify_user_intent"
@@ -2081,7 +2422,13 @@ def test_entity_definition_solver_prefers_supporting_paper_over_top_ranked_candi
         ),
     ]
 
-    claims = agent._solve_text(contract=contract, papers=papers, evidence=evidence, session=SessionContext(session_id="grpo-demo"))
+    claims = agent._run_deterministic_claim_solver(
+        contract=contract,
+        plan=ResearchPlan(required_claims=list(contract.requested_fields or ["answer"])),
+        papers=papers,
+        evidence=evidence,
+        session=SessionContext(session_id="grpo-demo"),
+    )
 
     assert claims
     claim = claims[0]
@@ -2292,7 +2639,15 @@ def test_claim_focus_titles_follow_claim_papers_not_candidate_rank(tmp_path: Pat
         )
     ]
 
-    titles = agent._claim_focus_titles(claims=claims, papers=papers)
+    titles = claim_focus_titles(
+        claims=claims,
+        papers=papers,
+        paper_title_lookup=lambda paper_id: (
+            str((doc.metadata or {}).get("title", ""))
+            if (doc := agent.retriever.paper_doc_by_id(paper_id)) is not None
+            else None
+        ),
+    )
 
     assert titles == ["UserLM-R1"]
 
@@ -2536,7 +2891,13 @@ def test_origin_solver_prefers_exact_entity_paper_over_superstring_alias(tmp_pat
         ),
     ]
 
-    claims = agent._solve_text(contract=contract, papers=papers, evidence=evidence, session=SessionContext(session_id="origin-alignx"))
+    claims = agent._run_deterministic_claim_solver(
+        contract=contract,
+        plan=ResearchPlan(required_claims=list(contract.requested_fields or ["answer"])),
+        papers=papers,
+        evidence=evidence,
+        session=SessionContext(session_id="origin-alignx"),
+    )
 
     assert claims
     assert claims[0].paper_ids == ["ALIGNX"]
@@ -2597,7 +2958,13 @@ def test_paper_summary_prefers_exact_entity_paper_over_superstring_alias(tmp_pat
         ),
     ]
 
-    claims = agent._solve_text(contract=contract, papers=papers, evidence=evidence, session=SessionContext(session_id="summary-alignx"))
+    claims = agent._run_deterministic_claim_solver(
+        contract=contract,
+        plan=ResearchPlan(required_claims=list(contract.requested_fields or ["answer"])),
+        papers=papers,
+        evidence=evidence,
+        session=SessionContext(session_id="summary-alignx"),
+    )
 
     assert claims
     assert claims[0].paper_ids == ["ALIGNX"]
@@ -2659,7 +3026,13 @@ def test_origin_solver_requires_intro_cue_not_benchmark_usage(tmp_path: Path) ->
         ),
     ]
 
-    claims = agent._solve_text(contract=contract, papers=papers, evidence=evidence, session=SessionContext(session_id="origin-alignx-usage"))
+    claims = agent._run_deterministic_claim_solver(
+        contract=contract,
+        plan=ResearchPlan(required_claims=list(contract.requested_fields or ["answer"])),
+        papers=papers,
+        evidence=evidence,
+        session=SessionContext(session_id="origin-alignx-usage"),
+    )
 
     assert claims
     assert claims[0].paper_ids == ["ALIGNX"]
@@ -2732,7 +3105,7 @@ def test_formula_screening_prefers_exact_target_paper_over_higher_scored_noise(t
         ),
     ]
 
-    screened = agent._prefer_identity_matching_papers(candidates=candidates, targets=["DPO"])
+    screened = [item for item in candidates if agent._paper_identity_matches_targets(paper=item, targets=["DPO"])] or candidates
 
     assert [item.paper_id for item in screened] == ["DPO"]
 
@@ -2891,9 +3264,13 @@ def test_followup_solver_uses_seed_paper_then_excludes_it_from_followups(tmp_pat
             )
         )
 
-    claims = agent._solve_followup_research(
+    claims = solve_followup_research_claims(
+        clients=agent.clients,
+        retriever=retriever,
+        paper_limit_default=int(agent.settings.paper_limit_default),
         contract=contract,
         papers=papers,
+        evidence=[],
         session=SessionContext(session_id="followup-demo"),
     )
 
@@ -2904,91 +3281,6 @@ def test_followup_solver_uses_seed_paper_then_excludes_it_from_followups(tmp_pat
     followup_ids = [item["paper_id"] for item in claim.structured_data["followup_titles"]]
     assert "ALIGNX" not in followup_ids
     assert "ALIGNXPLORE" in followup_ids
-
-
-def test_followup_filter_keeps_domain_related_papers_without_literal_target(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    candidates = [
-        CandidatePaper(
-            paper_id="ALIGNX",
-            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-            metadata={"paper_card_text": "This paper introduces AlignX."},
-        ),
-        CandidatePaper(
-            paper_id="PERSONADUAL",
-            title="PersonaDual: Balancing Personalization and Objectivity via Adaptive Reasoning",
-            metadata={"paper_card_text": "A personalized alignment method using user preferences and persona reasoning."},
-        ),
-    ]
-
-    filtered = agent._filter_followup_candidates(contract=contract, candidates=candidates)
-
-    assert [item.paper_id for item in filtered] == ["ALIGNX", "PERSONADUAL"]
-
-
-def test_followup_relevance_boost_prioritizes_personalization_continuations(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    seed = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        year="2025",
-        metadata={"paper_card_text": "This paper introduces AlignX."},
-    )
-    candidates = [
-        seed,
-        CandidatePaper(
-            paper_id="COMMUNITY",
-            title="CommunityBench: Benchmarking Community-Level Alignment across Diverse Groups and Tasks",
-            year="2026",
-            score=1.2,
-            metadata={"paper_card_text": "A benchmark for community-level alignment."},
-        ),
-        CandidatePaper(
-            paper_id="POPI",
-            title="POPI: Personalizing LLMs via Optimized Preference Inference",
-            year="2026",
-            score=0.4,
-            metadata={"paper_card_text": "Modular personalization with preference inference and conditioned generation."},
-        ),
-    ]
-
-    ranked = agent._rank_followup_candidates_fallback(contract=contract, seed_papers=[seed], candidates=candidates)
-
-    assert ranked
-    assert ranked[0]["paper"].paper_id == "POPI"
-    assert all(item["paper"].paper_id != "ALIGNX" for item in ranked)
-
-
-def test_followup_expansion_terms_are_topic_based_not_example_titles(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    paper = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        metadata={
-            "paper_card_text": (
-                "This work introduces a user-level alignment benchmark for personalized preference, "
-                "preference inference, and conditioned generation."
-            )
-        },
-    )
-
-    terms = agent._followup_expansion_terms(paper)
-
-    assert "preference inference" in terms
-    assert "conditioned generation" in terms
-    assert "POPI" not in terms
-    assert "PersonaDual" not in terms
-    assert "Text as a Universal Interface" not in terms
 
 
 def test_followup_answer_composer_lists_structured_candidates(tmp_path: Path) -> None:
@@ -3052,7 +3344,7 @@ def test_candidate_validation_followup_uses_previous_followup_history_in_answer(
     citation_doc_ids = {item["doc_id"] for item in second["citations"]}
     assert "block-alignxplore-definition" in citation_doc_ids
     assert "block-alignx-definition" in citation_doc_ids
-    assert clients.compound_decompose_calls == first_decompose_calls
+    assert clients.compound_decompose_calls == first_decompose_calls + 1
     assert clients.followup_refine_calls == first_refine_calls
 
 
@@ -3060,10 +3352,10 @@ def test_explicit_followup_direction_uses_seed_after_de_particle(tmp_path: Path)
     agent, _ = _build_agent(tmp_path)
     session = SessionContext(session_id="followup-direction")
 
-    contract = agent._extract_query_contract(
+    contract = extract_agent_query_contract(
+        agent=agent,
         query="Extended Inductive Reasoning for Personalized Preference Inference from Behavioral Signals是ALignX的后续工作吗",
         session=session,
-        mode="auto",
     )
 
     assert contract.relation == "followup_research"
@@ -3167,43 +3459,6 @@ def test_followup_answer_groups_relationship_strength_and_hides_raw_english_reas
     assert "读法建议" in answer
 
 
-def test_followup_assessment_does_not_treat_author_overlap_as_direct(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-    contract = QueryContract(
-        clean_query="AlignX数据集有后续工作吗？",
-        relation="followup_research",
-        targets=["AlignX"],
-    )
-    seed = CandidatePaper(
-        paper_id="ALIGNX",
-        title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
-        year="2025",
-        metadata={
-            "authors": "Li; Chen",
-            "aliases": "AlignX",
-            "paper_card_text": "This paper introduces AlignX, a dataset and benchmark for user-level alignment.",
-        },
-    )
-    candidate = CandidatePaper(
-        paper_id="RELATED",
-        title="Personalized Alignment with User Profiles",
-        year="2026",
-        metadata={
-            "authors": "Li; Zhang",
-            "paper_card_text": "A personalized alignment method for user preference inference.",
-        },
-    )
-
-    assessment = agent._followup_relationship_assessment(
-        contract=contract,
-        seed_papers=[seed],
-        paper=candidate,
-    )
-
-    assert assessment["strength"] != "direct"
-    assert "证据不足" in assessment["reason"]
-
-
 def test_web_search_fallback_uses_web_evidence_when_enabled(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
 
@@ -3238,8 +3493,13 @@ def test_web_search_fallback_uses_web_evidence_when_enabled(tmp_path: Path) -> N
         relation="general_question",
         allow_web_search=True,
     )
-    evidence = agent._collect_web_evidence(contract=contract, use_web_search=True, max_web_results=3)
-    claim = agent._build_web_research_claim(contract=contract, web_evidence=evidence)
+    evidence = collect_web_evidence(
+        web_search=agent.web_search,
+        contract=contract,
+        use_web_search=True,
+        max_web_results=3,
+    )
+    claim = build_web_research_claim(contract=contract, web_evidence=evidence)
     report = agent._verify_claims(
         contract=contract,
         plan=ResearchPlan(required_claims=["answer"]),
@@ -3267,7 +3527,7 @@ def test_latest_query_auto_enables_external_search(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     contract = QueryContract(clean_query="最新的多模态RAG论文有哪些？", relation="paper_recommendation")
 
-    assert agent._should_use_web_search(use_web_search=False, contract=contract)
+    assert should_use_web_search(use_web_search=False, contract=contract)
 
 
 def test_correction_followup_reuses_active_target_for_repair(tmp_path: Path) -> None:
@@ -3285,7 +3545,7 @@ def test_correction_followup_reuses_active_target_for_repair(tmp_path: Path) -> 
     )
     session.last_relation = "entity_definition"
 
-    contract = agent._extract_query_contract(query="不对吧", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="不对吧", session=session)
 
     assert contract.relation == "entity_definition"
     assert contract.targets == ["AlignX"]
@@ -3306,7 +3566,7 @@ def test_contextual_origin_challenge_is_recovered_as_research_followup(tmp_path:
         clean_query="AlignX是什么",
     )
 
-    contract = agent._extract_query_contract(query="最早不是在这里吧", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="最早不是在这里吧", session=session)
 
     assert contract.relation == "origin_lookup"
     assert contract.continuation_mode == "followup"
@@ -3339,7 +3599,7 @@ def test_explicit_first_proposed_query_does_not_bind_stale_memory_paper(tmp_path
         }
     }
 
-    contract = agent._extract_query_contract(query="不是这一篇，是第一个提出AlignX的", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="不是这一篇，是第一个提出AlignX的", session=session)
 
     assert contract.relation == "origin_lookup"
     assert contract.targets == ["AlignX"]
@@ -3351,17 +3611,62 @@ def test_first_paper_origin_phrase_routes_to_origin_lookup(tmp_path: Path) -> No
     agent, _ = _build_agent(tmp_path)
     session = agent.sessions.get("origin-first-paper-demo")
 
-    contract = agent._extract_query_contract(query="我问的是AlignX的第一篇论文", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="我问的是AlignX的第一篇论文", session=session)
 
     assert contract.relation == "origin_lookup"
     assert contract.targets == ["AlignX"]
+
+
+def test_paper_source_clarification_recovers_from_wrong_active_paper(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("deepseek-source-correction")
+    session.set_active_research(
+        relation="figure_question",
+        targets=["DeepSeek"],
+        titles=["CommunityBench: Benchmarking Community-Level Alignment across Diverse Groups and Tasks"],
+        requested_fields=["figure_conclusion"],
+        required_modalities=["figure", "caption", "page_text"],
+        answer_shape="bullets",
+        precision_requirement="high",
+        clean_query="Deepseek论文中有哪些figure",
+    )
+
+    def clarify_plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {
+            "actions": ["need_clarify"],
+            "tool_call_args": [
+                {
+                    "name": "need_clarify",
+                    "args": {
+                        "question": "请提供 DeepSeek 的具体论文来源。",
+                        "reason": "ambiguous paper source",
+                        "confidence": 0.32,
+                    },
+                }
+            ],
+        }
+
+    agent.clients.invoke_tool_plan_messages = MethodType(clarify_plan_messages, agent.clients)
+
+    contract = extract_agent_query_contract(
+        agent=agent,
+        query="我就是让你找DeepSeek是哪篇论文",
+        session=session,
+    )
+
+    assert contract.relation == "origin_lookup"
+    assert contract.targets == ["DeepSeek"]
+    assert contract.continuation_mode == "context_switch"
+    assert "origin" in contract.answer_slots
+    assert "clarify_recovered_origin_lookup" in contract.notes
+    assert not any("CommunityBench" in note for note in contract.notes)
 
 
 def test_explicit_summary_query_keeps_named_target(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     session = agent.sessions.get("summary-explicit-demo")
 
-    contract = agent._extract_query_contract(query="AlignX中主要结论是什么？用什么数据支持？", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="AlignX中主要结论是什么？用什么数据支持？", session=session)
 
     assert contract.relation == "paper_summary_results"
     assert contract.targets == ["AlignX"]
@@ -3413,10 +3718,10 @@ def test_compound_formula_comparison_streams_subtasks_without_plan_in_answer(tmp
     agent, _ = _build_agent(tmp_path)
     events: list[dict[str, object]] = []
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="DPO公式是什么，PPO呢，顺便比较一下",
         session_id="compound-formula-demo",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -3441,10 +3746,10 @@ def test_compound_followup_comparison_uses_previous_formula_memory(tmp_path: Pat
     events: list[dict[str, object]] = []
 
     first = agent.chat(query="DPO的公式是什么？", session_id="compare-memory")
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="那PPO呢，两者有什么区别",
         session_id="compare-memory",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -3459,13 +3764,22 @@ def test_compound_followup_comparison_uses_previous_formula_memory(tmp_path: Pat
     assert len(deltas) >= 3
 
 
-def test_compound_query_stops_for_subtask_clarification(tmp_path: Path) -> None:
+def test_compound_query_stops_for_subtask_clarification(tmp_path: Path, monkeypatch) -> None:
     agent, _ = _build_agent(tmp_path)
     calls: list[str] = []
 
-    def fake_execute(self, *, contract: QueryContract, session: SessionContext, emit, execution_steps):
+    def fake_execute(*, agent: ResearchAssistantAgentV4, contract: QueryContract, session: SessionContext, emit, execution_steps):
         calls.append(contract.relation)
-        blocked = self._contract_with_ambiguity_options(
+        if "resolved_human_choice" in contract.notes:
+            return {
+                "contract": contract,
+                "answer": f"{contract.targets[0]} 已按用户选择消歧。",
+                "citations": [],
+                "claims": [],
+                "evidence": [],
+                "verification": VerificationReport(status="pass"),
+            }
+        blocked = contract_with_ambiguity_options(
             contract=contract,
             options=[
                 {
@@ -3491,19 +3805,24 @@ def test_compound_query_stops_for_subtask_clarification(tmp_path: Path) -> None:
         )
         return {
             "contract": blocked,
-            "answer": self._clarification_question(blocked, session),
+            "answer": build_agent_clarification_question(
+                contract=blocked,
+                session=session,
+                clients=agent.clients,
+                settings=agent.settings,
+            ),
             "citations": [],
             "claims": [],
             "evidence": [],
             "verification": verification,
         }
 
-    agent._execute_compound_research_subtask = MethodType(fake_execute, agent)
+    monkeypatch.setattr(agent_compound_module, "execute_compound_task_subagent", fake_execute)
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="PPO和DPO有什么区别",
         session_id="compound-clarify-stop",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=lambda _: None,
@@ -3519,16 +3838,33 @@ def test_compound_query_stops_for_subtask_clarification(tmp_path: Path) -> None:
     assert calls == ["formula_lookup"]
     assert "在继续复合问题" in result["answer"]
     assert session.pending_clarification_type == "ambiguity"
+    assert "pending_compound_plan" in session.working_memory
+
+    resumed, _ = run_agent_chat_turn(
+        agent=agent,
+        query="Proximal Policy Optimization",
+        session_id="compound-clarify-stop",
+        use_web_search=False,
+        max_web_results=3,
+        event_callback=lambda _: None,
+    )
+    resumed_nodes = [step["node"] for step in resumed["execution_steps"]]
+
+    assert resumed["needs_human"] is False
+    assert resumed["query_contract"]["relation"] == "compound_query"
+    assert "compound_task:comparison_synthesis" in resumed_nodes
+    assert "比较 DPO 和 PPO" in resumed["answer"]
+    assert "pending_compound_plan" not in session.working_memory
 
 
 def test_compound_parallel_formula_query_without_compare_splits_targets(tmp_path: Path) -> None:
     agent, _ = _build_agent(tmp_path)
     events: list[dict[str, object]] = []
 
-    result, _ = agent._run(
+    result, _ = run_agent_chat_turn(
+        agent=agent,
         query="DPO的公式是什么？PPO公式又是什么",
         session_id="compound-formula-no-compare",
-        mode="auto",
         use_web_search=False,
         max_web_results=3,
         event_callback=events.append,
@@ -3601,8 +3937,8 @@ def test_compact_unicode_formula_is_normalized_to_markdown_latex() -> None:
         "βlogπθ(yw|x)/πref(yw|x))]"
     )
 
-    normalized = ResearchAssistantAgentV4._normalize_extracted_formula_text(formula)
-    symbol = ResearchAssistantAgentV4._normalize_formula_variable_symbol("∇θLDPO")
+    normalized = formula_helpers.normalize_extracted_formula_text(formula)
+    symbol = formula_helpers.normalize_formula_variable_symbol("∇θLDPO")
 
     assert r"\nabla_{\theta}\mathcal{L}_{\mathrm{DPO}}" in normalized
     assert r"\pi_{\theta}" in normalized
@@ -3645,8 +3981,19 @@ def test_formula_interpretation_followup_uses_memory_not_retrieval(tmp_path: Pat
         )
     )
 
-    contract = agent._extract_query_contract(query="怎么理解这个公式？", session=session, mode="auto")
-    answer = agent._compose_memory_followup_answer(query="怎么理解这个公式？", session=session, contract=contract)
+    contract = extract_agent_query_contract(agent=agent, query="怎么理解这个公式？", session=session)
+    answer = compose_memory_followup_answer(
+        query="怎么理解这个公式？",
+        session=session,
+        contract=contract,
+        clients=agent.clients,
+        conversation_context=lambda current_session, *, max_chars=24000: agent_session_conversation_context(
+            current_session,
+            settings=agent.settings,
+            max_chars=max_chars,
+        ),
+        clean_text=agent._clean_common_ocr_artifacts,
+    )
 
     assert contract.interaction_mode == "conversation"
     assert contract.relation == "memory_followup"
@@ -3668,7 +4015,7 @@ def test_negative_formula_correction_keeps_active_paper_scope(tmp_path: Path) ->
         clean_query="DPO 的公式是什么？",
     )
 
-    contract = agent._extract_query_contract(query="我觉得不是这个公式哦", session=session, mode="auto")
+    contract = extract_agent_query_contract(agent=agent, query="我觉得不是这个公式哦", session=session)
 
     assert contract.relation == "formula_lookup"
     assert contract.targets == ["DPO"]
@@ -3693,8 +4040,19 @@ def test_language_preference_followup_does_not_search_random_papers(tmp_path: Pa
         )
     )
 
-    contract = agent._extract_query_contract(query="你怎么回答还中英文混杂，我要中文", session=session, mode="auto")
-    answer = agent._compose_memory_followup_answer(query="你怎么回答还中英文混杂，我要中文", session=session, contract=contract)
+    contract = extract_agent_query_contract(agent=agent, query="你怎么回答还中英文混杂，我要中文", session=session)
+    answer = compose_memory_followup_answer(
+        query="你怎么回答还中英文混杂，我要中文",
+        session=session,
+        contract=contract,
+        clients=agent.clients,
+        conversation_context=lambda current_session, *, max_chars=24000: agent_session_conversation_context(
+            current_session,
+            settings=agent.settings,
+            max_chars=max_chars,
+        ),
+        clean_text=agent._clean_common_ocr_artifacts,
+    )
 
     assert contract.interaction_mode == "conversation"
     assert contract.relation == "memory_followup"
@@ -3749,7 +4107,13 @@ def test_formula_claim_preserves_structured_variables_from_llm(tmp_path: Path) -
         )
     ]
 
-    claims = agent._solve_formula(contract=contract, papers=[paper], evidence=evidence)
+    claims = solve_formula_claims(
+        clients=agent.clients,
+        contract=contract,
+        papers=[paper],
+        evidence=evidence,
+        retrieval_formula_token_weights=agent.settings.retrieval_formula_token_weights,
+    )
 
     assert claims
     structured = dict(claims[0].structured_data)
@@ -3976,10 +4340,10 @@ def test_contextual_method_result_query_binds_to_active_paper(tmp_path: Path) ->
     )
     agent.sessions.upsert(session)
 
-    contract = agent._extract_query_contract(
+    contract = extract_agent_query_contract(
+        agent=agent,
         query="这篇论文中PBA和ICA的具体效果如何呢",
         session=session,
-        mode="auto",
     )
 
     assert contract.relation == "metric_value_lookup"
@@ -3987,6 +4351,104 @@ def test_contextual_method_result_query_binds_to_active_paper(tmp_path: Path) ->
     assert "selected_paper_id=ALIGNX" in contract.notes
     assert any(note.startswith("memory_title=From 1,000,000 Users") for note in contract.notes)
     assert "PersonaDual" not in contract.clean_query
+
+
+def test_extract_query_contract_prefers_llm_tool_router_when_available(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router")
+
+    def plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {
+            "actions": ["need_corpus_search"],
+            "tool_call_args": [
+                {
+                    "name": "need_corpus_search",
+                    "args": {
+                        "query": "PBA 准确率多少",
+                        "targets": ["PBA"],
+                        "confidence": 0.91,
+                        "rationale": "table-backed metric question",
+                    },
+                }
+            ],
+        }
+
+    agent.clients.invoke_tool_plan_messages = MethodType(plan_messages, agent.clients)
+
+    contract = extract_agent_query_contract(agent=agent, query="PBA 准确率多少", session=session)
+
+    assert contract.relation == "metric_value_lookup"
+    assert contract.targets == ["PBA"]
+    assert "llm_tool_router" in contract.notes
+    assert "intent_confidence=0.91" in contract.notes
+    assert "local_protected_explicit_target_metric" not in contract.notes
+
+
+def test_extract_query_contract_clarifies_when_llm_tool_router_misses(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router-miss")
+
+    def bad_plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {"actions": ["not_a_router_tool"], "tool_call_args": []}
+
+    agent.clients.invoke_tool_plan_messages = MethodType(bad_plan_messages, agent.clients)
+
+    contract = extract_agent_query_contract(agent=agent, query="PBA 准确率多少", session=session)
+
+    assert contract.interaction_mode == "conversation"
+    assert contract.relation == "clarify_user_intent"
+    assert contract.targets == []
+    assert "router_unavailable" in contract.notes
+    assert "legacy_intent_fallback_removed" in contract.notes
+    assert "local_protected_explicit_target_metric" not in contract.notes
+
+
+def test_extract_query_contract_router_miss_keeps_clarification_contract(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("llm-tool-router-disabled-fallback")
+
+    def bad_plan_messages(self: object, **_: object) -> dict[str, object]:
+        return {"actions": ["not_a_router_tool"], "tool_call_args": []}
+
+    agent.clients.invoke_tool_plan_messages = MethodType(bad_plan_messages, agent.clients)
+
+    contract = extract_agent_query_contract(agent=agent, query="PBA 准确率多少", session=session)
+
+    assert contract.interaction_mode == "conversation"
+    assert contract.relation == "clarify_user_intent"
+    assert contract.targets == []
+    assert "legacy_intent_fallback_removed" in contract.notes
+    assert "local_protected_explicit_target_metric" not in contract.notes
+
+
+def test_metric_definition_followup_reuses_active_metric_context(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    session = agent.sessions.get("metric-definition-followup")
+    session.set_active_research(
+        relation="metric_value_lookup",
+        targets=["ICA", "PBA"],
+        titles=["From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment"],
+        requested_fields=["metric_value", "setting", "evidence"],
+        required_modalities=["table", "caption", "page_text"],
+        answer_shape="table",
+        precision_requirement="exact",
+        clean_query="ICA、PBA 方法在各数据集上的准确度是多少？",
+    )
+    agent.sessions.upsert(session)
+
+    contract = extract_agent_query_contract(
+        agent=agent,
+        query="这个准确度是怎么定义的？",
+        session=session,
+    )
+
+    assert contract.relation == "metric_value_lookup"
+    assert contract.interaction_mode == "research"
+    assert contract.continuation_mode == "followup"
+    assert contract.targets == ["ICA", "PBA"]
+    assert contract.requested_fields == ["metric_value", "metric_definition", "setting", "evidence"]
+    assert contract.required_modalities == ["table", "caption", "page_text"]
+    assert "metric_definition_followup" in contract.notes
 
 
 def test_paper_scope_correction_reuses_previous_targets_in_named_paper(tmp_path: Path) -> None:
@@ -4005,10 +4467,10 @@ def test_paper_scope_correction_reuses_previous_targets_in_named_paper(tmp_path:
     )
     agent.sessions.upsert(session)
 
-    contract = agent._extract_query_contract(
+    contract = extract_agent_query_contract(
+        agent=agent,
         query="我问的就是AlignX最初的论文中的",
         session=session,
-        mode="auto",
     )
 
     assert contract.relation == "metric_value_lookup"
@@ -4203,8 +4665,14 @@ def test_schema_claim_solver_is_not_used_for_formula_or_followup(tmp_path: Path)
         required_modalities=["paper_card", "page_text"],
     )
 
-    assert not agent._should_use_schema_claim_solver(contract=formula_contract, plan=agent._build_research_plan(formula_contract))
-    assert not agent._should_use_schema_claim_solver(contract=followup_contract, plan=agent._build_research_plan(followup_contract))
+    assert not should_use_schema_claim_solver(
+        contract=formula_contract,
+        plan=build_research_plan(contract=formula_contract, settings=agent.settings),
+    )
+    assert not should_use_schema_claim_solver(
+        contract=followup_contract,
+        plan=build_research_plan(contract=followup_contract, settings=agent.settings),
+    )
 
 
 def test_paper_recommendation_query_does_not_fall_into_topology_followup(tmp_path: Path) -> None:
@@ -4223,10 +4691,10 @@ def test_conversation_turn_does_not_clear_active_research_memory(tmp_path: Path)
 
     agent.chat(query="DPO的公式是什么？", session_id="memory-demo-2")
     agent.chat(query="你是谁", session_id="memory-demo-2")
-    contract = agent._extract_query_contract(
+    contract = extract_agent_query_contract(
+        agent=agent,
         query="变量解释呢",
         session=agent.sessions.get("memory-demo-2"),
-        mode="auto",
     )
 
     assert contract.relation == "formula_lookup"
@@ -4235,9 +4703,7 @@ def test_conversation_turn_does_not_clear_active_research_memory(tmp_path: Path)
 
 
 def test_figure_signal_score_detects_benchmark_rich_caption(tmp_path: Path) -> None:
-    agent, _ = _build_agent(tmp_path)
-
-    score = agent._figure_signal_score(
+    score = figure_signal_score(
         "Figure 1 | Benchmark performance on AIME, Codeforces, GPQA, MATH-500, MMLU and SWE-bench."
     )
 
@@ -4497,7 +4963,7 @@ def test_llm_disambiguation_judge_recommends_but_keeps_human_gate(tmp_path: Path
 
 
 def test_formula_clarification_choice_preserves_answer_slots() -> None:
-    contract = ResearchAssistantAgentV4._contract_from_selected_clarification_option(
+    contract = contract_from_selected_clarification_option(
         clean_query="选择第二个",
         target="XYZ",
         selected={
@@ -4624,6 +5090,84 @@ def test_final_answer_composer_streams_llm_deltas(tmp_path: Path) -> None:
     )
 
     assert chunks
+    assert "".join(chunks).strip() == answer
+    assert citations
+
+
+def test_final_answer_composer_forwards_optional_logprobs(tmp_path: Path) -> None:
+    agent, _ = _build_agent(tmp_path)
+    contract = QueryContract(
+        clean_query="AlignX是什么",
+        relation="entity_definition",
+        targets=["AlignX"],
+        requested_fields=["definition"],
+        required_modalities=["page_text", "paper_card"],
+    )
+    papers = [
+        CandidatePaper(
+            paper_id="ALIGNX",
+            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+            year="2025",
+            doc_ids=["paper::ALIGNX"],
+        )
+    ]
+    evidence = [
+        EvidenceBlock(
+            doc_id="block-alignx-definition",
+            paper_id="ALIGNX",
+            title="From 1,000,000 Users to Every User: Scaling Up Personalized Preference for User-level Alignment",
+            file_path="/tmp/alignx.pdf",
+            page=1,
+            block_type="page_text",
+            snippet="AlignX is a large-scale dataset and benchmark.",
+            metadata={"authors": "Li et al.", "year": "2025"},
+        )
+    ]
+    claims = [
+        Claim(
+            claim_type="entity_definition",
+            entity="AlignX",
+            value="偏好数据集",
+            structured_data={"definition_lines": ["AlignX is a large-scale dataset and benchmark."]},
+            evidence_ids=["block-alignx-definition"],
+            paper_ids=["ALIGNX"],
+        )
+    ]
+    chunks: list[str] = []
+    logprobs: list[float] = []
+    captured: dict[str, object] = {}
+
+    def stream_text(
+        *,
+        system_prompt: str,
+        human_prompt: str,
+        on_delta,
+        on_logprobs=None,
+        request_logprobs: bool = False,
+        fallback: str = "",
+    ) -> str:
+        captured["request_logprobs"] = request_logprobs
+        captured["has_logprob_callback"] = on_logprobs is not None
+        on_delta("## 定义\n\nAlignX 是偏好数据集。")
+        if on_logprobs is not None:
+            on_logprobs([-0.1, -0.2])
+        return "## 定义\n\nAlignX 是偏好数据集。"
+
+    agent.clients.stream_text = stream_text
+
+    answer, citations = agent._compose_answer(
+        contract=contract,
+        claims=claims,
+        evidence=evidence,
+        papers=papers,
+        verification=VerificationReport(status="pass"),
+        stream_callback=chunks.append,
+        logprob_callback=logprobs.extend,
+        request_logprobs=True,
+    )
+
+    assert captured == {"request_logprobs": True, "has_logprob_callback": True}
+    assert logprobs == [-0.1, -0.2]
     assert "".join(chunks).strip() == answer
     assert citations
 

@@ -6,10 +6,10 @@ from pathlib import Path
 from langchain_core.documents import Document
 
 from app.core.config import Settings
-from app.domain.models import QueryContract
-from app.services.indexing import V4IngestionService
-from app.services.retrieval import DualIndexRetriever
-from app.services.zotero_sqlite import PaperRecord
+from app.domain.models import EvidenceBlock, QueryContract
+from app.services.retrieval.indexing import V4IngestionService
+from app.services.retrieval import RETRIEVAL_MARKERS, DualIndexRetriever
+from app.services.library.zotero_sqlite import PaperRecord
 
 
 def _paper_record() -> PaperRecord:
@@ -104,6 +104,124 @@ def test_retriever_lookup_indexes_filter_evidence_by_paper_id(tmp_path: Path) ->
     assert retriever.block_doc_by_id("b2") is not None
     assert [doc.metadata["doc_id"] for doc in retriever.block_documents_for_paper("P1", limit=10)] == ["b1"]
     assert {item.paper_id for item in evidence} == {"P2"}
+
+
+def test_retriever_exposes_atomic_bm25_and_hybrid_search_tools(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    paper_docs = [
+        Document(page_content="title: Direct Preference Optimization\nDPO optimizes a preference objective.", metadata={"doc_id": "paper::DPO", "paper_id": "DPO", "title": "Direct Preference Optimization"}),
+        Document(page_content="title: Proximal Policy Optimization\nPPO clips policy ratios.", metadata={"doc_id": "paper::PPO", "paper_id": "PPO", "title": "Proximal Policy Optimization"}),
+    ]
+    block_docs = [
+        Document(page_content="The DPO loss directly optimizes preferences without a reward model.", metadata={"doc_id": "dpo-block", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 2}),
+        Document(page_content="The PPO clipped surrogate objective limits policy updates.", metadata={"doc_id": "ppo-block", "paper_id": "PPO", "title": "Proximal Policy Optimization", "block_type": "page_text", "page": 3}),
+    ]
+    V4IngestionService._persist_jsonl(settings.paper_store_path, paper_docs)
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    retriever = DualIndexRetriever(settings)
+    contract = QueryContract(clean_query="DPO loss", targets=["DPO"], requested_fields=["formula"])
+
+    bm25 = retriever.bm25_search(query="DPO loss", contract=contract, scope="blocks", limit=3)
+    hybrid = retriever.hybrid_search(query="DPO loss", contract=contract, scope="auto", limit=3)
+
+    assert bm25
+    assert bm25[0].paper_id == "DPO"
+    assert bm25[0].metadata["search_source"] == "block_bm25"
+    assert hybrid
+    assert hybrid[0].paper_id == "DPO"
+
+
+def test_retriever_reranks_existing_evidence_by_focus_terms(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    retriever = DualIndexRetriever(settings)
+    evidence = [
+        EvidenceBlock(doc_id="a", paper_id="P1", title="A", file_path="", page=1, block_type="page_text", snippet="generic policy text", score=1.0),
+        EvidenceBlock(doc_id="b", paper_id="P2", title="B", file_path="", page=1, block_type="page_text", snippet="DPO loss optimizes preferences", score=0.1),
+    ]
+
+    reranked = retriever.rerank_evidence(query="DPO loss", evidence=evidence, top_k=2, focus=["DPO"])
+
+    assert [item.doc_id for item in reranked] == ["b", "a"]
+    assert reranked[0].metadata["rerank_score"] > reranked[1].metadata["rerank_score"]
+
+
+def test_retrieval_markers_drive_static_scoring_profiles() -> None:
+    assert "mechanism_strong" in RETRIEVAL_MARKERS
+    assert (
+        DualIndexRetriever._mechanism_like_score(
+            "The objective computes relative rewards.",
+            "",
+            targets=[],
+            requested_fields=set(),
+        )
+        >= 1.4
+    )
+    assert (
+        DualIndexRetriever._mechanism_like_score(
+            "The workflow uses reward guiding signals.",
+            "",
+            targets=[],
+            requested_fields={"mechanism"},
+        )
+        >= 2.0
+    )
+    assert (
+        DualIndexRetriever._application_like_score("We use this method as guiding signals.", targets=[])
+        == 0.8
+    )
+
+
+def test_formula_heavy_filter_can_be_disabled_for_entity_evidence(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    block_docs = [
+        Document(
+            page_content="PPO ∑𝜋𝜃 (𝑜𝑡 |𝑞, 𝑜<𝑡) 𝜋𝜃𝑜𝑙𝑑 (𝑜𝑡 |𝑞, 𝑜<𝑡) , 1 − 𝜀, 1 + 𝜀  𝐴𝑡  . (15)",
+            metadata={
+                "doc_id": "formula-heavy",
+                "paper_id": "PPO",
+                "title": "PPO Paper",
+                "block_type": "page_text",
+                "page": 1,
+            },
+        )
+    ]
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    contract = QueryContract(clean_query="PPO 是什么方法", targets=["PPO"], requested_fields=["definition"])
+
+    default_retriever = DualIndexRetriever(settings)
+    default_hits = default_retriever.search_entity_evidence(query=contract.clean_query, contract=contract, limit=5)
+    disabled_settings = settings.model_copy(update={"retrieval_filter_formula_heavy_non_formula": False})
+    disabled_retriever = DualIndexRetriever(disabled_settings)
+    disabled_hits = disabled_retriever.search_entity_evidence(query=contract.clean_query, contract=contract, limit=5)
+
+    assert [item.doc_id for item in default_hits] == []
+    assert [item.doc_id for item in disabled_hits] == ["formula-heavy"]
+
+
+def test_retriever_reads_pdf_page_blocks_and_greps_corpus(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    paper_docs = [
+        Document(
+            page_content="title: Direct Preference Optimization",
+            metadata={"doc_id": "paper::DPO", "paper_id": "DPO", "title": "Direct Preference Optimization"},
+        )
+    ]
+    block_docs = [
+        Document(page_content="Page one introduction", metadata={"doc_id": "dpo-p1", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 1}),
+        Document(page_content="Page two contains L_DPO and preference loss details.", metadata={"doc_id": "dpo-p2", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 2}),
+        Document(page_content="Page three appendix", metadata={"doc_id": "dpo-p3", "paper_id": "DPO", "title": "Direct Preference Optimization", "block_type": "page_text", "page": 3}),
+    ]
+    V4IngestionService._persist_jsonl(settings.paper_store_path, paper_docs)
+    V4IngestionService._persist_jsonl(settings.block_store_path, block_docs)
+    retriever = DualIndexRetriever(settings)
+
+    page_blocks = retriever.read_pdf_pages(paper_id="DPO", page_from=2, page_to=2, max_chars=2000)
+    grep_hits = retriever.grep_corpus(pattern=r"L_DPO", scope="blocks", paper_ids=["DPO"], max_hits=5)
+
+    assert [item.doc_id for item in page_blocks] == ["dpo-p2"]
+    assert "preference loss" in page_blocks[0].snippet
+    assert [item.doc_id for item in grep_hits] == ["dpo-p2"]
+    assert grep_hits[0].metadata["grep_pattern"] == r"L_DPO"
 
 
 def test_ingestion_extracts_body_acronym_aliases_from_definitions_and_formulae() -> None:
