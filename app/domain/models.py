@@ -348,6 +348,7 @@ class VerificationReport(BaseModel):
     unsupported_claims: list[str] = Field(default_factory=list)
     contradictory_claims: list[str] = Field(default_factory=list)
     recommended_action: str = ""
+    original_status: str = ""  # P0-8: set to "best_effort" when clarif limit reached, prevents target_binding pollution
 
 
 class AssistantCitation(BaseModel):
