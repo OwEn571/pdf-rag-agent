@@ -1,8 +1,8 @@
-# PDF-RAG-Agent V5
+# PDF-RAG-Agent
 
 面向 Zotero 个人论文库的智能研究助手。将论文检索、证据抽取、歧义消解、grounding 校验和答案组合全部接入 Agent Loop，支持多轮对话、公式/图表/指标精确查询、LLM-judge 自动消歧和流式可视化。
 
-**当前运行时版本 V5**，基于 FastAPI + SSE + Milvus + BM25，Chat Model 部署 `deepseek-v4-flash`。
+基于 FastAPI + SSE + Milvus + BM25，Chat Model 部署 `deepseek-v4-flash`。
 
 ## 架构
 
@@ -12,7 +12,7 @@ app/
 ├── core/             配置、依赖注入、安全、日志
 ├── domain/           数据模型 (QueryContract, SessionContext, ResearchPlan, Claim 等)
 ├── schemas/          API 请求/响应模型
-├── static/           前端单页 v4.html
+├── static/           前端单页 index.html
 ├── prompts/          Agent 自述 prompt
 └── services/         16 个子包、140+ 模块
     ├── infra/        模型客户端封装 (deepseek-v4-flash + gpt-4.1-mini VLM + Qihai embedding)
@@ -22,7 +22,7 @@ app/
     ├── intents/      LLMIntentRouter (tool-calling 意图路由, 20+ 种 relation)
     ├── planning/     研究计划生成、查询改写、复合查询分解
     ├── contracts/    会话上下文、合约规范化、追问关系
-    ├── claims/       ★ 23 模块: 13 种 deterministic solver + verifier pipeline
+    ├── claims/       ★ 20+ 模块: 12 种 deterministic solver stage + verifier pipeline
     ├── answers/      答案组合 (公式/论文/实体/指标/推荐等)
     ├── entities/     实体定义与类型推断
     ├── followup/     追问候选管理
@@ -36,10 +36,10 @@ app/
 
 ```
 用户问题
-→ LLMIntentRouter (tool-calling 路由, 5 tool choice → 20+ relation)
+→ LLMIntentRouter (tool-calling 路由, Router+Planner 合并，单次 tool-calling 完成路由+规划)
 → extract_agent_query_contract (多层加工: followup继承 → normalize → contextual resolve)
-→ AgentPlanner (tool-calling → JSON → fallback 三级 plan 生成)
-→ AgentRuntime (conversation 12工具 / research 18工具 两条 tool loop)
+→ AgentPlanner (Router 提供 planned_actions，回退时 JSON/fallback)
+→ AgentRuntime (conversation 12工具 / research 19工具 两条 tool loop)
 → Claim Solver (13 deterministic solvers + schema solver + shadow mode)
 → Claim Verifier (三层: 证据ID审计 → type-specific → LLM fallback)
 → Answer Composer (按 relation 分发, 输出带引用的 Markdown)
@@ -63,7 +63,7 @@ python scripts/ingest_rebuild.py
 uvicorn app.main:app --host 127.0.0.1 --port 8001
 
 # 访问
-open http://127.0.0.1:8001/v5
+open http://127.0.0.1:8001/
 ```
 
 ## 环境变量
