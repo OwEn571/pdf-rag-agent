@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 class AgentChatRequest(BaseModel):
     query: str = Field(min_length=1)
     session_id: str | None = None
-    mode: str = "auto"
     use_web_search: bool = False
     max_web_results: int = Field(default=3, ge=1, le=10)
     clarification_choice: dict[str, Any] | None = None
@@ -57,6 +56,20 @@ class IngestResponse(BaseModel):
     paper_docs: int = 0
     vectors_upserted: int = 0
     papers_with_generated_summary: int = 0
+
+
+class ToolProposalTransitionRequest(BaseModel):
+    next_status: str
+    code_sha256: str
+    reviewer: str
+    note: str = ""
+    sandbox_report: dict[str, Any] | None = None
+
+
+class ToolProposalSandboxRequest(BaseModel):
+    args: dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: float = Field(default=2.0, gt=0, le=30.0)
+    memory_limit_mb: int = Field(default=256, ge=64, le=2048)
 
 
 class HealthResponse(BaseModel):

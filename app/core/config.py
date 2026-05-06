@@ -38,6 +38,14 @@ class Settings(BaseSettings):
         default="https://api.openai.com/v1",
         validation_alias=AliasChoices("OPENAI_BASE_URL", "QIHANG_BASE_URL"),
     )
+    embedding_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("EMBEDDING_API_KEY"),
+    )
+    embedding_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("EMBEDDING_BASE_URL", "EMBEDDING_BASE"),
+    )
     chat_model: str = "gpt-4o-mini"
     chat_max_tokens: int = 1800
     embedding_model: str = "text-embedding-3-large"
@@ -53,6 +61,9 @@ class Settings(BaseSettings):
     milvus_uri: str = "http://localhost:19530"
     milvus_paper_collection: str = "zprag_v4_papers"
     milvus_block_collection: str = "zprag_v4_blocks"
+
+    redis_url: str = "redis://localhost:6380/0"
+    redis_cache_ttl_seconds: int = 300
 
     tavily_api_key: str = ""
     tavily_search_depth: str = "basic"
@@ -99,6 +110,7 @@ class Settings(BaseSettings):
         }
     )
     retrieval_target_formula_token_weights: dict[str, dict[str, float]] = Field(default_factory=dict)
+    retrieval_filter_formula_heavy_non_formula: bool = True
     solver_metric_token_weights: dict[str, float] = Field(
         default_factory=lambda: {
             "pba": 4.0,
@@ -120,9 +132,20 @@ class Settings(BaseSettings):
     agent_max_steps: int = 8
     agent_max_parallel_tools: int = 4
     agent_confidence_floor: float = 0.6
+    agent_answer_logprobs_enabled: bool = False
+    agent_answer_logprobs_min_tokens: int = 3
+    agent_answer_self_consistency_enabled: bool = False
+    agent_answer_self_consistency_samples: int = 3
+    agent_generic_claim_solver_enabled: bool = False
+    agent_generic_claim_solver_shadow_enabled: bool = False
+    agent_dynamic_tools_enabled: bool = False
+    agent_dynamic_tool_deployment_id: str = "local"
+    agent_dynamic_tool_timeout_seconds: float = 2.0
+    agent_dynamic_tool_memory_mb: int = 256
     agent_max_clarification_attempts: int = 2
     agent_disambiguation_auto_resolve_threshold: float = 0.85
     agent_disambiguation_recommend_threshold: float = 0.65
+    agent_trace_enabled: bool = True
     ingestion_excluded_tags: tuple[str, ...] = ("书籍", "book", "books")
     ingestion_allowed_item_types: tuple[str, ...] = (
         "journalArticle",

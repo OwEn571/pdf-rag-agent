@@ -25,3 +25,4 @@ data/
 
 # Accidental pip output artifact
 =8.2.0
+.claude/

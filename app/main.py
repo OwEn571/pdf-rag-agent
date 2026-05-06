@@ -36,7 +36,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="Tool-calling Zotero paper research agent V4",
+    description="Tool-calling Zotero paper research agent",
     lifespan=lifespan,
 )
 
@@ -53,14 +53,9 @@ app.include_router(router, prefix="/api/v1")
 
 
 @app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/v4", status_code=307)
-
-
-@app.get("/v4", include_in_schema=False)
-def v4_ui() -> FileResponse:
+def root() -> FileResponse:
     return FileResponse(
-        STATIC_DIR / "v4.html",
+        STATIC_DIR / "index.html",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",

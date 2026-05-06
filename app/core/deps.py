@@ -6,11 +6,11 @@ from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.services.agent import ResearchAssistantAgentV4
-from app.services.indexing import V4IngestionService
+from app.services.retrieval.indexing import V4IngestionService
 from app.services.library import LibraryBrowserService
-from app.services.model_clients import ModelClients
+from app.services.infra.model_clients import ModelClients
 from app.services.retrieval import DualIndexRetriever
-from app.services.session_store import SQLiteSessionStore, SessionStore
+from app.services.memory.session_store import SQLiteSessionStore, SessionStore
 
 logger = logging.getLogger(__name__)
 
