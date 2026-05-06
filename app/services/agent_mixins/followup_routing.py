@@ -3,6 +3,59 @@ from __future__ import annotations
 import json
 
 from app.domain.models import QueryContract, SessionContext
+from app.services.contracts.context import contract_has_note, contract_notes
+from app.services.contracts.normalization import normalize_contract_targets, normalize_lookup_text, normalize_modalities
+from app.services.intents.marker_matching import MarkerProfile, query_matches_any
+from app.services.planning.research import research_plan_context_from_contract
+from app.services.contracts.session_context import agent_session_conversation_context, session_llm_history_messages
+
+
+FOLLOWUP_ROUTING_MARKERS: dict[str, MarkerProfile] = {
+    "formula_focus": ("公式", "objective", "loss", "advantage", "变量", "推导"),
+    "detail_focus": (
+        "具体",
+        "细节",
+        "详细",
+        "原理",
+        "机制",
+        "怎么",
+        "如何",
+        "工作",
+        "流程",
+        "样子",
+        "what is it like",
+    ),
+    "vague_patterns": (
+        "具体是什么样",
+        "具体是怎样",
+        "具体呢",
+        "详细一点",
+        "展开讲讲",
+        "具体说说",
+        "再具体一点",
+        "怎么工作的",
+        "如何工作的",
+        "工作原理",
+    ),
+    "vague_short": ("具体", "详细", "怎么", "如何", "原理", "机制"),
+    "contextual_challenge": (
+        "最早",
+        "起源",
+        "最初",
+        "首次",
+        "第一个",
+        "第一篇",
+        "提出",
+        "出处",
+        "来源",
+        "证据",
+        "不对",
+        "不是",
+        "确定",
+        "真的吗",
+    ),
+    "contextual_short": ("这里", "这个", "那篇", "上一条", "上一轮"),
+}
 
 
 class FollowupRoutingMixin:
@@ -18,8 +71,8 @@ class FollowupRoutingMixin:
         required_modalities = list(contract.required_modalities)
         answer_shape = contract.answer_shape
         precision_requirement = contract.precision_requirement
-        notes = list(contract.notes)
-        goals = self._research_plan_goals(contract)
+        notes = contract_notes(contract)
+        goals = set(research_plan_context_from_contract(contract).goals)
 
         if goals & {"entity_type", "role_in_context"}:
             refined_fields, resolved_query = self._infer_entity_followup_focus(
@@ -70,7 +123,7 @@ class FollowupRoutingMixin:
         active = session.effective_active_research()
         if self.clients.chat is None or not active.relation:
             return contract
-        needs_contextual_refine = "needs_contextual_refine" in contract.notes
+        needs_contextual_refine = contract_has_note(contract, "needs_contextual_refine")
         if contract.relation not in {"clarify_user_intent", "correction_without_context"} and not needs_contextual_refine:
             return contract
         if contract.continuation_mode != "followup" and not self._looks_like_contextual_followup_query(contract.clean_query):
@@ -90,6 +143,8 @@ class FollowupRoutingMixin:
                 "如果用户沿用上一轮推荐/提到的论文并追问“具体说了啥”“讲了什么”“核心结论”“实验结果”“方法细节”，"
                 "必须把它改成 research + paper_summary_results，并把 targets 设为 conversation_context 中对应的论文标题；"
                 "记忆只用于解析指代，不能直接用 memory_followup 回答论文正文内容。"
+                "如果用户追问上一轮表格/实验里的“准确度/accuracy/metric 是怎么定义或计算的”，"
+                "必须把它改成 research + metric_value_lookup，并要求 table/caption/page_text 证据。"
                 "如果用户是在追问某技术/术语最早由哪篇论文提出，优先改成 origin_lookup。"
                 "如果用户是在纠正或核验上一轮 entity_definition 的来源，也优先考虑 origin_lookup 或带有 supporting_paper 的研究合同，"
                 "不要简单退回澄清。"
@@ -98,7 +153,11 @@ class FollowupRoutingMixin:
         human_payload = {
             "current_query": contract.clean_query,
             "current_contract": contract.model_dump(),
-            "conversation_context": self._session_conversation_context(session, max_chars=12000),
+            "conversation_context": agent_session_conversation_context(
+                session,
+                settings=self.settings,
+                max_chars=12000,
+            ),
             "active_research_context": session.active_research_context_payload(),
             "recent_turns": [
                 {
@@ -115,7 +174,7 @@ class FollowupRoutingMixin:
             payload = invoke_json_messages(
                 system_prompt=system_prompt,
                 messages=[
-                    *self._session_llm_history_messages(session),
+                    *session_llm_history_messages(session),
                     {"role": "user", "content": json.dumps(human_payload, ensure_ascii=False)},
                 ],
                 fallback={},
@@ -187,9 +246,13 @@ class FollowupRoutingMixin:
         )
         if relation not in conversation_relations and not requested_fields:
             requested_fields = list(contract.requested_fields) or list(active.requested_fields) or ["answer"]
-        targets = self._normalize_contract_targets(targets=targets, requested_fields=requested_fields)
+        targets = normalize_contract_targets(
+            targets=targets,
+            requested_fields=requested_fields,
+            canonicalize_targets=self.retriever.canonicalize_targets,
+        )
         raw_required_modalities = payload.get("required_modalities", contract.required_modalities)
-        required_modalities = self._normalize_modalities(
+        required_modalities = normalize_modalities(
             [str(item).strip() for item in raw_required_modalities if str(item).strip()]
             if isinstance(raw_required_modalities, list)
             else list(contract.required_modalities),
@@ -205,7 +268,7 @@ class FollowupRoutingMixin:
             precision_requirement = contract.precision_requirement
         rewritten_query = str(payload.get("rewritten_query", "") or "").strip() or contract.clean_query
         raw_notes = payload.get("notes", [])
-        notes = list(contract.notes)
+        notes = contract_notes(contract)
         if isinstance(raw_notes, list):
             for item in raw_notes:
                 note = str(item).strip()
@@ -237,16 +300,14 @@ class FollowupRoutingMixin:
         current_fields: list[str],
         previous_fields: list[str],
     ) -> tuple[list[str], str]:
-        normalized_query = self._normalize_lookup_text(query)
+        normalized_query = normalize_lookup_text(query)
         generic_fields = {"definition", "applications", "key_features", "answer", "summary"}
-        current_keys = {self._normalize_lookup_text(item) for item in current_fields if item}
-        previous_keys = {self._normalize_lookup_text(item) for item in previous_fields if item}
-        formula_cues = {"公式", "objective", "loss", "advantage", "变量", "推导"}
-        detail_cues = {"具体", "细节", "详细", "原理", "机制", "怎么", "如何", "工作", "流程", "样子", "what is it like"}
-        if any(cue in normalized_query for cue in formula_cues):
+        current_keys = {normalize_lookup_text(item) for item in current_fields if item}
+        previous_keys = {normalize_lookup_text(item) for item in previous_fields if item}
+        if query_matches_any(normalized_query, "", FOLLOWUP_ROUTING_MARKERS["formula_focus"]):
             resolved_query = f"{target} 的目标函数、关键公式和变量含义是什么？" if target else query
             return ["formula", "objective", "variable_explanation"], resolved_query
-        if any(cue in normalized_query for cue in detail_cues) or (
+        if query_matches_any(normalized_query, "", FOLLOWUP_ROUTING_MARKERS["detail_focus"]) or (
             self._is_vague_followup_query(query) and current_keys <= generic_fields and previous_keys <= generic_fields
         ):
             resolved_query = f"{target} 的具体机制、工作流程和奖励/优化目标是什么？" if target else query
@@ -258,45 +319,21 @@ class FollowupRoutingMixin:
         normalized = " ".join(str(query or "").lower().split())
         if not normalized:
             return False
-        vague_patterns = [
-            "具体是什么样",
-            "具体是怎样",
-            "具体呢",
-            "详细一点",
-            "展开讲讲",
-            "具体说说",
-            "再具体一点",
-            "怎么工作的",
-            "如何工作的",
-            "工作原理",
-        ]
-        if any(token in normalized for token in vague_patterns):
+        if query_matches_any(normalized, "", FOLLOWUP_ROUTING_MARKERS["vague_patterns"]):
             return True
-        return len(normalized) <= 12 and any(token in normalized for token in ["具体", "详细", "怎么", "如何", "原理", "机制"])
+        return len(normalized) <= 12 and query_matches_any(
+            normalized, "", FOLLOWUP_ROUTING_MARKERS["vague_short"]
+        )
 
     @staticmethod
     def _looks_like_contextual_followup_query(query: str) -> bool:
         normalized = " ".join(str(query or "").lower().split())
         if not normalized:
             return False
-        challenge_tokens = [
-            "最早",
-            "起源",
-            "最初",
-            "首次",
-            "第一个",
-            "第一篇",
-            "提出",
-            "出处",
-            "来源",
-            "证据",
-            "不对",
-            "不是",
-            "确定",
-            "真的吗",
-        ]
-        if any(token in normalized for token in challenge_tokens):
+        if query_matches_any(normalized, "", FOLLOWUP_ROUTING_MARKERS["contextual_challenge"]):
             return True
-        if len(normalized) <= 18 and any(token in normalized for token in ["这里", "这个", "那篇", "上一条", "上一轮"]):
+        if len(normalized) <= 18 and query_matches_any(
+            normalized, "", FOLLOWUP_ROUTING_MARKERS["contextual_short"]
+        ):
             return True
         return False
