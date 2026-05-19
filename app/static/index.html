@@ -918,7 +918,7 @@
 
       .tabs {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
         gap: 4px;
         padding: 3px;
         border: 1px solid var(--border);
@@ -1528,7 +1528,7 @@
             <div class="composer-bottom">
               <div class="left-actions">
                 <label class="toggle"><input id="webSearch" type="checkbox" /> Web</label>
-                <input id="chatKey" class="mini-input chat-key" type="password" placeholder="CHAT_API_KEY" autocomplete="off" />
+                <input id="chatKey" class="mini-input chat-key" type="password" placeholder="CHAT_API_KEY" title="聊天访问密钥" aria-label="聊天访问密钥" autocomplete="off" />
               </div>
               <div class="right-actions">
                 <button id="clearInput" class="ghost icon-only" type="button" title="清空" aria-label="清空">
@@ -1553,7 +1553,7 @@
             <button class="panel-tab active" type="button" data-panel="evidence">Evidence</button>
             <button class="panel-tab" type="button" data-panel="pdf">PDF</button>
             <button class="panel-tab" type="button" data-panel="run">Run</button>
-            <button class="panel-tab" type="button" data-panel="tools">Tools</button>
+            <button class="panel-tab" type="button" data-panel="tools" data-tool-review-control hidden>Tools</button>
           </div>
         </div>
 
@@ -1610,11 +1610,11 @@
             </div>
           </section>
 
-          <section id="panel-tools" class="panel">
+          <section id="panel-tools" class="panel" data-tool-review-control hidden>
             <div class="panel-block">
               <h3>Tool Review</h3>
               <div class="admin-bar">
-                <input id="adminKey" class="mini-input" type="password" placeholder="ADMIN_API_KEY" autocomplete="off" />
+                <input id="adminKey" class="mini-input" type="password" placeholder="ADMIN_API_KEY" title="管理员访问密钥" aria-label="管理员访问密钥" autocomplete="off" />
                 <button id="loadToolProposals" class="ghost" type="button">刷新</button>
               </div>
               <p id="toolAdminStatus" class="admin-note">等待加载动态工具提案。</p>
@@ -1661,6 +1661,7 @@
       const CITATION_PREVIEW_ENDPOINT = runtimeConfig.citationPreviewEndpoint || "/api/v1/citations/preview";
       const ADMIN_TOOL_PROPOSALS_ENDPOINT = runtimeConfig.adminToolProposalsEndpoint || "/api/v1/admin/tools/proposals";
       const LIBRARY_API_KEY = runtimeConfig.libraryApiKey || runtimeConfig.apiKey || "";
+      const TOOL_REVIEW_VISIBLE = runtimeConfig.showToolReview === true || runtimeConfig.enableToolReview === true;
       const CHAT_KEY_STORAGE = "zotero-agent-v5-chat-key";
       const ADMIN_KEY_STORAGE = "zotero-agent-v5-admin-key";
       const HISTORY_KEY = "zotero-agent-v5-conversations";
@@ -1720,6 +1721,7 @@
         approveRuntimeTool: document.getElementById("approveRuntimeTool"),
         rejectToolProposal: document.getElementById("rejectToolProposal"),
         toolSandboxReport: document.getElementById("toolSandboxReport"),
+        toolReviewControls: document.querySelectorAll("[data-tool-review-control]"),
       };
 
       const state = {
@@ -2416,12 +2418,28 @@
         }
       }
 
+      function panelIsAvailable(name) {
+        const tab = Array.from(document.querySelectorAll(".panel-tab")).find((button) => button.dataset.panel === name);
+        const panel = document.getElementById(`panel-${name}`);
+        return Boolean(tab && panel && !tab.hidden && !panel.hidden);
+      }
+
+      function configureToolReviewVisibility() {
+        elements.toolReviewControls.forEach((item) => {
+          item.hidden = !TOOL_REVIEW_VISIBLE;
+        });
+        if (!TOOL_REVIEW_VISIBLE && document.querySelector(".panel-tab.active")?.dataset.panel === "tools") {
+          selectPanel("evidence");
+        }
+      }
+
       function selectPanel(name) {
+        const target = panelIsAvailable(name) ? name : "evidence";
         document.querySelectorAll(".panel-tab").forEach((button) => {
-          button.classList.toggle("active", button.dataset.panel === name);
+          button.classList.toggle("active", button.dataset.panel === target);
         });
         document.querySelectorAll(".panel").forEach((panel) => {
-          panel.classList.toggle("active", panel.id === `panel-${name}`);
+          panel.classList.toggle("active", panel.id === `panel-${target}`);
         });
       }
 
@@ -3081,9 +3099,15 @@
 
       function bootstrap() {
         setTheme(initialTheme());
+        configureToolReviewVisibility();
         const storedAdminKey = window.localStorage.getItem(ADMIN_KEY_STORAGE) || "";
-        elements.adminKey.value = storedAdminKey;
-        elements.chatKey.value = window.localStorage.getItem(CHAT_KEY_STORAGE) || storedAdminKey;
+        const storedChatKey = window.localStorage.getItem(CHAT_KEY_STORAGE) || "";
+        const migratedChatKey = storedChatKey || storedAdminKey;
+        elements.chatKey.value = migratedChatKey;
+        if (migratedChatKey && !storedChatKey) {
+          window.localStorage.setItem(CHAT_KEY_STORAGE, migratedChatKey);
+        }
+        elements.adminKey.value = TOOL_REVIEW_VISIBLE ? storedAdminKey : "";
         if (!state.activeConversationId || !activeConversation()) {
           state.activeConversationId = "";
           state.sessionId = "";
