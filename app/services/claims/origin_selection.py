@@ -107,7 +107,7 @@ def select_origin_paper(
     paper_identity_matches_targets: Callable[[CandidatePaper, list[str]], bool],
     target_matcher: Callable[[str, str], bool],
 ) -> CandidatePaper | None:
-    if not papers:
+    if not contract.targets:
         return None
     candidate_pool = list(papers)
     paper_by_id = {item.paper_id: item for item in candidate_pool}
@@ -146,7 +146,7 @@ def select_origin_paper(
                 )
             ]
         score = 0.0
-        intro_score = 0.0
+        support_intro_score = 0.0
         for item in support:
             score += float(item.score)
             snippet = item.snippet.lower()
@@ -154,14 +154,16 @@ def select_origin_paper(
                 score += 1.5
             if " is a " in snippet or " is an " in snippet:
                 score += 0.8
-            intro_score += origin_target_intro_score(item.snippet, target_aliases)
+            support_intro_score = max(support_intro_score, origin_target_intro_score(item.snippet, target_aliases))
             score += origin_target_definition_score(item.snippet, target_aliases)
+        paper_intro_score = 0.0
         if target_aliases:
             paper_text = origin_paper_text(paper)
             if any(target_matcher(paper_text, alias) for alias in target_aliases):
                 score += 0.8
-            intro_score += origin_target_intro_score(paper_text, target_aliases)
+            paper_intro_score = origin_target_intro_score(paper_text, target_aliases)
             score += origin_target_definition_score(paper_text, target_aliases)
+        intro_score = (paper_intro_score * 2.0) + support_intro_score
         scored.append((intro_score, score, paper))
     scored.sort(key=lambda item: (-item[0], -item[1], safe_year(item[2].year), -item[2].score, item[2].title))
     if scored and scored[0][0] > 0:
@@ -198,7 +200,9 @@ def origin_candidates_from_corpus(
         score = origin_target_intro_score(text, aliases)
         if score <= 0:
             continue
-        candidates.append((score, paper.model_copy(update={"score": max(float(paper.score), score)})))
+        metadata = dict(paper.metadata or {})
+        metadata.setdefault("paper_card_text", text)
+        candidates.append((score, paper.model_copy(update={"score": max(float(paper.score), score), "metadata": metadata})))
     candidates.sort(key=lambda item: (-item[0], safe_year(item[1].year), item[1].title))
     return [paper for _, paper in candidates[:8]]
 
@@ -210,7 +214,7 @@ def pick_origin_paper_with_intro_support(
 ) -> CandidatePaper | None:
     aliases = origin_target_aliases(contract.targets)
     if not aliases:
-        return pick_origin_paper(papers)
+        return None
     scored = [
         (origin_target_intro_score(origin_paper_text(paper), aliases), paper)
         for paper in papers
@@ -278,10 +282,18 @@ def origin_target_intro_score(text: str, aliases: list[str]) -> float:
                 previous_words = re.findall(r"[a-z]+", before)
                 previous_word = previous_words[-1] if previous_words else ""
                 modifier_use = bool(previous_word and previous_word not in allowed_previous)
-                if before.rstrip().endswith("("):
+                parenthetical_alias = before.rstrip().endswith("(")
+                negative_parenthetical_context = bool(
+                    parenthetical_alias
+                    and re.search(
+                        r"\b(?:variant|extension|implementation|version|application|use|uses|using|based)\s+of\b.{0,100}\($",
+                        before.rstrip(),
+                    )
+                )
+                if parenthetical_alias and not negative_parenthetical_context:
                     modifier_use = False
                 cue_matches = list(re.finditer(origin_cue, before, flags=re.IGNORECASE))
-                if cue_matches and match.start() - cue_matches[-1].end() <= 150:
+                if cue_matches and match.start() - cue_matches[-1].end() <= 150 and not negative_parenthetical_context:
                     score += 6.0 if not modifier_use else 1.0
                 if re.search(
                     r"\b(is|was|has been)\s+(?:first\s+|originally\s+)?(?:introduced|proposed|presented|defined|constructed|created|released)\b",
