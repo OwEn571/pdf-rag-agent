@@ -28,6 +28,17 @@ def test_origin_intro_score_rewards_direct_intro_cues() -> None:
     assert origin_target_intro_score("Prior work compares against AlignX in experiments.", aliases) == 0.0
 
 
+def test_origin_intro_score_rewards_parenthetical_acronym_named_by_authors() -> None:
+    aliases = ["PPO"]
+
+    score = origin_target_intro_score(
+        "The new methods, which we call proximal policy optimization (PPO), have several benefits.",
+        aliases,
+    )
+
+    assert score >= 6.0
+
+
 def test_origin_definition_score_rewards_entity_definition_context() -> None:
     aliases = ["AlignX"]
 

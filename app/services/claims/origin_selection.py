@@ -229,6 +229,7 @@ def origin_target_intro_score(text: str, aliases: list[str]) -> float:
     origin_cue = (
         r"(?:we\s+|this\s+paper\s+|our\s+work\s+)?"
         r"(?:propose|proposes|proposed|introduce|introduces|introduced|present|presents|presented|"
+        r"call|calls|called|name|names|named|"
         r"define|defines|defined|construct|constructs|constructed|create|creates|created|release|releases|released|"
         r"提出|引入|介绍|定义|构建|发布)"
     )
@@ -277,6 +278,8 @@ def origin_target_intro_score(text: str, aliases: list[str]) -> float:
                 previous_words = re.findall(r"[a-z]+", before)
                 previous_word = previous_words[-1] if previous_words else ""
                 modifier_use = bool(previous_word and previous_word not in allowed_previous)
+                if before.rstrip().endswith("("):
+                    modifier_use = False
                 cue_matches = list(re.finditer(origin_cue, before, flags=re.IGNORECASE))
                 if cue_matches and match.start() - cue_matches[-1].end() <= 150:
                     score += 6.0 if not modifier_use else 1.0
