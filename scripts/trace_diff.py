@@ -6,7 +6,7 @@ Uses lightweight composer to avoid wiring every solver/verifier's complex signat
 
 from __future__ import annotations
 
-import json, sys, time
+import json, os, sys, time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,22 @@ from app.services.planning.query_shaping import paper_query_text, extract_target
 from app.services.intents.router import LLMIntentRouter
 
 QUERY = "GRPO是什么"
+
+
+def env_value(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, raw = line.split("=", 1)
+        if key.strip() == name:
+            return raw.strip().strip('"').strip("'")
+    return ""
 
 
 def make_clients(chat_model: str, api_key: str, base_url: str) -> ModelClients:
@@ -141,12 +157,14 @@ def main():
     # ── Model B: the other one ──
     if "deepseek" in settings.openai_base_url.lower():
         b_name = "gpt-4o"
-        b_key = "sk-REDACTED"
+        b_key = env_value("QIHAI_API_KEY") or env_value("EMBEDDING_API_KEY") or env_value("OPENAI_API_KEY")
         b_url = "https://api.qhaigc.net/v1"
     else:
         b_name = "deepseek-v4-flash"
-        b_key = "sk-REDACTED"
+        b_key = env_value("DEEPSEEK_API_KEY")
         b_url = "https://api.deepseek.com/v1"
+    if not b_key:
+        raise RuntimeError(f"API key not configured for comparison model {b_name}")
 
     print(f"[B] {b_name} ...")
     clients_b = make_clients(b_name, b_key, b_url)

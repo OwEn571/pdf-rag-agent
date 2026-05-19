@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.core.config import Settings
-from app.core.security import require_pdf_access
+from app.core.security import require_chat_access, require_pdf_access
 from app.services.retrieval.pdf_rendering import subprocess_command_allowed
 
 
@@ -71,6 +71,31 @@ def test_pdf_access_requires_configured_key_even_for_local_requests() -> None:
         _request(host="127.0.0.1", query_string=b"api_key=secret"),
         settings=settings,
         authorization=None,
+        x_api_key=None,
+    )
+
+
+def test_chat_access_requires_configured_key() -> None:
+    settings = Settings(_env_file=None, admin_api_key="", chat_api_key="")
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_chat_access(_request(host="127.0.0.1"), settings=settings, authorization=None, x_api_key=None)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "CHAT_API_KEY or ADMIN_API_KEY is not configured"
+
+
+def test_chat_access_accepts_chat_key_and_admin_fallback() -> None:
+    require_chat_access(
+        _request(host="203.0.113.10"),
+        settings=Settings(_env_file=None, chat_api_key="chat-secret", admin_api_key=""),
+        authorization=None,
+        x_api_key="chat-secret",
+    )
+    require_chat_access(
+        _request(host="203.0.113.10"),
+        settings=Settings(_env_file=None, chat_api_key="", admin_api_key="admin-secret"),
+        authorization="Bearer admin-secret",
         x_api_key=None,
     )
 

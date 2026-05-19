@@ -154,3 +154,24 @@ def require_pdf_access(
         limit=settings.pdf_rate_limit_per_window,
         window_seconds=settings.api_rate_limit_window_seconds,
     )
+
+
+def require_chat_access(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> None:
+    provided = _extract_api_key(authorization, x_api_key)
+    expected = settings.chat_api_key or settings.admin_api_key
+    _require_api_key(
+        expected=expected,
+        provided=provided,
+        missing_detail="CHAT_API_KEY or ADMIN_API_KEY is not configured",
+    )
+    _rate_limiter.check(
+        scope="chat",
+        key=_request_key(request),
+        limit=settings.chat_rate_limit_per_window,
+        window_seconds=settings.api_rate_limit_window_seconds,
+    )

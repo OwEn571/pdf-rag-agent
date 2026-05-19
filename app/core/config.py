@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     chat_max_tokens: int = 1800
     embedding_model: str = "text-embedding-3-large"
     embedding_fallback_model: str = "text-embedding-3-small"
+    vlm_api_key: str = Field(default="", validation_alias=AliasChoices("VLM_API_KEY"))
+    vlm_base_url: str = Field(default="", validation_alias=AliasChoices("VLM_BASE_URL"))
     vlm_model: str = "gpt-4.1-mini"
     enable_figure_vlm: bool = True
     enable_table_vlm: bool = True
@@ -63,7 +65,12 @@ class Settings(BaseSettings):
     milvus_block_collection: str = "zprag_v4_blocks"
 
     redis_url: str = "redis://localhost:6380/0"
-    redis_cache_ttl_seconds: int = 300
+    redis_cache_enabled: bool = True
+    redis_cache_namespace: str = "zprag:v4"
+    redis_query_embedding_cache_ttl_seconds: int = 2_592_000  # 30d
+    redis_dense_retrieval_cache_ttl_seconds: int = 21_600  # 6h
+    redis_final_answer_cache_enabled: bool = False
+    redis_cache_ttl_seconds: int = 86400  # legacy; final answer cache is disabled by default
 
     tavily_api_key: str = ""
     tavily_search_depth: str = "basic"
@@ -177,10 +184,12 @@ class Settings(BaseSettings):
 
     admin_api_key: str = ""
     library_api_key: str = ""
+    chat_api_key: str = ""
     allow_local_pdf_without_api_key: bool = True
     allow_same_origin_pdf_without_api_key: bool = True
     api_rate_limit_window_seconds: int = 60
     admin_rate_limit_per_window: int = 10
+    chat_rate_limit_per_window: int = 8
     pdf_rate_limit_per_window: int = 120
     cors_allow_origins: tuple[str, ...] = ()
 

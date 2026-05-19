@@ -1609,7 +1609,7 @@
             <div class="panel-block">
               <h3>Tool Review</h3>
               <div class="admin-bar">
-                <input id="adminKey" class="mini-input" type="password" placeholder="ADMIN_API_KEY" autocomplete="off" />
+                <input id="adminKey" class="mini-input" type="password" placeholder="CHAT / ADMIN_API_KEY" autocomplete="off" />
                 <button id="loadToolProposals" class="ghost" type="button">刷新</button>
               </div>
               <p id="toolAdminStatus" class="admin-note">等待加载动态工具提案。</p>
@@ -2261,6 +2261,10 @@
         return headers;
       }
 
+      function chatHeaders(extra = {}) {
+        return adminHeaders(extra);
+      }
+
       function selectedToolProposal() {
         return state.selectedToolProposal || null;
       }
@@ -2732,7 +2736,7 @@
       async function streamChat(payload, onEvent) {
         const response = await fetch(STREAM_ENDPOINT, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          headers: chatHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
           body: JSON.stringify(payload),
         });
         if (!response.ok) {
@@ -2755,7 +2759,7 @@
       async function postChat(payload) {
         const response = await fetch(CHAT_ENDPOINT, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          headers: chatHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
           body: JSON.stringify(payload),
         });
         if (!response.ok) {

@@ -12,6 +12,7 @@ The Router and retrieval stages are already proven identical across models
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from copy import deepcopy
@@ -33,6 +34,22 @@ from app.services.agent.planner_helpers import (
     fallback_plan,
     normalize_plan_payload,
 )
+
+
+def _env_value(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.exists():
+        return ""
+    for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, raw = line.split("=", 1)
+        if key.strip() == name:
+            return raw.strip().strip('"').strip("'")
+    return ""
 
 
 def _make_clients(chat_model: str, api_key: str, base_url: str) -> ModelClients:
@@ -214,12 +231,12 @@ def main() -> None:
     models = [
         {
             "name": "deepseek-v4-flash",
-            "api_key": "sk-REDACTED",
+            "api_key": _env_value("DEEPSEEK_API_KEY"),
             "base_url": "https://api.deepseek.com/v1",
         },
         {
             "name": "gpt-4o (Qihai)",
-            "api_key": "sk-REDACTED",
+            "api_key": _env_value("QIHAI_API_KEY") or _env_value("EMBEDDING_API_KEY") or _env_value("OPENAI_API_KEY"),
             "base_url": "https://api.qhaigc.net/v1",
         },
     ]
@@ -230,6 +247,10 @@ def main() -> None:
         print(f"\n{'='*60}")
         print(f"Testing: {model_cfg['name']}")
         print(f"{'='*60}")
+        if not model_cfg["api_key"]:
+            print("  SKIP: API key not configured")
+            all_results.append({"model": model_cfg["name"], "error": "API key not configured"})
+            continue
 
         clients = _make_clients(
             chat_model=model_cfg["name"].split()[0],  # "deepseek-v4-flash" or "gpt-4o"

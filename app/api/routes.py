@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.core.deps import get_agent, get_ingestion_service, get_library_service, get_retriever
-from app.core.security import require_admin_access, require_pdf_access
+from app.core.security import require_admin_access, require_chat_access, require_pdf_access
 from app.schemas.api import (
     AgentChatRequest,
     AgentChatResponse,
@@ -24,6 +24,7 @@ from app.schemas.api import (
 )
 from app.services.agent import ResearchAssistantAgentV4
 from app.services.agent.events import normalize_agent_event
+from app.services.infra.upstream_errors import user_facing_error_message
 from app.services.retrieval.indexing import V4IngestionService
 from app.services.library import LibraryBrowserService
 from app.services.tools.proposals import (
@@ -45,7 +46,7 @@ def _format_sse(event: str, data: object) -> str:
 
 
 def _stream_error_events(exc: Exception) -> list[tuple[str, dict[str, object]]]:
-    message = str(exc)
+    message = user_facing_error_message(exc)
     return [
         ("error", normalize_agent_event("error", {"message": message})),
         ("final", normalize_agent_event("final", {"answer": "", "error": message})),
@@ -179,6 +180,7 @@ def admin_transition_tool_proposal_status(
 @router.post("/chat", response_model=AgentChatResponse)
 async def agent_chat_v4(
     payload: AgentChatRequest,
+    _: None = Depends(require_chat_access),
     agent: ResearchAssistantAgentV4 = Depends(get_agent),
 ) -> AgentChatResponse:
     try:
@@ -191,7 +193,7 @@ async def agent_chat_v4(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("v4 chat failed")
-        raise HTTPException(status_code=500, detail="chat failed") from exc
+        raise HTTPException(status_code=500, detail=user_facing_error_message(exc)) from exc
     citation_models = [AgentCitation(**item) for item in result.get("citations", [])]
     return AgentChatResponse(
         session_id=str(result.get("session_id", "")),
@@ -212,6 +214,7 @@ async def agent_chat_v4(
 @router.post("/chat/stream")
 async def agent_chat_v4_stream(
     payload: AgentChatRequest,
+    _: None = Depends(require_chat_access),
     agent: ResearchAssistantAgentV4 = Depends(get_agent),
 ) -> StreamingResponse:
     async def event_stream() -> object:
